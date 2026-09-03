@@ -9,15 +9,18 @@
 
 const CFG = {
   GRAVITY: 1700,               // px/s^2
-  BASE_SPEED_START: 250,       // px/s, forward auto-drift floor
+  BASE_SPEED_START: 250,       // px/s, forward auto-drift floor while airborne
   BASE_SPEED_MAX: 560,
   BASE_SPEED_RAMP: 2.4,        // px/s of floor gained per second survived
   MAX_FALL_SPEED: 1500,
   MAX_VX: 950,
   MAX_WEB_DISTANCE: 520,       // furthest anchor the web can reach
   MIN_ROPE_LENGTH: 70,
-  GROUND_Y: 900,               // world y where building bases sit
-  FAIL_MARGIN: 110,            // extra slack below ground before game over
+  GROUND_Y: 900,               // world y of the street surface (walkable ground)
+  PLAYER_FOOT: 20,             // distance from player centre to feet, for ground contact
+  WALK_SPEED: 230,             // px/s, direct WASD ground movement
+  JUMP_SPEED: 640,             // px/s, upward impulse from a ground jump
+  AIR_CONTROL_ACCEL: 500,      // px/s^2, light A/D steering while airborne
   PIXELS_PER_METER: 14,
   COMBO_WINDOW: 3.2,           // seconds allowed between release -> next attach
   PERFECT_RELEASE_FACTOR: 1.3, // vx must exceed baseSpeed * this for "perfect"
@@ -256,9 +259,11 @@ class Building {
     if (sx + this.width < -50 || sx > 3000) return;
 
     if (this.layer !== 'mid') {
-      // silhouette buildings for depth
+      // silhouette buildings for depth. A small buffer (not the building's
+      // full height again) keeps the base flush with the street even as
+      // this layer's slower vertical parallax drifts slightly out of sync.
       ctx.fillStyle = this.layer === 'far' ? 'rgba(15,17,38,0.85)' : 'rgba(5,6,14,0.9)';
-      ctx.fillRect(sx, sy, this.width, this.height + 400);
+      ctx.fillRect(sx, sy, this.width, this.height + 70);
       if (this.neon && this.layer === 'far') {
         ctx.fillStyle = this.neon;
         ctx.globalAlpha = 0.25 + Math.sin(t * 2 + this.flicker) * 0.05;
@@ -269,8 +274,10 @@ class Building {
     }
 
     // --- MID layer: full detail, interactive buildings ---
+    // Drawn flush to exactly its real height so the base lands right on
+    // the street surface instead of a big opaque slab bleeding past it.
     ctx.fillStyle = this.color;
-    ctx.fillRect(sx, sy, this.width, this.height + 400);
+    ctx.fillRect(sx, sy, this.width, this.height);
 
     // roof parapet
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -398,6 +405,7 @@ class CityGenerator {
     this.far = new CityLayer('far', 0.25);
     this.mid = new CityLayer('mid', 1.0);
     this.near = new CityLayer('near', 1.6);
+    this.street = new Street();
   }
   reset() {
     this.far.reset(-300);
@@ -418,15 +426,58 @@ class CityGenerator {
     this.mid.update(camX, viewW, difficulty);
     this.near.update(camX, viewW, difficulty);
   }
-  draw(ctx, cam, viewW, t) {
+  draw(ctx, cam, viewW, viewH, t) {
     this.far.draw(ctx, cam, viewW, t);
     this.mid.draw(ctx, cam, viewW, t);
+    this.street.draw(ctx, cam, viewW, viewH, t);
     this.near.draw(ctx, cam, viewW, t);
   }
   allAnchors() {
     const out = [];
     for (const b of this.mid.buildings) for (const a of b.anchors) out.push(a);
     return out;
+  }
+}
+
+/* ----------------------------- STREET (walkable ground) --------------------- */
+
+class Street {
+  draw(ctx, cam, viewW, viewH, t) {
+    const sy = CFG.GROUND_Y - cam.y;
+    if (sy > viewH || sy + 4000 < 0) return; // fully off-screen
+
+    // asphalt body
+    const grad = ctx.createLinearGradient(0, sy, 0, sy + 160);
+    grad.addColorStop(0, '#33323d');
+    grad.addColorStop(1, '#1a1a22');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, sy, viewW, Math.max(viewH - sy, 200));
+
+    // curb / sidewalk edge
+    ctx.fillStyle = '#4a4a58';
+    ctx.fillRect(0, sy, viewW, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(0, sy + 4, viewW, 2);
+
+    // dashed lane markings, scrolling with the world so they read as real ground
+    ctx.strokeStyle = 'rgba(255,214,120,0.35)';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([28, 26]);
+    ctx.lineDashOffset = -cam.x;
+    ctx.beginPath();
+    ctx.moveTo(0, sy + 46);
+    ctx.lineTo(viewW, sy + 46);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // faint window-light glints on the wet asphalt
+    ctx.fillStyle = 'rgba(255,214,120,0.05)';
+    for (let i = 0; i < 6; i++) {
+      const gx = ((i * 260 - cam.x * 0.6) % (viewW + 260) + (viewW + 260)) % (viewW + 260) - 130;
+      ctx.beginPath();
+      ctx.ellipse(gx, sy + 90, 60, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -446,6 +497,14 @@ class Player {
     this.legPhase = 0;
     this.lean = 0;
     this.squash = 1;
+    this.grounded = false;
+  }
+
+  jump() {
+    if (this.attached || !this.grounded) return;
+    this.vy = -CFG.JUMP_SPEED;
+    this.grounded = false;
+    this.squash = 0.75;
   }
 
   handPos() {
@@ -468,12 +527,14 @@ class Player {
     this.squash = 1.25;
   }
 
-  update(dt, baseSpeed) {
-    this.legPhase += dt * 6;
+  update(dt, baseSpeed, input) {
     this.webGrow = clamp(this.webGrow + dt / CFG.WEB_GROW_TIME, 0, 1);
     this.squash = lerp(this.squash, 1, dt * 6);
+    const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    this.legPhase += dt * (this.grounded ? 5 + Math.abs(this.vx) * 0.02 : 6);
 
     if (this.attached) {
+      this.grounded = false;
       this.attachTime += dt;
       // --- pendulum swing via a simple distance constraint -------------
       // Free-fall the point under gravity, then clamp it back onto the
@@ -499,19 +560,37 @@ class Player {
         }
       }
       this.lean = clamp(this.vx * 0.0009, -0.5, 0.5);
+    } else if (this.grounded) {
+      // --- ground locomotion: direct WASD control, no gravity to fight ---
+      if (dir !== 0) this.vx = dir * CFG.WALK_SPEED;
+      else this.vx = lerp(this.vx, 0, clamp(10 * dt, 0, 1));
+      this.x += this.vx * dt;
+      this.lean = clamp(this.vx * 0.001, -0.15, 0.15);
     } else {
+      // --- airborne free flight: gravity + gentle forward assist + A/D steer ---
       this.vy += CFG.GRAVITY * dt;
       if (this.vx < baseSpeed) this.vx += (baseSpeed - this.vx) * clamp(2.2 * dt, 0, 1);
+      if (dir !== 0) this.vx += dir * CFG.AIR_CONTROL_ACCEL * dt;
       this.x += this.vx * dt;
       this.y += this.vy * dt;
       this.lean = clamp(this.vy * 0.0006, -0.6, 0.9);
     }
 
+    // ground contact: land on the street instead of falling forever
+    if (!this.attached) {
+      const footY = this.y + CFG.PLAYER_FOOT;
+      if (footY >= CFG.GROUND_Y) {
+        this.y = CFG.GROUND_Y - CFG.PLAYER_FOOT;
+        if (!this.grounded && this.vy > 200) this.squash = 1.3;
+        this.vy = 0;
+        this.grounded = true;
+      } else {
+        this.grounded = false;
+      }
+    }
+
     this.vy = clamp(this.vy, -2000, CFG.MAX_FALL_SPEED);
-    // Only floor vx while free-flying (handled above via the lerp toward
-    // baseSpeed); while attached the rope must be free to swing the player
-    // backward through part of the arc, so just guard against runaway values.
-    this.vx = clamp(this.vx, this.attached ? -CFG.MAX_VX : 40, CFG.MAX_VX);
+    this.vx = clamp(this.vx, -CFG.MAX_VX, CFG.MAX_VX);
   }
 
   draw(ctx, cam, t) {
@@ -831,9 +910,16 @@ class Game {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') { down(e); }
       if (e.code === 'Escape') { if (this.state === 'PLAYING' || this.state === 'PAUSED') this.togglePause(); }
+      if (e.code === 'KeyA' || e.code === 'ArrowLeft') this.moveLeft = true;
+      if (e.code === 'KeyD' || e.code === 'ArrowRight') this.moveRight = true;
+      if ((e.code === 'KeyW' || e.code === 'ArrowUp') && !e.repeat && this.state === 'PLAYING') {
+        this.player.jump();
+      }
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') up(e);
+      if (e.code === 'KeyA' || e.code === 'ArrowLeft') this.moveLeft = false;
+      if (e.code === 'KeyD' || e.code === 'ArrowRight') this.moveRight = false;
     });
   }
 
@@ -876,6 +962,8 @@ class Game {
     this.swingStartTime = 0;
     this.inputDown = false;
     this.prevInputDown = false;
+    this.moveLeft = false;
+    this.moveRight = false;
 
     this.state = 'PLAYING';
     this.lastTime = performance.now();
@@ -949,16 +1037,17 @@ class Game {
 
     this.baseSpeed = Math.min(CFG.BASE_SPEED_MAX, CFG.BASE_SPEED_START + this.elapsed * CFG.BASE_SPEED_RAMP);
 
-    // edge-triggered input -> attach/release
-    if (this.inputDown && !this.prevInputDown && !this.player.attached) {
-      this.tryAttach();
+    // edge-triggered input -> jump (if grounded) / web attach / web release
+    if (this.inputDown && !this.prevInputDown) {
+      if (this.player.grounded) this.player.jump();
+      else if (!this.player.attached) this.tryAttach();
     }
     if (!this.inputDown && this.prevInputDown && this.player.attached) {
       this.releaseWeb();
     }
     this.prevInputDown = this.inputDown;
 
-    this.player.update(dt, this.baseSpeed);
+    this.player.update(dt, this.baseSpeed, { left: this.moveLeft, right: this.moveRight });
     this.maxXReached = Math.max(this.maxXReached, this.player.x);
 
     if (this.comboTimer > 0) {
@@ -980,11 +1069,16 @@ class Game {
       });
     }
 
-    if (this.player.y > CFG.GROUND_Y + CFG.FAIL_MARGIN) {
-      this.gameOver();
+    // Falling just means landing on the street (see Player's ground contact
+    // handling) -- there is no fall damage or death here, only a running
+    // best-distance record, saved continuously as it's beaten.
+    const d = this.distanceMeters();
+    if (d > this.best) {
+      this.best = d;
+      localStorage.setItem('spiderSwingBest', String(this.best));
     }
 
-    document.getElementById('hud-distance').textContent = this.distanceMeters();
+    document.getElementById('hud-distance').textContent = d;
     document.getElementById('hud-best').textContent = this.best;
   }
 
@@ -1031,7 +1125,7 @@ class Game {
     const t = this.elapsed;
 
     this.atmo.drawSky(ctx, cam, this.viewW, this.viewH, t);
-    this.city.draw(ctx, cam, this.viewW, t);
+    this.city.draw(ctx, cam, this.viewW, this.viewH, t);
     this.particles.draw(ctx, cam);
 
     if (this.player.attached && this.player.anchor) {
@@ -1062,5 +1156,5 @@ class Game {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  new Game();
+  window.__game = new Game();
 });
