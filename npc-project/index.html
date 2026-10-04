@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Minifig NPC Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<!--APP-START-->
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <h1>Minifig NPC Studio</h1>
+        <p class="brand-sub">Процедурные игровые NPC · Three.js · GLB</p>
+      </div>
+    </div>
+    <div class="roster-wrap">
+      <span class="roster-progress" title="NPC готово"><span id="roster-progress">1 / 10</span> NPC</span>
+      <nav class="roster" id="roster" aria-label="Список NPC"></nav>
+    </div>
+  </header>
+
+  <aside class="panel panel-left" aria-label="Информация NPC">
+    <section class="npc-card">
+      <p class="eyebrow"><span id="npc-index">NPC 01</span> · NPC information</p>
+      <h2 id="npc-name">Civilian 01</h2>
+      <p class="npc-desc" id="npc-desc"></p>
+      <dl class="stats" id="stats"></dl>
+    </section>
+
+    <section class="block">
+      <h3 class="block-title">Лицо и lip-sync</h3>
+      <p class="block-label">Рот</p>
+      <div class="chips" id="mouth-chips"></div>
+      <p class="block-label">Брови</p>
+      <div class="chips" id="brow-chips"></div>
+      <label class="check"><input type="checkbox" id="blink-toggle"> Глаза закрыты (Blink)</label>
+      <form class="say" id="say-form">
+        <label class="block-label" for="say-input">Произнести фразу</label>
+        <div class="say-row">
+          <input id="say-input" type="text" value="Привет! Как дела в городе?" autocomplete="off">
+          <button type="submit" class="btn btn-small">Say</button>
+        </div>
+        <p class="say-status" id="say-status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="block">
+      <h3 class="block-title">Части модели</h3>
+      <div class="parts" id="parts"></div>
+    </section>
+
+    <section class="block">
+      <h3 class="block-title">Скелет</h3>
+      <details class="bones">
+        <summary>Иерархия костей (20)</summary>
+        <pre class="bone-tree" id="bone-tree"></pre>
+      </details>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="viewport" id="viewport" data-bg="studio">
+      <canvas id="canvas" aria-label="3D-просмотр NPC"></canvas>
+      <div class="view-tools" role="group" aria-label="Камера">
+        <button type="button" class="tool" data-view="front">Вид спереди</button>
+        <button type="button" class="tool" data-view="back">Вид сзади</button>
+        <button type="button" class="tool" data-view="left">Вид слева</button>
+        <button type="button" class="tool" data-view="right">Вид справа</button>
+        <button type="button" class="tool tool-strong" data-view="reset">Сброс камеры</button>
+      </div>
+      <div class="now-playing" aria-live="polite">
+        <span class="np-name" id="now-playing-name">Idle</span>
+        <span class="np-meta" id="now-playing-meta"></span>
+      </div>
+      <p class="hint">Мышь: вращение · колесо: зум · правая кнопка: сдвиг</p>
+    </div>
+
+    <div class="scene-bar">
+      <div class="scene-toggles" role="group" aria-label="Сцена">
+        <button type="button" class="tool" id="grid-toggle" aria-pressed="false">Сетка</button>
+        <button type="button" class="tool" id="light-toggle" aria-pressed="true">Свет</button>
+        <button type="button" class="tool" id="turntable-toggle" aria-pressed="false">Вращать NPC</button>
+      </div>
+      <label class="rot">
+        <span>Поворот NPC</span>
+        <input type="range" id="rot-slider" min="0" max="360" step="1" value="0">
+      </label>
+      <div class="bg-swatches" role="group" aria-label="Фон">
+        <span class="bar-label">Фон</span>
+        <button type="button" class="swatch" data-bg="studio" aria-pressed="true" title="Студия"></button>
+        <button type="button" class="swatch" data-bg="night" aria-pressed="false" title="Ночь"></button>
+        <button type="button" class="swatch" data-bg="sky" aria-pressed="false" title="Небо"></button>
+        <button type="button" class="swatch" data-bg="mint" aria-pressed="false" title="Мята"></button>
+        <button type="button" class="swatch" data-bg="sand" aria-pressed="false" title="Песок"></button>
+        <label class="swatch swatch-custom" title="Свой цвет"><input type="color" id="bg-color" value="#8fa3b8" aria-label="Свой цвет фона"></label>
+      </div>
+    </div>
+
+    <div class="transport" id="transport">
+      <div class="transport-buttons" role="group" aria-label="Воспроизведение">
+        <button type="button" class="tbtn" id="btn-play" aria-pressed="false"><span aria-hidden="true">▶</span> Play</button>
+        <button type="button" class="tbtn" id="btn-pause" aria-pressed="false"><span aria-hidden="true">⏸</span> Pause</button>
+        <button type="button" class="tbtn" id="btn-stop" aria-pressed="false"><span aria-hidden="true">⏹</span> Stop</button>
+        <button type="button" class="tbtn" id="btn-loop" aria-pressed="true"><span aria-hidden="true">⟳</span> Loop</button>
+      </div>
+      <div class="timeline">
+        <input type="range" id="timeline" min="0" max="1" step="0.001" value="0" aria-label="Timeline">
+        <span class="time-readout" id="time-readout">0.00 / 0.00 s</span>
+      </div>
+      <div class="speed" id="speed" role="group" aria-label="Speed">
+        <span class="bar-label">Speed</span>
+        <button type="button" data-speed="0.25">0.25x</button>
+        <button type="button" data-speed="0.5">0.5x</button>
+        <button type="button" data-speed="1" aria-pressed="true">1x</button>
+        <button type="button" data-speed="1.5">1.5x</button>
+        <button type="button" data-speed="2">2x</button>
+      </div>
+      <label class="check"><input type="checkbox" id="xfade" checked> Плавный переход</label>
+    </div>
+  </main>
+
+  <aside class="panel panel-right" aria-label="Анимации">
+    <div class="anim-head">
+      <h3>ANIMATIONS <span class="count" id="anim-count">0</span></h3>
+      <input type="search" id="anim-search" placeholder="Поиск: walk, talk, punch…" aria-label="Поиск анимации">
+    </div>
+    <div class="anim-list" id="anim-list"></div>
+    <p class="kbd-hint">Пробел — play/pause · ↑ ↓ — соседняя анимация</p>
+  </aside>
+
+  <footer class="exportbar">
+    <div class="export-actions">
+      <button type="button" class="btn" id="btn-glb">Download GLB</button>
+      <button type="button" class="btn btn-primary" id="btn-glb-anim">Download GLB + Animations</button>
+      <label class="check"><input type="checkbox" id="merge-toggle"> Склеить меши тела (3 draw calls)</label>
+    </div>
+    <p class="export-status" id="export-status" role="status"></p>
+    <p class="export-note" id="export-note" hidden>В этом окне GLB сохраняется внутри ZIP-архива.</p>
+  </footer>
+</div>
+<!--APP-END-->
+<script src="dist/npc-viewer.js"></script>
+</body>
+</html>

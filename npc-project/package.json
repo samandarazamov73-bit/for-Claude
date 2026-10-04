@@ -1,0 +1,23 @@
+{
+  "name": "npc-project",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Procedural minifigure-style NPCs for a browser game (Three.js, GLB export)",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "export-glb": "node tools/export-glb.mjs",
+    "validate": "node tools/validate-glb.mjs models/*.glb",
+    "smoke": "node tools/smoke-test.mjs test-output",
+    "glb-report": "node tools/glb-report.mjs models/NPC_01_Civilian.glb"
+  },
+  "dependencies": {
+    "jszip": "3.10.1",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "gltf-validator": "^2.0.0-dev.3.10",
+    "playwright": "^1.56.1"
+  },
+  "type": "module"
+}
