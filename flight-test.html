@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Flight Test</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc8ec; touch-action: none;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  canvas { display: block; }
+  #hud { position: fixed; top: 10px; left: 10px; padding: 8px 12px; background: rgba(10, 20, 35, .55);
+    color: #e8f4ff; font-size: 14px; line-height: 1.45; border-radius: 6px; pointer-events: none; white-space: pre; z-index: 5; }
+  #hud .dim { opacity: .6; font-size: 12px; }
+  #msg { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); padding: 8px 12px; background: rgba(120, 30, 30, .8);
+    color: #fff; font: 13px sans-serif; border-radius: 6px; display: none; cursor: pointer; z-index: 6; text-align: center; }
+  #help { position: fixed; bottom: 10px; left: 10px; color: #fff; font-size: 12px; opacity: .85;
+    text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #touch { position: fixed; inset: 0; display: none; z-index: 4; }
+  body.touch #touch { display: block; }
+  body.touch #help { display: none; }
+  #joy { position: absolute; left: 40px; bottom: 40px; width: 120px; height: 120px; margin: 0; border-radius: 50%;
+    background: rgba(255, 255, 255, .12); border: 2px solid rgba(255, 255, 255, .35); pointer-events: none; }
+  #knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255, 255, 255, .5); }
+  .btn { position: absolute; width: 64px; height: 64px; border-radius: 50%; background: rgba(255, 255, 255, .18);
+    border: 2px solid rgba(255, 255, 255, .5); color: #fff; font: bold 13px sans-serif; display: flex;
+    align-items: center; justify-content: center; }
+  .btn.on { background: rgba(140, 210, 255, .55); }
+  #bFly { right: 20px; bottom: 24px; width: 80px; height: 80px; }
+  #bBoost { right: 114px; bottom: 24px; }
+  #bUp { right: 28px; bottom: 120px; }
+  #bDown { right: 114px; bottom: 104px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">Loading…</div>
+<div id="msg"></div>
+<div id="help">WASD — движение · Space — взлёт / выкл. полёта · Shift — ускорение · E / Q — вверх / вниз · клик + мышь — камера</div>
+<div id="touch">
+  <div id="joy"><div id="knob"></div></div>
+  <div class="btn" id="bUp">▲</div>
+  <div class="btn" id="bDown">▼</div>
+  <div class="btn" id="bBoost">BOOST</div>
+  <div class="btn" id="bFly">FLY</div>
+</div>
+<input type="file" id="file" accept=".glb" style="display:none">
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------------------------------------------------------------- constants
+const G = 9.81;                       // Earth gravity, m/s²
+const MODEL_FILES = ['lego_minifigure_rigged.glb', 'lego_minifig_model_rigged.glb'];
+const CHAR_H = 1.8;                   // character height, m
+const MODEL_YAW = 0;                  // model faces +Z
+const CRUISE = 18, BOOST = 55;        // horizontal flight speeds, m/s
+const CLIMB = 8;                      // E/Q vertical speed, m/s
+const WALK = 4.5, RUN = 8;
+const LIFT_MAX = 3 * G;               // max lift acceleration
+const LAND_ZONE = 2;                  // m
+const HOVER_AMP = 0.15, HOVER_PERIOD = 2.8;
+const MIN_HOLD = 0.5;
+const WORLD_HALF = 245;
+const DEG = Math.PI / 180;
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const damp = (k, dt) => 1 - Math.exp(-k * dt);
+const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+// ---------------------------------------------------------------- renderer / scene
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const HORIZON = new THREE.Color(0xd2e7f6);
+scene.fog = new THREE.Fog(HORIZON, 180, 650);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 2500);
+
+const sky = new THREE.Mesh(new THREE.SphereGeometry(1200, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { top: { value: new THREE.Color(0x2a64b0) }, bottom: { value: HORIZON } },
+  vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 vP; void main(){ float h = clamp(vP.y, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, pow(h, 0.55)), 1.0); \n#include <colorspace_fragment>\n }'
+}));
+sky.frustumCulled = false;
+sky.renderOrder = -1;
+scene.add(sky);
+
+scene.add(new THREE.HemisphereLight(0xd6eaff, 0x55604c, 0.7));
+const SUN_DIR = new THREE.Vector3(0.45, 0.8, 0.35).normalize();
+const sun = new THREE.DirectionalLight(0xfff2df, 2.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 600 });
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
+scene.add(sun, sun.target);
+
+// ground: one 50 m tile = 5×10 m cells, repeated
+const gridTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const x = c.getContext('2d');
+  x.fillStyle = '#7f8c76'; x.fillRect(0, 0, 512, 512);
+  x.fillStyle = '#6b7863';
+  for (let i = 0; i < 5; i++) { x.fillRect(i * 102.4 - 1, 0, 2, 512); x.fillRect(0, i * 102.4 - 1, 512, 2); }
+  x.fillStyle = '#56624f'; x.fillRect(0, 0, 512, 3); x.fillRect(0, 0, 3, 512);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+})();
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshStandardMaterial({ map: gridTex, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// landmarks: [x, z, height, type]
+const LANDMARKS = [
+  [25, -35, 5, 'box'], [-40, -60, 10, 'cyl'], [60, -90, 20, 'box'], [-90, -20, 15, 'box'],
+  [100, 10, 30, 'cyl'], [-20, 70, 8, 'cyl'], [45, 120, 25, 'box'], [-130, 90, 12, 'box'],
+  [150, -150, 18, 'cyl'], [-170, -140, 28, 'box'], [190, 160, 22, 'box'], [-60, -180, 6, 'cyl'],
+  [0, -125, 14, 'box'], [-200, 30, 30, 'cyl']
+];
+const LM_COLORS = [0xb9b2a4, 0x9aa7b4, 0xc2a88b, 0xa3a38f, 0xb7c0c7];
+LANDMARKS.forEach(([x, z, h, t], i) => {
+  const geo = t === 'box' ? new THREE.BoxGeometry(5, h, 5) : new THREE.CylinderGeometry(2.5, 2.5, h, 20);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: LM_COLORS[i % LM_COLORS.length], roughness: 0.9 }));
+  m.position.set(x, h / 2, z);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+});
+
+// ---------------------------------------------------------------- character
+const player = new THREE.Group();          // position = feet, rotation.y = heading
+const tilt = new THREE.Group();            // pitch / roll around body center
+tilt.position.y = CHAR_H / 2;
+tilt.rotation.order = 'ZXY';
+const body = new THREE.Group();
+body.position.y = -CHAR_H / 2;
+tilt.add(body); player.add(tilt); scene.add(player);
+
+const placeholder = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, CHAR_H - 0.64, 6, 12), new THREE.MeshStandardMaterial({ color: 0xe0a020 }));
+placeholder.position.y = CHAR_H / 2;
+placeholder.castShadow = true;
+body.add(placeholder);
+let modelRoot = null;
+
+// glow texture + effects
+const glowTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(200,235,255,.6)'); g.addColorStop(1, 'rgba(150,210,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const makeGlow = () => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xaee0ff, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending }));
+  s.renderOrder = 2; body.add(s); return s;
+};
+const footGlow = makeGlow(); footGlow.position.set(0, 0.05, 0);
+const handGlows = [makeGlow(), makeGlow()];
+handGlows[0].position.set(0.38, 0.85, 0.1); handGlows[1].position.set(-0.38, 0.85, 0.1);
+
+const cone = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 20, 1, true), new THREE.MeshBasicMaterial({
+  color: 0xbfe8ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+cone.position.y = -0.7; // apex at feet, opening downward
+const coneHolder = new THREE.Group(); coneHolder.add(cone); body.add(coneHolder);
+
+// particles (trail + takeoff burst)
+const PN = 260;
+const pPos = new Float32Array(PN * 3), pCol = new Float32Array(PN * 3), pVel = new Float32Array(PN * 3);
+const pLife = new Float32Array(PN), pMax = new Float32Array(PN);
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
+const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.55, map: glowTex, vertexColors: true,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+particles.frustumCulled = false;
+scene.add(particles);
+let pNext = 0;
+function emit(p, vx, vy, vz, life) {
+  const i = pNext; pNext = (pNext + 1) % PN;
+  pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
+  pVel[i * 3] = vx; pVel[i * 3 + 1] = vy; pVel[i * 3 + 2] = vz;
+  pLife[i] = pMax[i] = life;
+}
+function updateParticles(dt) {
+  for (let i = 0; i < PN; i++) {
+    if (pLife[i] <= 0) { pCol[i * 3] = pCol[i * 3 + 1] = pCol[i * 3 + 2] = 0; continue; }
+    pLife[i] -= dt;
+    const k = Math.max(0, pLife[i] / pMax[i]);
+    pPos[i * 3] += pVel[i * 3] * dt; pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt; pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+    pCol[i * 3] = 0.65 * k; pCol[i * 3 + 1] = 0.85 * k; pCol[i * 3 + 2] = 1.0 * k;
+  }
+  pGeo.attributes.position.needsUpdate = true;
+  pGeo.attributes.color.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------- model loading
+const msg = document.getElementById('msg');
+const fileInput = document.getElementById('file');
+const loader = new GLTFLoader();
+
+function setupModel(gltf) {
+  const model = gltf.scene;
+  model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+
+  // fit wrapper: scale to CHAR_H, feet at y=0, centered (model itself is untouched)
+  const root = new THREE.Group(); root.rotation.y = MODEL_YAW;
+  const fit = new THREE.Group(); fit.add(model); root.add(fit);
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const s = CHAR_H / (size.y || 1);
+  fit.scale.setScalar(s);
+  fit.position.set(-c.x * s, -box.min.y * s, -c.z * s);
+  root.updateMatrixWorld(true);
+
+  // bones
+  const bones = [];
+  model.traverse(o => { if (o.isBone && !/end/i.test(o.name)) bones.push(o); });
+  const wp = b => b.getWorldPosition(new THREE.Vector3());
+  let headBone = null, hy = -Infinity;
+  for (const b of bones) { const y = wp(b).y; if (y > hy) { hy = y; headBone = b; } }
+
+  // spherical helmet attached to the head bone
+  const headBox = new THREE.Box3();
+  model.traverse(o => { if (o.isMesh) { const b = new THREE.Box3().setFromObject(o); if (b.min.y > CHAR_H * 0.55) headBox.union(b); } });
+  const hc = headBox.isEmpty() ? new THREE.Vector3(0, CHAR_H * 0.84, 0) : headBox.getCenter(new THREE.Vector3());
+  const hs = headBox.isEmpty() ? new THREE.Vector3(1, 1, 1).multiplyScalar(CHAR_H * 0.3) : headBox.getSize(new THREE.Vector3());
+  const hr = Math.max(hs.x, hs.y, hs.z) * 0.5 * 1.12;
+  const helmet = new THREE.Group();
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(hr, 32, 20), new THREE.MeshStandardMaterial({
+    color: 0xcfe9ff, transparent: true, opacity: 0.25, roughness: 0.05, metalness: 0.1, depthWrite: false }));
+  glass.renderOrder = 1;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(hr * 0.72, hr * 0.07, 10, 32), new THREE.MeshStandardMaterial({ color: 0xe8eef3, roughness: 0.4, metalness: 0.3 }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = -hr * 0.7; ring.castShadow = true;
+  helmet.add(glass, ring);
+  helmet.position.copy(hc);
+  root.add(helmet);
+  helmet.updateMatrixWorld(true);
+  (headBone || fit).attach(helmet);
+
+  // palm positions for glows (bones with extreme X, excluding head chain)
+  if (bones.length > 4) {
+    let l = null, r = null;
+    for (const b of bones) { const p = wp(b); if (!l || p.x > l.x) l = p; if (!r || p.x < r.x) r = p; }
+    handGlows[0].position.copy(l); handGlows[1].position.copy(r);
+  }
+
+  if (modelRoot) body.remove(modelRoot);
+  placeholder.visible = false;
+  modelRoot = root;
+  body.add(root);
+  msg.style.display = 'none';
+}
+
+function loadModel(i = 0) {
+  if (i >= MODEL_FILES.length) {
+    msg.textContent = 'Не удалось загрузить lego_minifigure_rigged.glb (положи рядом с HTML или открой через локальный сервер). Нажми сюда или перетащи .glb в окно.';
+    msg.style.display = 'block';
+    return;
+  }
+  loader.load(MODEL_FILES[i], setupModel, undefined, () => loadModel(i + 1));
+}
+function loadFile(f) {
+  f.arrayBuffer().then(buf => loader.parse(buf, '', setupModel, e => { msg.textContent = 'Ошибка GLB: ' + e.message; msg.style.display = 'block'; }));
+}
+msg.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => fileInput.files[0] && loadFile(fileInput.files[0]));
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+loadModel();
+
+// ---------------------------------------------------------------- input
+const keys = {};
+const touchBtn = { boost: false, up: false, down: false };
+const joy = { active: false, x: 0, y: 0 };
+let camYaw = 0, camPitch = 0.28;
+
+addEventListener('keydown', e => {
+  if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
+  if (e.code === 'Space' && !e.repeat) toggleFlight();
+  keys[e.code] = true;
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+const canvas = renderer.domElement;
+let mouseDown = false;
+canvas.addEventListener('mousedown', e => {
+  mouseDown = true;
+  if (!document.pointerLockElement && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+});
+addEventListener('mouseup', () => { mouseDown = false; });
+addEventListener('mousemove', e => {
+  if (document.pointerLockElement === canvas || mouseDown) rotateCam(e.movementX * 0.0025, e.movementY * 0.0025);
+});
+function rotateCam(dx, dy) {
+  camYaw -= dx;
+  camPitch = clamp(camPitch + dy, -0.35, 1.25);
+}
+
+// touch
+if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) document.body.classList.add('touch');
+const touchLayer = document.getElementById('touch'), joyEl = document.getElementById('joy'), knob = document.getElementById('knob');
+const JOY_R = 50;
+let joyId = null, lookId = null, jx0 = 0, jy0 = 0, lx = 0, ly = 0;
+touchLayer.addEventListener('pointerdown', e => {
+  if (e.clientX < innerWidth * 0.45 && joyId === null) {
+    joyId = e.pointerId; jx0 = e.clientX; jy0 = e.clientY; joy.active = true;
+    joyEl.style.left = (jx0 - 60) + 'px'; joyEl.style.top = (jy0 - 60) + 'px'; joyEl.style.bottom = 'auto';
+  } else if (lookId === null) { lookId = e.pointerId; lx = e.clientX; ly = e.clientY; }
+  touchLayer.setPointerCapture(e.pointerId);
+});
+touchLayer.addEventListener('pointermove', e => {
+  if (e.pointerId === joyId) {
+    let dx = e.clientX - jx0, dy = e.clientY - jy0;
+    const l = Math.hypot(dx, dy); if (l > JOY_R) { dx *= JOY_R / l; dy *= JOY_R / l; }
+    joy.x = dx / JOY_R; joy.y = -dy / JOY_R;
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  } else if (e.pointerId === lookId) {
+    rotateCam((e.clientX - lx) * 0.006, (e.clientY - ly) * 0.004);
+    lx = e.clientX; ly = e.clientY;
+  }
+});
+const endTouch = e => {
+  if (e.pointerId === joyId) {
+    joyId = null; joy.active = false; joy.x = joy.y = 0; knob.style.transform = '';
+    joyEl.style.left = '40px'; joyEl.style.top = 'auto'; joyEl.style.bottom = '40px';
+  }
+  if (e.pointerId === lookId) lookId = null;
+};
+touchLayer.addEventListener('pointerup', endTouch);
+touchLayer.addEventListener('pointercancel', endTouch);
+
+function holdButton(id, key) {
+  const el = document.getElementById(id);
+  const set = v => e => { e.stopPropagation(); e.preventDefault(); touchBtn[key] = v; el.classList.toggle('on', v); };
+  el.addEventListener('pointerdown', set(true));
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, set(false));
+}
+holdButton('bBoost', 'boost'); holdButton('bUp', 'up'); holdButton('bDown', 'down');
+const bFly = document.getElementById('bFly');
+bFly.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); toggleFlight(); });
+
+function readInput() {
+  let x = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + joy.x;
+  let z = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + joy.y;
+  const l = Math.hypot(x, z); if (l > 1) { x /= l; z /= l; }
+  return {
+    x, z, mag: Math.min(1, l),
+    boost: !!(keys.ShiftLeft || keys.ShiftRight || touchBtn.boost),
+    climb: (keys.KeyE || touchBtn.up ? 1 : 0) - (keys.KeyQ || touchBtn.down ? 1 : 0)
+  };
+}
+
+// ---------------------------------------------------------------- flight state
+const pos = player.position;
+const vel = new THREE.Vector3();
+const st = {
+  grounded: true, flying: false, spool: 0,
+  holdEngaged: false, holdY: 0, hoverT: 0, hoverBlend: 0, hovering: false,
+  boostT: 0, lift: G, heading: Math.PI, simT: 0, yawRate: 0, pitch: 0, roll: 0, aFwd: 0,
+  glow: 0, pulse: 1, landPulse: 1
+};
+
+function toggleFlight() {
+  if (st.spool > 0) return;
+  if (st.flying) { st.flying = false; st.hovering = false; return; } // lift off -> gravity takes over
+  st.spool = st.grounded ? 0.3 : 0.15;                                 // short delay before flight engages
+}
+function engageFlight() {
+  st.flying = true;
+  st.hoverBlend = 0;
+  if (st.grounded) { st.grounded = false; st.holdEngaged = true; st.holdY = pos.y + 3; }
+  else st.holdEngaged = false;
+  st.pulse = 0;
+  const p = new THREE.Vector3();
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 3;
+    p.set(pos.x + (Math.random() - 0.5) * 0.3, pos.y + 0.05, pos.z + (Math.random() - 0.5) * 0.3);
+    emit(p, Math.cos(a) * r, -1 - Math.random() * 2, Math.sin(a) * r, 0.45 + Math.random() * 0.3);
+  }
+}
+
+const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _wish = new THREE.Vector3(), _dv = new THREE.Vector3(), _vh = new THREE.Vector3();
+
+function physicsStep(h, inp) {
+  st.simT += h;
+  if (st.spool > 0) { st.spool -= h; if (st.spool <= 0) { st.spool = 0; engageFlight(); } }
+
+  _f.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  _r.set(Math.cos(camYaw), 0, -Math.sin(camYaw));
+  _wish.copy(_f).multiplyScalar(inp.z).addScaledVector(_r, inp.x);
+  const hasMove = inp.mag > 0.05;
+  _vh.set(vel.x, 0, vel.z);
+  const hs = _vh.length();
+
+  st.boostT = clamp(st.boostT + (inp.boost && st.flying && hasMove ? 0.45 : -0.6) * h, 0, 1);
+
+  if (st.grounded) {
+    // ---------------- walking
+    const target = _wish.clone().multiplyScalar(inp.boost ? RUN : WALK);
+    _dv.copy(target).sub(_vh);
+    const a = Math.min(hasMove ? 25 : 18, _dv.length() * 6);
+    const step = Math.min(a * h, _dv.length());
+    if (_dv.lengthSq() > 1e-8) _vh.addScaledVector(_dv.normalize(), step);
+    vel.set(_vh.x, 0, _vh.z);
+    pos.y = 0;
+    st.lift = G; // ground reaction
+  } else if (st.flying) {
+    // ---------------- horizontal thrust with inertia
+    const maxSpeed = CRUISE + (BOOST - CRUISE) * st.boostT;
+    const target = _wish.clone().multiplyScalar(maxSpeed);
+    _dv.copy(target).sub(_vh);
+    const maxA = hasMove ? 9 + 9 * st.boostT : 6;
+    const a = Math.min(maxA, _dv.length() * 1.6);
+    const step = Math.min(a * h, _dv.length());
+    if (_dv.lengthSq() > 1e-8) _vh.addScaledVector(_dv.normalize(), step);
+    vel.x = _vh.x; vel.z = _vh.z;
+
+    // ---------------- vertical: lift force vs gravity (gravity always applied)
+    st.hovering = !hasMove && inp.climb === 0 && hs < 1.5 && Math.abs(vel.y) < 1.5 && (!st.holdEngaged || Math.abs(st.holdY - pos.y) < 0.6);
+    st.hoverBlend = clamp(st.hoverBlend + (st.hovering ? 0.6 : -2) * h, 0, 1);
+    st.hoverT += h;
+    let aDes;
+    if (inp.climb !== 0) {
+      st.holdEngaged = false;
+      let tvy = inp.climb * CLIMB * (1 + 0.5 * st.boostT), ff = 0;
+      if (inp.climb < 0) { // landing flare: constant 5 m/s² braking profile, touchdown ≈ 0.6 m/s
+        const prof = -Math.sqrt(0.36 + 2 * 5 * Math.max(0, pos.y));
+        if (prof > tvy) { tvy = prof; ff = 5; }
+      }
+      aDes = (tvy - vel.y) * 4 + ff;
+    } else if (!st.holdEngaged) {
+      aDes = -vel.y * 3; // kill vertical speed, then lock altitude
+      if (Math.abs(vel.y) < 0.3) { st.holdEngaged = true; st.holdY = Math.max(pos.y, MIN_HOLD); }
+    } else {
+      const w = 2 * Math.PI / HOVER_PERIOD, A = HOVER_AMP * st.hoverBlend, ph = st.hoverT * w;
+      const ty = st.holdY + A * Math.sin(ph), tv = A * w * Math.cos(ph), ta = -A * w * w * Math.sin(ph);
+      aDes = 4 * (ty - pos.y) + 4 * (tv - vel.y) + ta;
+    }
+    st.lift = clamp(G + aDes, 0, LIFT_MAX);
+    vel.y += (st.lift - G) * h;
+  } else {
+    // ---------------- free fall: only gravity (+ tiny air control)
+    st.lift = 0;
+    if (hasMove) { vel.x += _wish.x * 2 * h; vel.z += _wish.z * 2 * h; }
+    vel.x *= 1 - 0.02 * h; vel.z *= 1 - 0.02 * h;
+    vel.y -= G * h;
+    // landing cushion: cap descent speed by a max-braking profile (≈ last 2 m for normal falls)
+    const vMax = Math.sqrt(1 + 2 * 3 * G * Math.max(0, pos.y));
+    if (pos.y < Math.max(LAND_ZONE, (vel.y * vel.y) / (6 * G)) && -vel.y > vMax) {
+      st.lift = G + (-vel.y - vMax) / h;
+      vel.y = -vMax;
+    }
+  }
+
+  // world bounds: outward speed is capped smoothly near the edge of the 500×500 ground
+  for (const k of ['x', 'z']) {
+    const sg = Math.sign(pos[k]) || 1, cap = (WORLD_HALF - Math.abs(pos[k])) * 1.2;
+    if (vel[k] * sg > cap) vel[k] = sg * cap;
+  }
+
+  pos.addScaledVector(vel, h);
+
+  // ground contact
+  if (!st.grounded && pos.y <= 0) {
+    pos.y = 0;
+    if (!st.flying || inp.climb < 0 || !st.holdEngaged) {
+      if (-vel.y > 0.2 || !st.flying) st.landPulse = 0;
+      st.grounded = true; st.flying = false; st.hovering = false; vel.y = 0;
+    } else vel.y = Math.max(0, vel.y);
+  }
+
+}
+
+// ---------------------------------------------------------------- visuals per frame
+const _prevVh = new THREE.Vector3(), _tmp = new THREE.Vector3(), _camOff = new THREE.Vector3();
+const lag = new THREE.Vector3();
+let camDist = 6, fov = 60;
+
+function updateVisuals(dt, inp) {
+  _vh.set(vel.x, 0, vel.z);
+  const hs = _vh.length(), speed = vel.length();
+
+  // heading follows horizontal velocity
+  const minHs = st.grounded ? 0.4 : 2;
+  const prevHeading = st.heading;
+  if (hs > minHs) {
+    const target = Math.atan2(vel.x, vel.z);
+    st.heading += wrapAngle(target - st.heading) * damp(st.grounded ? 10 : 4, dt);
+  }
+  const yr = wrapAngle(st.heading - prevHeading) / Math.max(dt, 1e-4);
+  st.yawRate += (yr - st.yawRate) * damp(6, dt);
+  player.rotation.y = st.heading;
+
+  // forward acceleration (for lean)
+  const accel = _tmp.copy(_vh).sub(_prevVh).divideScalar(Math.max(dt, 1e-4));
+  _prevVh.copy(_vh);
+  const aF = accel.x * Math.sin(st.heading) + accel.z * Math.cos(st.heading);
+  st.aFwd += (aF - st.aFwd) * damp(4, dt);
+
+  let pitchT = 0, rollT = 0;
+  if (st.flying && !st.grounded) {
+    const sfast = clamp((hs - CRUISE) / (BOOST - CRUISE), 0, 1);
+    pitchT = 15 * DEG * Math.min(1, hs / CRUISE) + 10 * DEG * sfast + clamp(st.aFwd * 0.8, -8, 8) * DEG;
+    pitchT = clamp(pitchT, -10 * DEG, 25 * DEG);
+    rollT = clamp(-st.yawRate * 0.3 * Math.min(1, hs / 8), -13 * DEG, 13 * DEG);
+  } else if (st.grounded) {
+    pitchT = 6 * DEG * Math.min(1, hs / RUN);
+  }
+  st.pitch += (pitchT - st.pitch) * damp(3, dt);
+  st.roll += (rollT - st.roll) * damp(3, dt);
+  tilt.rotation.set(st.pitch, 0, st.roll);
+
+  // glows
+  const fast = clamp((speed - 30) / 25, 0, 1);
+  const glowT = st.flying ? 0.25 + 0.75 * fast + clamp((st.lift - G) / (2 * G), 0, 0.3) : st.spool > 0 ? 0.6 : 0;
+  st.glow += (glowT - st.glow) * damp(5, dt);
+  st.pulse = Math.min(1, st.pulse + dt / 0.6);
+  st.landPulse = Math.min(1, st.landPulse + dt / 0.5);
+  const flash = (1 - st.pulse) * (1 - st.pulse);
+  footGlow.material.opacity = clamp(st.glow + flash, 0, 1);
+  footGlow.scale.setScalar(0.5 + st.glow * 1.1 + flash * 1.5);
+  for (const hg of handGlows) {
+    hg.material.opacity = clamp(st.glow * 0.8 + flash, 0, 1);
+    hg.scale.setScalar(0.25 + st.glow * 0.5 + flash * 0.9);
+  }
+  const cp = Math.max(1 - st.pulse, (1 - st.landPulse) * 0.6);
+  cone.material.opacity = 0.85 * cp;
+  coneHolder.scale.set(1 + (1 - cp) * 1.6, 0.6 + (1 - cp) * 1.2, 1 + (1 - cp) * 1.6);
+  coneHolder.visible = cp > 0.01;
+
+  // trail at high speed
+  if (speed > 38) {
+    const n = Math.floor(150 * clamp((speed - 38) / 17, 0, 1) * dt + Math.random());
+    tilt.getWorldPosition(_tmp);
+    for (let i = 0; i < n; i++) {
+      emit(_tmp.set(_tmp.x + (Math.random() - 0.5) * 0.5, _tmp.y + (Math.random() - 0.5) * 0.7, _tmp.z + (Math.random() - 0.5) * 0.5),
+        (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, 0.5 + Math.random() * 0.3);
+      tilt.getWorldPosition(_tmp);
+    }
+  }
+  updateParticles(dt);
+
+  // camera: locked to player translation + smoothed offset/lag (no jitter)
+  const sp = clamp((speed - 15) / 40, 0, 1);
+  camDist += (6 + sp * 3 - camDist) * damp(2, dt);
+  fov += (60 + sp * 12 - fov) * damp(2, dt);
+  if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  lag.lerp(_tmp.copy(vel).multiplyScalar(-0.035), damp(2.5, dt));
+  _camOff.set(Math.sin(camYaw) * Math.cos(camPitch), Math.sin(camPitch), Math.cos(camYaw) * Math.cos(camPitch)).multiplyScalar(camDist);
+  camera.position.copy(pos).add(_camOff).add(lag);
+  camera.position.y += 1.5;
+  camera.position.y = Math.max(camera.position.y, 0.3);
+  camera.lookAt(pos.x, pos.y + 1.3, pos.z);
+  sky.position.copy(camera.position);
+
+  // sun / shadow follow player's shadow point
+  const sh = _tmp.copy(pos).addScaledVector(SUN_DIR, -pos.y / SUN_DIR.y);
+  sun.target.position.copy(sh);
+  sun.position.copy(sh).addScaledVector(SUN_DIR, 300);
+}
+
+// ---------------------------------------------------------------- HUD
+const hud = document.getElementById('hud');
+let fpsFrames = 0, fpsTime = 0, fps = 0, hudTime = 0;
+function updateHud(dt, rawDt) {
+  fpsFrames++; fpsTime += rawDt;
+  if (fpsTime >= 0.5) { fps = Math.round(fpsFrames / fpsTime); fpsFrames = 0; fpsTime = 0; }
+  hudTime += dt;
+  if (hudTime < 0.1) return;
+  hudTime = 0;
+  const mode = st.grounded ? 'Ground' : st.flying ? (st.hovering ? 'Hover' : 'Flight') : 'Fall';
+  hud.innerHTML =
+    `Speed: ${vel.length().toFixed(1)} m/s\nAltitude: ${Math.max(0, pos.y).toFixed(1)} m\nMode: ${mode}\nFPS: ${fps}` +
+    `\n<span class="dim">V.speed: ${vel.y.toFixed(1)} m/s · Lift: ${(st.lift / G).toFixed(2)} g · g = ${G}</span>`;
+}
+
+// ---------------------------------------------------------------- loop
+const clock = new THREE.Clock();
+function frame() {
+  const rawDt = clock.getDelta(), dt = Math.min(rawDt, 0.05);
+  const inp = readInput();
+  const n = Math.max(1, Math.ceil(dt / (1 / 120)));
+  for (let i = 0; i < n; i++) physicsStep(dt / n, inp);
+  updateVisuals(dt, inp);
+  updateHud(dt, rawDt);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// debug hook (console)
+window.flightDebug = { st, pos, vel, step: physicsStep, frame, toggleFlight, G };
+</script>
+</body>
+</html>
