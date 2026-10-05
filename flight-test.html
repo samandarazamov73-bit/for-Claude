@@ -12,13 +12,17 @@
   #hud { position: fixed; top: 10px; left: 10px; padding: 8px 12px; background: rgba(10, 20, 35, .55);
     color: #e8f4ff; font-size: 14px; line-height: 1.45; border-radius: 6px; pointer-events: none; white-space: pre; z-index: 5; }
   #hud .dim { opacity: .6; font-size: 12px; }
-  #msg { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); padding: 8px 12px; background: rgba(120, 30, 30, .8);
-    color: #fff; font: 13px sans-serif; border-radius: 6px; display: none; cursor: pointer; z-index: 6; text-align: center; }
+  #msg { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 14px 18px; background: rgba(10, 20, 35, .78);
+    color: #fff; font: 16px sans-serif; border-radius: 8px; cursor: pointer; z-index: 6; text-align: center; line-height: 1.5; }
+  #msg small { opacity: .7; font-size: 12px; }
+  #glbBtn { position: fixed; top: 10px; right: 10px; z-index: 7; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, .4);
+    border-radius: 6px; background: rgba(10, 20, 35, .7); color: #e8f4ff; font: 13px sans-serif; cursor: pointer; }
   #help { position: fixed; bottom: 10px; left: 10px; color: #fff; font-size: 12px; opacity: .85;
     text-shadow: 0 1px 2px #000; pointer-events: none; }
   #touch { position: fixed; inset: 0; display: none; z-index: 4; }
   body.touch #touch { display: block; }
   body.touch #help { display: none; }
+  body.touch #hud { font-size: 11px; padding: 6px 9px; }
   #joy { position: absolute; left: 40px; bottom: 40px; width: 120px; height: 120px; margin: 0; border-radius: 50%;
     background: rgba(255, 255, 255, .12); border: 2px solid rgba(255, 255, 255, .35); pointer-events: none; }
   #knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255, 255, 255, .5); }
@@ -26,10 +30,11 @@
     border: 2px solid rgba(255, 255, 255, .5); color: #fff; font: bold 13px sans-serif; display: flex;
     align-items: center; justify-content: center; }
   .btn.on { background: rgba(140, 210, 255, .55); }
-  #bFly { right: 20px; bottom: 24px; width: 80px; height: 80px; }
-  #bBoost { right: 114px; bottom: 24px; }
-  #bUp { right: 28px; bottom: 120px; }
-  #bDown { right: 114px; bottom: 104px; }
+  #bFly { right: 20px; bottom: 20px; width: 80px; height: 80px; }
+  #bDash { right: 28px; bottom: 112px; }
+  #bBoost { right: 112px; bottom: 20px; }
+  #bUp { right: 196px; bottom: 92px; width: 56px; height: 56px; }
+  #bDown { right: 196px; bottom: 24px; width: 56px; height: 56px; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -40,14 +45,16 @@
 </head>
 <body>
 <div id="hud">Loading…</div>
-<div id="msg"></div>
-<div id="help">WASD — движение · Space — взлёт / выкл. полёта · Shift — ускорение · E / Q — вверх / вниз · клик + мышь — камера</div>
+<div id="msg">Загрузка модели…</div>
+<button id="glbBtn">Загрузить GLB</button>
+<div id="help">WASD — движение · Space — полёт вкл/выкл · Shift — Boost · F / ПКМ — Dash · W+A / W+D — Dodge · C — тормоз · E / Q — вверх / вниз · клик + мышь — камера</div>
 <div id="touch">
   <div id="joy"><div id="knob"></div></div>
   <div class="btn" id="bUp">▲</div>
   <div class="btn" id="bDown">▼</div>
   <div class="btn" id="bBoost">BOOST</div>
-  <div class="btn" id="bFly">FLY</div>
+  <div class="btn" id="bDash">DASH</div>
+  <div class="btn" id="bFly">FLIGHT</div>
 </div>
 <input type="file" id="file" accept=".glb" style="display:none">
 
@@ -67,6 +74,14 @@ const LIFT_MAX = 3 * G;               // max lift acceleration
 const LAND_ZONE = 2;                  // m
 const HOVER_AMP = 0.15, HOVER_PERIOD = 2.8;
 const MIN_HOLD = 0.5;
+const THRUST = 10, BOOST_THRUST = 12;       // forward thrust, m/s² (cruise / extra at full boost)
+const TURN_ACC = 45, BOOST_TURN_ACC = 15;   // lateral (turning) acceleration, m/s²
+const BRAKE_ACC = 12, BRAKE_DRAG = 0.006;   // braking on release: 12 + 0.006·v² m/s²
+const HARD_BRAKE = 40;                      // C key
+const OVERSPEED_ACC = 4, AIR_DRAG = 0.004;  // drag when faster than target speed (after dash / boost)
+const DASH_TIME = 0.24, DASH_DV = 28, DASH_ACC = 200, DASH_MAX = 90, DASH_CD = 0.85;
+const DODGE_TIME = 0.18, DODGE_ACC = 110, DODGE_CD = 0.4;
+const LAUNCH_TIME = 0.35, LAUNCH_ACC = 26;  // takeoff impulse: net upward accel, m/s²
 const WORLD_HALF = 245;
 const DEG = Math.PI / 180;
 
@@ -150,11 +165,8 @@ const body = new THREE.Group();
 body.position.y = -CHAR_H / 2;
 tilt.add(body); player.add(tilt); scene.add(player);
 
-const placeholder = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, CHAR_H - 0.64, 6, 12), new THREE.MeshStandardMaterial({ color: 0xe0a020 }));
-placeholder.position.y = CHAR_H / 2;
-placeholder.castShadow = true;
-body.add(placeholder);
 let modelRoot = null;
+const rig = {};                            // posed bones: head / armL / armR / legL / legR
 
 // glow texture + effects
 const glowTex = (() => {
@@ -177,9 +189,12 @@ const cone = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 20, 1, true), new 
   color: 0xbfe8ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
 cone.position.y = -0.7; // apex at feet, opening downward
 const coneHolder = new THREE.Group(); coneHolder.add(cone); body.add(coneHolder);
+const shock = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 48), new THREE.MeshBasicMaterial({
+  color: 0xcfeeff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+shock.rotation.x = -Math.PI / 2; shock.visible = false; scene.add(shock);
 
 // particles (trail + takeoff burst)
-const PN = 260;
+const PN = 420;
 const pPos = new Float32Array(PN * 3), pCol = new Float32Array(PN * 3), pVel = new Float32Array(PN * 3);
 const pLife = new Float32Array(PN), pMax = new Float32Array(PN);
 const pGeo = new THREE.BufferGeometry();
@@ -260,26 +275,39 @@ function setupModel(gltf) {
     handGlows[0].position.copy(l); handGlows[1].position.copy(r);
   }
 
+  // skeleton posing: rotations are given in character space and converted to each bone's parent space
+  for (const k in rig) delete rig[k];
+  const findBone = n => bones.find(b => new RegExp('^Bone\\.?' + n + '(?:_\\d+)?$').test(b.name));
+  const rootInv = root.quaternion.clone().invert();
+  for (const [k, n] of Object.entries({ head: '005', armL: '021', armR: '022', legL: '007', legR: '008' })) {
+    const b = findBone(n);
+    if (!b) continue;
+    const p = rootInv.clone().multiply(b.parent.getWorldQuaternion(new THREE.Quaternion()));
+    rig[k] = { b, rest: b.quaternion.clone(), p, pInv: p.clone().invert(), side: Math.sign(wp(b).x) || (k.endsWith('L') ? 1 : -1) };
+  }
+
   if (modelRoot) body.remove(modelRoot);
-  placeholder.visible = false;
   modelRoot = root;
   body.add(root);
   msg.style.display = 'none';
+  window.flightDebug && (window.flightDebug.model = { bones: bones.length, rig: Object.keys(rig), helmetParent: helmet.parent.name });
 }
 
+const showMsg = html => { if (!modelRoot) { msg.innerHTML = html; msg.style.display = 'block'; } };
+const NEED_MODEL = 'Загрузите lego_minifigure_rigged.glb<br><small>кнопка «Загрузить GLB» справа сверху или перетащите файл в окно</small>';
 function loadModel(i = 0) {
-  if (i >= MODEL_FILES.length) {
-    msg.textContent = 'Не удалось загрузить lego_minifigure_rigged.glb (положи рядом с HTML или открой через локальный сервер). Нажми сюда или перетащи .glb в окно.';
-    msg.style.display = 'block';
-    return;
-  }
+  if (i >= MODEL_FILES.length) { showMsg(NEED_MODEL); return; }
   loader.load(MODEL_FILES[i], setupModel, undefined, () => loadModel(i + 1));
 }
 function loadFile(f) {
-  f.arrayBuffer().then(buf => loader.parse(buf, '', setupModel, e => { msg.textContent = 'Ошибка GLB: ' + e.message; msg.style.display = 'block'; }));
+  msg.innerHTML = 'Загрузка ' + f.name + '…'; msg.style.display = 'block';
+  f.arrayBuffer()
+    .then(buf => loader.parse(buf, '', setupModel, e => { msg.innerHTML = 'Ошибка GLB: ' + e.message + '<br>' + NEED_MODEL; msg.style.display = 'block'; }))
+    .catch(e => { msg.innerHTML = 'Ошибка чтения файла: ' + e.message; msg.style.display = 'block'; });
 }
 msg.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => fileInput.files[0] && loadFile(fileInput.files[0]));
+document.getElementById('glbBtn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); fileInput.value = ''; });
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
 loadModel();
@@ -289,10 +317,14 @@ const keys = {};
 const touchBtn = { boost: false, up: false, down: false };
 const joy = { active: false, x: 0, y: 0 };
 let camYaw = 0, camPitch = 0.28;
+let moveYaw = 0;          // input reference yaw: latched while the same directions are held, so camera auto-follow doesn't curve the path
+let lookIdle = 10;        // seconds since the player last rotated the camera
+let dashQueued = false;
 
 addEventListener('keydown', e => {
-  if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
+  if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'KeyF', 'KeyC', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
   if (e.code === 'Space' && !e.repeat) toggleFlight();
+  if (e.code === 'KeyF' && !e.repeat) dashQueued = true;
   keys[e.code] = true;
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
@@ -301,16 +333,19 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 const canvas = renderer.domElement;
 let mouseDown = false;
 canvas.addEventListener('mousedown', e => {
+  if (e.button === 2) { dashQueued = true; return; }
   mouseDown = true;
   if (!document.pointerLockElement && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
 });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('mouseup', () => { mouseDown = false; });
 addEventListener('mousemove', e => {
   if (document.pointerLockElement === canvas || mouseDown) rotateCam(e.movementX * 0.0025, e.movementY * 0.0025);
 });
 function rotateCam(dx, dy) {
-  camYaw -= dx;
+  camYaw -= dx; moveYaw -= dx;
   camPitch = clamp(camPitch + dy, -0.35, 1.25);
+  if (Math.abs(dx) > 1e-4) lookIdle = 0;
 }
 
 // touch
@@ -353,63 +388,106 @@ function holdButton(id, key) {
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, set(false));
 }
 holdButton('bBoost', 'boost'); holdButton('bUp', 'up'); holdButton('bDown', 'down');
-const bFly = document.getElementById('bFly');
-bFly.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); toggleFlight(); });
+const tapButton = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(); });
+tapButton('bFly', () => toggleFlight());
+tapButton('bDash', () => { dashQueued = true; });
 
-function readInput() {
+let inputSig = '', prevSide = 0, sideFreeT = 0;
+function readInput(dt) {
   let x = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + joy.x;
   let z = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + joy.y;
   const l = Math.hypot(x, z); if (l > 1) { x /= l; z /= l; }
+  // a new set of directions re-latches the input frame to the current camera
+  const sig = ['KeyW', 'KeyA', 'KeyS', 'KeyD'].map(k => keys[k] ? k[3] : '').join('') +
+    (Math.hypot(joy.x, joy.y) > 0.3 ? 'j' + Math.round(Math.atan2(joy.x, joy.y) / (Math.PI / 4)) : '');
+  if (sig !== inputSig) { inputSig = sig; moveYaw = camYaw; }
+  // air dodge: quick sideways input added while flying forward (W+A / W+D, or a fast joystick flick)
+  if (Math.abs(x) < 0.3) sideFreeT = 0; else sideFreeT += dt;
+  const side = Math.abs(x) > 0.6 && z > 0.4 ? Math.sign(x) : 0;
+  const dodge = side !== 0 && prevSide === 0 && sideFreeT < 0.2 ? side : 0;
+  prevSide = side;
   return {
-    x, z, mag: Math.min(1, l),
+    x, z, mag: Math.min(1, l), dodge,
     boost: !!(keys.ShiftLeft || keys.ShiftRight || touchBtn.boost),
+    brake: !!keys.KeyC,
     climb: (keys.KeyE || touchBtn.up ? 1 : 0) - (keys.KeyQ || touchBtn.down ? 1 : 0)
   };
+}
+function wishFrom(inp, out) {
+  return out.set(-Math.sin(moveYaw) * inp.z + Math.cos(moveYaw) * inp.x, 0, -Math.cos(moveYaw) * inp.z - Math.sin(moveYaw) * inp.x);
 }
 
 // ---------------------------------------------------------------- flight state
 const pos = player.position;
 const vel = new THREE.Vector3();
 const st = {
-  grounded: true, flying: false, spool: 0,
+  grounded: true, flying: false, spool: 0, launchT: 0, launchFx: 0,
   holdEngaged: false, holdY: 0, hoverT: 0, hoverBlend: 0, hovering: false,
-  boostT: 0, lift: G, heading: Math.PI, simT: 0, yawRate: 0, pitch: 0, roll: 0, aFwd: 0,
-  glow: 0, pulse: 1, landPulse: 1
+  boostT: 0, boostOn: false, lift: G, heading: Math.PI, simT: 0, pitch: 0, roll: 0, aFwd: 0, aLat: 0,
+  glow: 0, pulse: 1, landPulse: 1, shockT: 1, walkPhase: 0, lockT: 0,
+  dashT: 0, dashCd: 0, dashTarget: 0, dashDir: new THREE.Vector3(), dashFx: 0,
+  dodgeT: 0, dodgeCd: 0, dodgeSide: 0, dodgeDir: new THREE.Vector3(), dodgeFx: 0,
+  action: ''
 };
 
-function toggleFlight() {
-  if (st.spool > 0) return;
-  if (st.flying) { st.flying = false; st.hovering = false; return; } // lift off -> gravity takes over
-  st.spool = st.grounded ? 0.3 : 0.15;                                 // short delay before flight engages
-}
-function engageFlight() {
-  st.flying = true;
-  st.hoverBlend = 0;
-  if (st.grounded) { st.grounded = false; st.holdEngaged = true; st.holdY = pos.y + 3; }
-  else st.holdEngaged = false;
-  st.pulse = 0;
+function burst(n, speed, life, up = 0) {
   const p = new THREE.Vector3();
-  for (let i = 0; i < 26; i++) {
-    const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 3;
-    p.set(pos.x + (Math.random() - 0.5) * 0.3, pos.y + 0.05, pos.z + (Math.random() - 0.5) * 0.3);
-    emit(p, Math.cos(a) * r, -1 - Math.random() * 2, Math.sin(a) * r, 0.45 + Math.random() * 0.3);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, r = speed * (0.5 + Math.random() * 0.5);
+    p.set(pos.x + (Math.random() - 0.5) * 0.4, pos.y + 0.05 + Math.random() * up, pos.z + (Math.random() - 0.5) * 0.4);
+    emit(p, Math.cos(a) * r, -1 - Math.random() * 2, Math.sin(a) * r, life * (0.7 + Math.random() * 0.6));
   }
 }
+function toggleFlight() {
+  if (st.spool > 0) return;
+  if (st.flying) { st.flying = false; st.hovering = false; st.launchT = 0; st.dashT = 0; st.dodgeT = 0; return; } // lift off -> gravity takes over
+  st.spool = st.grounded ? 0.15 : 0.12;                                 // short delay before flight engages
+}
+function engageFlight() {
+  const fromGround = st.grounded;
+  st.flying = true; st.grounded = false;
+  st.holdEngaged = false; st.hoverBlend = 0;
+  st.launchT = fromGround ? LAUNCH_TIME : 0.25;   // powerful short upward impulse
+  st.launchFx = 1; st.pulse = 0;
+  if (pos.y < 4) { st.shockT = 0; shock.position.set(pos.x, 0.06, pos.z); }
+  burst(40, 6, 0.6, 0.2);
+}
+function requestDash(inp) {
+  if (!st.flying || st.grounded || st.dashCd > 0) return;
+  const d = wishFrom(inp, st.dashDir);
+  if (d.lengthSq() < 0.01) { // no direction held: dash along current motion / camera forward
+    if (Math.hypot(vel.x, vel.z) > 2) d.set(vel.x, 0, vel.z); else d.set(-Math.sin(moveYaw), 0, -Math.cos(moveYaw));
+  }
+  d.normalize();
+  const along = vel.x * d.x + vel.z * d.z;
+  st.dashTarget = Math.min(DASH_MAX, Math.max(along, 0) + DASH_DV);
+  st.dashT = DASH_TIME; st.dashCd = DASH_CD; st.dashFx = 1; st.lockT = DASH_TIME + 0.1; st.dodgeT = 0;
+  burst(24, 4, 0.4, 1.4);
+}
+function requestDodge(side) {
+  const hs = Math.hypot(vel.x, vel.z);
+  if (!st.flying || st.grounded || st.dodgeCd > 0 || st.dashT > 0 || hs < 6) return;
+  const ux = vel.x / hs, uz = vel.z / hs;
+  st.dodgeDir.set(-uz * side, 0, ux * side);   // right of motion = (-uz, 0, ux)
+  st.dodgeT = DODGE_TIME; st.dodgeCd = DODGE_CD; st.dodgeSide = side; st.dodgeFx = 1; st.lockT = 0.3;
+}
 
-const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _wish = new THREE.Vector3(), _dv = new THREE.Vector3(), _vh = new THREE.Vector3();
+const _wish = new THREE.Vector3(), _dv = new THREE.Vector3(), _vh = new THREE.Vector3(), _tgt = new THREE.Vector3();
 
 function physicsStep(h, inp) {
   st.simT += h;
+  st.dashCd = Math.max(0, st.dashCd - h);
+  st.dodgeCd = Math.max(0, st.dodgeCd - h);
   if (st.spool > 0) { st.spool -= h; if (st.spool <= 0) { st.spool = 0; engageFlight(); } }
 
-  _f.set(-Math.sin(camYaw), 0, -Math.cos(camYaw));
-  _r.set(Math.cos(camYaw), 0, -Math.sin(camYaw));
-  _wish.copy(_f).multiplyScalar(inp.z).addScaledVector(_r, inp.x);
+  wishFrom(inp, _wish);
   const hasMove = inp.mag > 0.05;
   _vh.set(vel.x, 0, vel.z);
   const hs = _vh.length();
 
-  st.boostT = clamp(st.boostT + (inp.boost && st.flying && hasMove ? 0.45 : -0.6) * h, 0, 1);
+  st.boostOn = inp.boost && st.flying && hasMove;
+  st.boostT = clamp(st.boostT + (st.boostOn ? 0.8 : -0.6) * h, 0, 1);
+  st.action = '';
 
   if (st.grounded) {
     // ---------------- walking
@@ -422,38 +500,73 @@ function physicsStep(h, inp) {
     pos.y = 0;
     st.lift = G; // ground reaction
   } else if (st.flying) {
-    // ---------------- horizontal thrust with inertia
+    // ---------------- horizontal: thrust / braking / drag along the motion, strong lateral accel for turns
     const maxSpeed = CRUISE + (BOOST - CRUISE) * st.boostT;
-    const target = _wish.clone().multiplyScalar(maxSpeed);
-    _dv.copy(target).sub(_vh);
-    const maxA = hasMove ? 9 + 9 * st.boostT : 6;
-    const a = Math.min(maxA, _dv.length() * 1.6);
-    const step = Math.min(a * h, _dv.length());
-    if (_dv.lengthSq() > 1e-8) _vh.addScaledVector(_dv.normalize(), step);
-    vel.x = _vh.x; vel.z = _vh.z;
+    if (st.dashT > 0) {
+      st.dashT -= h;
+      const d = st.dashDir, along = vel.x * d.x + vel.z * d.z;
+      const sA = clamp(st.dashTarget - along, -DASH_ACC * h, DASH_ACC * h);
+      vel.x += d.x * sA; vel.z += d.z * sA;
+      const k = damp(6, h), a2 = along + sA;   // bleed sideways motion for a crisp dash
+      vel.x -= (vel.x - d.x * a2) * k; vel.z -= (vel.z - d.z * a2) * k;
+      st.action = 'DASH';
+    } else {
+      _tgt.set(0, 0, 0);
+      if (hasMove && !inp.brake) _tgt.copy(_wish).multiplyScalar(maxSpeed);
+      let ux = 0, uz = 0;
+      if (hs > 0.5) { ux = vel.x / hs; uz = vel.z / hs; }
+      else if (hasMove) { const l = Math.hypot(_wish.x, _wish.z); ux = _wish.x / l; uz = _wish.z / l; }
+      const dvx = _tgt.x - vel.x, dvz = _tgt.z - vel.z;
+      const dA = dvx * ux + dvz * uz;
+      const lx = dvx - ux * dA, lz = dvz - uz * dA, dL = Math.hypot(lx, lz);
+      let aA;
+      if (dA >= 0) aA = THRUST + BOOST_THRUST * st.boostT;               // acceleration
+      else if (inp.brake) aA = HARD_BRAKE + BRAKE_DRAG * hs * hs;       // hard brake (C)
+      else if (!hasMove) aA = BRAKE_ACC + BRAKE_DRAG * hs * hs;         // released: strong braking
+      else aA = OVERSPEED_ACC + AIR_DRAG * hs * hs;                     // faster than target: drag only
+      const aL = st.dodgeT > 0 ? 0 : TURN_ACC + BOOST_TURN_ACC * st.boostT;
+      const sA = Math.sign(dA) * Math.min(Math.abs(dA), Math.min(aA, Math.abs(dA) * 4) * h);
+      const sL = Math.min(dL, Math.min(aL, dL * 4) * h);
+      vel.x += ux * sA; vel.z += uz * sA;
+      if (dL > 1e-6) { vel.x += lx / dL * sL; vel.z += lz / dL * sL; }
+      if (hs > 3 && (inp.brake || !hasMove)) st.action = 'BRAKE';
+      else if (hs > 8 && dL > 0.5 * hs) st.action = 'TURN';
+    }
+    if (st.dodgeT > 0) {
+      st.dodgeT -= h;
+      vel.x += st.dodgeDir.x * DODGE_ACC * h; vel.z += st.dodgeDir.z * DODGE_ACC * h;
+      st.action = 'DODGE';
+    }
 
     // ---------------- vertical: lift force vs gravity (gravity always applied)
-    st.hovering = !hasMove && inp.climb === 0 && hs < 1.5 && Math.abs(vel.y) < 1.5 && (!st.holdEngaged || Math.abs(st.holdY - pos.y) < 0.6);
+    st.hovering = !hasMove && inp.climb === 0 && hs < 1.5 && Math.abs(vel.y) < 1.5 && st.launchT <= 0 && st.dashT <= 0 &&
+      (!st.holdEngaged || Math.abs(st.holdY - pos.y) < 0.6);
     st.hoverBlend = clamp(st.hoverBlend + (st.hovering ? 0.6 : -2) * h, 0, 1);
     st.hoverT += h;
-    let aDes;
-    if (inp.climb !== 0) {
-      st.holdEngaged = false;
-      let tvy = inp.climb * CLIMB * (1 + 0.5 * st.boostT), ff = 0;
-      if (inp.climb < 0) { // landing flare: constant 5 m/s² braking profile, touchdown ≈ 0.6 m/s
-        const prof = -Math.sqrt(0.36 + 2 * 5 * Math.max(0, pos.y));
-        if (prof > tvy) { tvy = prof; ff = 5; }
-      }
-      aDes = (tvy - vel.y) * 4 + ff;
-    } else if (!st.holdEngaged) {
-      aDes = -vel.y * 3; // kill vertical speed, then lock altitude
-      if (Math.abs(vel.y) < 0.3) { st.holdEngaged = true; st.holdY = Math.max(pos.y, MIN_HOLD); }
+    if (st.launchT > 0) {
+      st.launchT -= h;
+      st.lift = G + LAUNCH_ACC;
+      st.action = 'LAUNCH';
     } else {
-      const w = 2 * Math.PI / HOVER_PERIOD, A = HOVER_AMP * st.hoverBlend, ph = st.hoverT * w;
-      const ty = st.holdY + A * Math.sin(ph), tv = A * w * Math.cos(ph), ta = -A * w * w * Math.sin(ph);
-      aDes = 4 * (ty - pos.y) + 4 * (tv - vel.y) + ta;
+      let aDes;
+      if (inp.climb !== 0) {
+        st.holdEngaged = false;
+        let tvy = inp.climb * CLIMB * (1 + 0.5 * st.boostT), ff = 0;
+        if (inp.climb < 0) { // landing flare: constant 5 m/s² braking profile, touchdown ≈ 0.6 m/s
+          const prof = -Math.sqrt(0.36 + 2 * 5 * Math.max(0, pos.y));
+          if (prof > tvy) { tvy = prof; ff = 5; }
+        }
+        aDes = (tvy - vel.y) * 4 + ff;
+      } else if (!st.holdEngaged) {
+        aDes = -vel.y * 3; // kill vertical speed, then lock altitude
+        if (Math.abs(vel.y) < 0.3) { st.holdEngaged = true; st.holdY = Math.max(pos.y, MIN_HOLD); }
+      } else {
+        const w = 2 * Math.PI / HOVER_PERIOD, A = HOVER_AMP * st.hoverBlend, ph = st.hoverT * w;
+        const ty = st.holdY + A * Math.sin(ph), tv = A * w * Math.cos(ph), ta = -A * w * w * Math.sin(ph);
+        aDes = 4 * (ty - pos.y) + 4 * (tv - vel.y) + ta;
+      }
+      st.lift = clamp(G + aDes, 0, LIFT_MAX);
     }
-    st.lift = clamp(G + aDes, 0, LIFT_MAX);
     vel.y += (st.lift - G) * h;
   } else {
     // ---------------- free fall: only gravity (+ tiny air control)
@@ -480,60 +593,112 @@ function physicsStep(h, inp) {
   // ground contact
   if (!st.grounded && pos.y <= 0) {
     pos.y = 0;
-    if (!st.flying || inp.climb < 0 || !st.holdEngaged) {
+    if (st.launchT <= 0 && (!st.flying || inp.climb < 0 || !st.holdEngaged)) {
       if (-vel.y > 0.2 || !st.flying) st.landPulse = 0;
-      st.grounded = true; st.flying = false; st.hovering = false; vel.y = 0;
+      st.grounded = true; st.flying = false; st.hovering = false; st.dashT = st.dodgeT = 0; vel.y = 0;
     } else vel.y = Math.max(0, vel.y);
   }
+}
 
+// ---------------------------------------------------------------- skeleton pose
+const pose = { armSwing: 0, armOut: 0, armSplit: 0, legSwing: 0, legSplit: 0 };
+const poseT = { ...pose };
+const _qe = new THREE.Euler(), _qa = new THREE.Quaternion();
+function setBone(k, rx, rz) {
+  const r = rig[k]; if (!r) return;
+  _qa.setFromEuler(_qe.set(rx, 0, rz));
+  r.b.quaternion.copy(r.pInv).multiply(_qa).multiply(r.p).multiply(r.rest);
+}
+function updatePose(dt, hs, sfast, hasMove) {
+  for (const k in poseT) poseT[k] = 0;
+  if (st.grounded) {
+    const w = Math.min(1, hs / 3);
+    st.walkPhase += hs * dt * 2.2;
+    poseT.legSplit = Math.sin(st.walkPhase) * 28 * w;
+    poseT.armSplit = -Math.sin(st.walkPhase) * 22 * w;
+    if (st.spool > 0) { poseT.armSwing = 10; poseT.armOut = 18; }
+  } else if (st.flying) {
+    const p = st.hoverT * 2.2;
+    if (st.launchFx > 0.35) { poseT.armSwing = 12; poseT.armOut = 22; }                        // pushing off, palms down
+    else if (st.dashT > 0 || st.dashFx > 0.45) { poseT.armSwing = 75; poseT.armOut = 4; poseT.legSwing = 25; } // tucked
+    else if (st.action === 'BRAKE' || (!hasMove && st.aFwd < -4)) { poseT.armSwing = -30; poseT.armOut = 30; poseT.legSwing = -14; }
+    else if (st.hovering || hs < 3) {
+      poseT.armSwing = 6 + 4 * Math.sin(p); poseT.armOut = 22; poseT.legSwing = 4 + 3 * Math.sin(p + 1); poseT.legSplit = 4 * Math.sin(p * 0.7);
+    } else { poseT.armSwing = 25 + 45 * sfast; poseT.armOut = 12 - 6 * sfast; poseT.legSwing = 10 + 12 * sfast; }
+  } else {                                                                                      // falling
+    const p = st.simT * 9;
+    poseT.armOut = 65; poseT.armSwing = -15 + 15 * Math.sin(p); poseT.armSplit = 12 * Math.sin(p); poseT.legSwing = 5; poseT.legSplit = 12 * Math.sin(p * 0.8);
+  }
+  const k = damp(7, dt);
+  for (const n in pose) pose[n] += (poseT[n] - pose[n]) * k;
+  const sl = rig.armL ? rig.armL.side : 1, sr = rig.armR ? rig.armR.side : -1;
+  setBone('armL', (pose.armSwing + pose.armSplit) * DEG, pose.armOut * DEG * sl);
+  setBone('armR', (pose.armSwing - pose.armSplit) * DEG, pose.armOut * DEG * sr);
+  setBone('legL', (pose.legSwing + pose.legSplit) * DEG, 0);
+  setBone('legR', (pose.legSwing - pose.legSplit) * DEG, 0);
+  setBone('head', clamp(-st.pitch * 0.7, -25 * DEG, 20 * DEG), 0);          // keep looking ahead while leaning
 }
 
 // ---------------------------------------------------------------- visuals per frame
-const _prevVh = new THREE.Vector3(), _tmp = new THREE.Vector3(), _camOff = new THREE.Vector3();
+const _prevV = new THREE.Vector3(), _tmp = new THREE.Vector3(), _camOff = new THREE.Vector3();
 const lag = new THREE.Vector3();
 let camDist = 6, fov = 60;
 
 function updateVisuals(dt, inp) {
   _vh.set(vel.x, 0, vel.z);
   const hs = _vh.length(), speed = vel.length();
+  lookIdle += dt;
 
-  // heading follows horizontal velocity
-  const minHs = st.grounded ? 0.4 : 2;
-  const prevHeading = st.heading;
-  if (hs > minHs) {
-    const target = Math.atan2(vel.x, vel.z);
-    st.heading += wrapAngle(target - st.heading) * damp(st.grounded ? 10 : 4, dt);
+  // heading follows horizontal velocity (locked during dash / dodge; backward flight keeps facing forward)
+  st.lockT = Math.max(0, st.lockT - dt);
+  if (st.lockT <= 0) {
+    let target = null;
+    if (st.flying && inp.z < -0.5 && Math.abs(inp.x) < 0.5) target = moveYaw + Math.PI;
+    else if (hs > (st.grounded ? 0.4 : 2)) target = Math.atan2(vel.x, vel.z);
+    if (target !== null) st.heading += wrapAngle(target - st.heading) * damp(st.grounded ? 10 : 6, dt);
   }
-  const yr = wrapAngle(st.heading - prevHeading) / Math.max(dt, 1e-4);
-  st.yawRate += (yr - st.yawRate) * damp(6, dt);
   player.rotation.y = st.heading;
 
-  // forward acceleration (for lean)
-  const accel = _tmp.copy(_vh).sub(_prevVh).divideScalar(Math.max(dt, 1e-4));
-  _prevVh.copy(_vh);
-  const aF = accel.x * Math.sin(st.heading) + accel.z * Math.cos(st.heading);
-  st.aFwd += (aF - st.aFwd) * damp(4, dt);
+  // measured acceleration in body axes (for lean)
+  const ax = clamp((vel.x - _prevV.x) / Math.max(dt, 1e-4), -250, 250), az = clamp((vel.z - _prevV.z) / Math.max(dt, 1e-4), -250, 250);
+  _prevV.copy(vel);
+  const sh = Math.sin(st.heading), ch = Math.cos(st.heading);
+  st.aFwd += (ax * sh + az * ch - st.aFwd) * damp(5, dt);
+  st.aLat += (-ax * ch + az * sh - st.aLat) * damp(5, dt);     // + = toward character's right
 
+  st.launchFx = Math.max(0, st.launchFx - dt * 1.4);
+  st.dashFx = Math.max(0, st.dashFx - dt * 2.2);
+  st.dodgeFx = Math.max(0, st.dodgeFx - dt / 0.5);
+
+  const vF = vel.x * sh + vel.z * ch;
+  const sfast = clamp((vF - CRUISE) / (BOOST - CRUISE), 0, 1);
   let pitchT = 0, rollT = 0;
   if (st.flying && !st.grounded) {
-    const sfast = clamp((hs - CRUISE) / (BOOST - CRUISE), 0, 1);
-    pitchT = 15 * DEG * Math.min(1, hs / CRUISE) + 10 * DEG * sfast + clamp(st.aFwd * 0.8, -8, 8) * DEG;
-    pitchT = clamp(pitchT, -10 * DEG, 25 * DEG);
-    rollT = clamp(-st.yawRate * 0.3 * Math.min(1, hs / 8), -13 * DEG, 13 * DEG);
+    // steady lean with speed, 15–25° forward while accelerating, 10–20° back while braking
+    let p = vF > 0 ? (12 + 8 * sfast) * Math.min(1, vF / CRUISE) : clamp(vF / CRUISE, -1, 0) * 10;
+    const ac = st.aFwd;
+    if (ac > 1) p += (15 + 10 * Math.max(sfast, clamp((ac - 1) / 20, 0, 1)) - p) * clamp((ac - 1) / 4, 0, 1);
+    else if (ac < -1) p += (-(10 + 10 * clamp((-ac - 1) / 25, 0, 1)) - p) * clamp((-ac - 1) / 4, 0, 1) * (inp.mag > 0.05 ? 0.4 : 1);
+    p += (-12 - p) * Math.min(1, st.launchFx * 1.5);                       // takeoff: lean back / up
+    pitchT = clamp(p, -20, 25) * DEG;
+    // bank into the lateral acceleration (turns, dodges), plus a roll kick on dodge
+    rollT = clamp(Math.atan2(st.aLat, G) * 0.45, -30 * DEG, 30 * DEG) * Math.min(1, hs / 6);
+    rollT += st.dodgeSide * 22 * DEG * Math.sin(Math.PI * (1 - st.dodgeFx)) * (st.dodgeFx > 0 ? 1 : 0);
   } else if (st.grounded) {
     pitchT = 6 * DEG * Math.min(1, hs / RUN);
   }
-  st.pitch += (pitchT - st.pitch) * damp(3, dt);
-  st.roll += (rollT - st.roll) * damp(3, dt);
+  st.pitch += (pitchT - st.pitch) * damp(5, dt);
+  st.roll += (rollT - st.roll) * damp(6, dt);
   tilt.rotation.set(st.pitch, 0, st.roll);
+  updatePose(dt, hs, sfast, inp.mag > 0.05);
 
   // glows
   const fast = clamp((speed - 30) / 25, 0, 1);
-  const glowT = st.flying ? 0.25 + 0.75 * fast + clamp((st.lift - G) / (2 * G), 0, 0.3) : st.spool > 0 ? 0.6 : 0;
+  const glowT = st.flying ? 0.25 + 0.75 * fast + clamp((st.lift - G) / (2 * G), 0, 0.4) : st.spool > 0 ? 0.6 : 0;
   st.glow += (glowT - st.glow) * damp(5, dt);
   st.pulse = Math.min(1, st.pulse + dt / 0.6);
   st.landPulse = Math.min(1, st.landPulse + dt / 0.5);
-  const flash = (1 - st.pulse) * (1 - st.pulse);
+  const flash = Math.max((1 - st.pulse) * (1 - st.pulse), st.dashFx * 0.8, st.dodgeFx * 0.4);
   footGlow.material.opacity = clamp(st.glow + flash, 0, 1);
   footGlow.scale.setScalar(0.5 + st.glow * 1.1 + flash * 1.5);
   for (const hg of handGlows) {
@@ -544,23 +709,30 @@ function updateVisuals(dt, inp) {
   cone.material.opacity = 0.85 * cp;
   coneHolder.scale.set(1 + (1 - cp) * 1.6, 0.6 + (1 - cp) * 1.2, 1 + (1 - cp) * 1.6);
   coneHolder.visible = cp > 0.01;
+  st.shockT += dt;
+  shock.visible = st.shockT < 0.6;
+  if (shock.visible) { const t = st.shockT / 0.6; shock.scale.setScalar(1 + 7 * t); shock.material.opacity = 0.8 * (1 - t); }
 
-  // trail at high speed
-  if (speed > 38) {
-    const n = Math.floor(150 * clamp((speed - 38) / 17, 0, 1) * dt + Math.random());
-    tilt.getWorldPosition(_tmp);
+  // particle trail: high speed, dash, dodge
+  const rate = 150 * clamp((speed - 38) / 17, 0, 1) + (st.dashT > 0 ? 260 : 0) + (st.dodgeT > 0 ? 160 : 0);
+  if (rate > 0) {
+    const n = Math.floor(rate * dt + Math.random());
     for (let i = 0; i < n; i++) {
-      emit(_tmp.set(_tmp.x + (Math.random() - 0.5) * 0.5, _tmp.y + (Math.random() - 0.5) * 0.7, _tmp.z + (Math.random() - 0.5) * 0.5),
-        (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, 0.5 + Math.random() * 0.3);
       tilt.getWorldPosition(_tmp);
+      _tmp.x += (Math.random() - 0.5) * 0.5; _tmp.y += (Math.random() - 0.5) * 0.9; _tmp.z += (Math.random() - 0.5) * 0.5;
+      emit(_tmp, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, 0.45 + Math.random() * 0.35);
     }
   }
   updateParticles(dt);
 
-  // camera: locked to player translation + smoothed offset/lag (no jitter)
+  // camera: locked to player translation + smoothed offset/lag (no jitter); auto-follows motion when mouse is idle
+  if (st.flying && hs > 8 && lookIdle > 0.8 && st.dashT <= 0) {
+    const d = wrapAngle(Math.atan2(vel.x, vel.z) + Math.PI - camYaw);
+    if (Math.abs(d) < 2.2) camYaw += d * damp(1.6, dt);
+  }
   const sp = clamp((speed - 15) / 40, 0, 1);
   camDist += (6 + sp * 3 - camDist) * damp(2, dt);
-  fov += (60 + sp * 12 - fov) * damp(2, dt);
+  fov += (60 + sp * 12 + st.dashFx * 8 - fov) * damp(3, dt);
   if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   lag.lerp(_tmp.copy(vel).multiplyScalar(-0.035), damp(2.5, dt));
   _camOff.set(Math.sin(camYaw) * Math.cos(camPitch), Math.sin(camPitch), Math.cos(camYaw) * Math.cos(camPitch)).multiplyScalar(camDist);
@@ -571,9 +743,9 @@ function updateVisuals(dt, inp) {
   sky.position.copy(camera.position);
 
   // sun / shadow follow player's shadow point
-  const sh = _tmp.copy(pos).addScaledVector(SUN_DIR, -pos.y / SUN_DIR.y);
-  sun.target.position.copy(sh);
-  sun.position.copy(sh).addScaledVector(SUN_DIR, 300);
+  const shp = _tmp.copy(pos).addScaledVector(SUN_DIR, -pos.y / SUN_DIR.y);
+  sun.target.position.copy(shp);
+  sun.position.copy(shp).addScaledVector(SUN_DIR, 300);
 }
 
 // ---------------------------------------------------------------- HUD
@@ -588,14 +760,19 @@ function updateHud(dt, rawDt) {
   const mode = st.grounded ? 'Ground' : st.flying ? (st.hovering ? 'Hover' : 'Flight') : 'Fall';
   hud.innerHTML =
     `Speed: ${vel.length().toFixed(1)} m/s\nAltitude: ${Math.max(0, pos.y).toFixed(1)} m\nMode: ${mode}\nFPS: ${fps}` +
-    `\n<span class="dim">V.speed: ${vel.y.toFixed(1)} m/s · Lift: ${(st.lift / G).toFixed(2)} g · g = ${G}</span>`;
+    `\nVertical Speed: ${vel.y.toFixed(1)} m/s\nBoost: ${st.boostOn ? 'ON' : 'OFF'}\nDash: ${st.dashCd > 0 ? 'COOLDOWN ' + st.dashCd.toFixed(1) + 's' : 'READY'}` +
+    `\n<span class="dim">Lift: ${(st.lift / G).toFixed(2)} g · g = ${G} m/s²${st.action ? ' · ' + st.action : ''}</span>`;
 }
 
 // ---------------------------------------------------------------- loop
 const clock = new THREE.Clock();
+let paused = false;
 function frame() {
   const rawDt = clock.getDelta(), dt = Math.min(rawDt, 0.05);
-  const inp = readInput();
+  if (paused) { renderer.render(scene, camera); return; }
+  const inp = readInput(dt);
+  if (inp.dodge) requestDodge(inp.dodge);
+  if (dashQueued) { dashQueued = false; requestDash(inp); }
   const n = Math.max(1, Math.ceil(dt / (1 / 120)));
   for (let i = 0; i < n; i++) physicsStep(dt / n, inp);
   updateVisuals(dt, inp);
@@ -610,7 +787,11 @@ addEventListener('resize', () => {
 });
 
 // debug hook (console)
-window.flightDebug = { st, pos, vel, step: physicsStep, frame, toggleFlight, G };
+window.flightDebug = {
+  st, pos, vel, rig, pose, G, step: physicsStep, visuals: updateVisuals, toggleFlight, requestDash, requestDodge,
+  pause: v => { paused = v; }, setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lookIdle = -1e9; },
+  model: window.flightDebug && window.flightDebug.model
+};
 </script>
 </body>
 </html>
