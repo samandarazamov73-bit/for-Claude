@@ -285,23 +285,28 @@ const shock = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 48), new THREE.MeshB
   color: 0xcfeeff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
 shock.rotation.x = -Math.PI / 2; shock.visible = false; scene.add(shock);
 
-// particles (trail + takeoff burst)
+// particles (takeoff burst, air brake, checkpoint sparkle, tiny jet sparks); size is per particle (1 = 0.55)
 const PN = 800;
 const pPos = new Float32Array(PN * 3), pCol = new Float32Array(PN * 3), pVel = new Float32Array(PN * 3);
-const pLife = new Float32Array(PN), pMax = new Float32Array(PN), pInt = new Float32Array(PN);
+const pLife = new Float32Array(PN), pMax = new Float32Array(PN), pInt = new Float32Array(PN), pSize = new Float32Array(PN).fill(1);
 const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage));
 pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3).setUsage(THREE.DynamicDrawUsage));
+pGeo.setAttribute('pSize', new THREE.BufferAttribute(pSize, 1).setUsage(THREE.DynamicDrawUsage));
 const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.55, map: glowTex, vertexColors: true,
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+particles.material.onBeforeCompile = s => {
+  s.vertexShader = 'attribute float pSize;\n' + s.vertexShader.replace('gl_PointSize = size;', 'gl_PointSize = size * pSize;');
+};
 particles.frustumCulled = false;
 scene.add(particles);
 let pNext = 0;
-function emit(p, vx, vy, vz, life, intensity = 1) {
+function emit(p, vx, vy, vz, life, intensity = 1, size = 1) {
   const i = pNext; pNext = (pNext + 1) % PN;
   pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
   pVel[i * 3] = vx; pVel[i * 3 + 1] = vy; pVel[i * 3 + 2] = vz;
   pLife[i] = pMax[i] = life; pInt[i] = intensity;
+  if (pSize[i] !== size) { pSize[i] = size; pGeo.attributes.pSize.needsUpdate = true; }
 }
 function updateParticles(dt) {
   for (let i = 0; i < PN; i++) {
@@ -313,6 +318,139 @@ function updateParticles(dt) {
   }
   pGeo.attributes.position.needsUpdate = true;
   pGeo.attributes.color.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------- energy jets (flight trail)
+// Each jet is one camera-facing ribbon (a single dynamic BufferGeometry): white core + blue glow across its width,
+// fading toward the tail. Samples are dropped in world space at the nozzle every frame and keep part of the character's
+// velocity, so after a sharp turn the older part keeps drifting the old way and bends instead of swinging with the body.
+const TRAIL_N = 128;                            // samples per jet (ring buffer)
+const TRAIL_INHERIT = 0.4, TRAIL_DRAG = 2.5;    // share of the character's velocity a sample keeps, and its decay (1/s)
+const trailMat = new THREE.ShaderMaterial({
+  uniforms: { core: { value: new THREE.Vector3(0.96, 0.99, 1) }, glow: { value: new THREE.Vector3(0.2, 0.56, 1) } },
+  vertexShader: 'attribute vec3 tdata; varying vec3 vD; void main(){ vD = tdata; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  // tdata: x = -1..1 across the ribbon, y = alpha, z = core strength
+  fragmentShader: 'uniform vec3 core; uniform vec3 glow; varying vec3 vD; void main(){ float r2 = vD.x * vD.x;' +
+    ' float g = exp(-2.6 * r2) * (1.0 - r2), c = exp(-16.0 * r2) * vD.z; gl_FragColor = vec4((glow * g + core * c) * vD.y, 1.0); }',
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+});
+function makeTrail() {
+  const N = TRAIL_N, geo = new THREE.BufferGeometry(), idx = [];
+  const vp = new Float32Array(N * 6), vd = new Float32Array(N * 6);
+  geo.setAttribute('position', new THREE.BufferAttribute(vp, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('tdata', new THREE.BufferAttribute(vd, 3).setUsage(THREE.DynamicDrawUsage));
+  for (let k = 0; k < N - 1; k++) idx.push(2 * k, 2 * k + 1, 2 * k + 2, 2 * k + 1, 2 * k + 3, 2 * k + 2);
+  geo.setIndex(idx); geo.setDrawRange(0, 0);
+  const mesh = new THREE.Mesh(geo, trailMat); mesh.frustumCulled = false; mesh.renderOrder = 3; scene.add(mesh);
+  return { geo, vp, vd, n: 0, head: 0, len: 0, P: new Float32Array(N * 3), V: new Float32Array(N * 3), age: new Float32Array(N),
+    I: new Float32Array(N), C: new Float32Array(N), W: new Float32Array(N), K: new Float32Array(N),
+    last: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, -1), brk: 0 };
+}
+// advance samples, add a new one at nozzle e (velocity ev, intensity I, core C, width W, self-decay K), ease visible duration to lenT
+function stepTrail(tr, dt, e, ev, I, C, W, K, lenT, lenK) {
+  const N = TRAIL_N, P = tr.P, V = tr.V, kd = Math.exp(-TRAIL_DRAG * dt);
+  if (tr.n && e.distanceToSquared(tr.last) > 400) tr.n = 0;     // teleport (route restart): drop the old jet
+  for (let k = 0; k < tr.n; k++) {
+    const i = (tr.head - k + N) % N, j = i * 3;
+    tr.age[i] += dt;
+    P[j] += V[j] * dt; P[j + 1] += V[j + 1] * dt; P[j + 2] += V[j + 2] * dt;
+    V[j] *= kd; V[j + 1] *= kd; V[j + 2] *= kd;
+  }
+  const i = tr.head = (tr.head + 1) % N, j = i * 3;
+  tr.n = Math.min(tr.n + 1, N);
+  P[j] = e.x; P[j + 1] = e.y; P[j + 2] = e.z; V[j] = ev.x; V[j + 1] = ev.y; V[j + 2] = ev.z;
+  tr.age[i] = 0; tr.I[i] = I; tr.C[i] = C; tr.W[i] = W; tr.K[i] = K;
+  tr.last.copy(e);
+  tr.len += (lenT - tr.len) * damp(lenK, dt);
+}
+const _rP = new Float32Array(TRAIL_N * 3), _rA = new Float32Array(TRAIL_N * 5);   // ribbon points: xyz | age, I, C, W, K
+const _tT = new THREE.Vector3(), _tC = new THREE.Vector3(), _tS = new THREE.Vector3(), _tS0 = new THREE.Vector3();
+function ribbonPoint(tr, M, a, b, f) {                        // point M = sample a blended toward sample b by f
+  const P = tr.P, o = M * 5;
+  for (let c = 0; c < 3; c++) _rP[M * 3 + c] = P[a * 3 + c] + (P[b * 3 + c] - P[a * 3 + c]) * f;
+  _rA[o] = tr.age[a] + (tr.age[b] - tr.age[a]) * f; _rA[o + 1] = tr.I[a] + (tr.I[b] - tr.I[a]) * f;
+  _rA[o + 2] = tr.C[a] + (tr.C[b] - tr.C[a]) * f; _rA[o + 3] = tr.W[a] + (tr.W[b] - tr.W[a]) * f; _rA[o + 4] = tr.K[a] + (tr.K[b] - tr.K[a]) * f;
+}
+function buildTrail(tr, cam) {
+  const N = TRAIL_N;
+  let m = 0;                                                  // samples inside the visible duration (newest → oldest)
+  while (m < tr.n && tr.age[(tr.head - m + N) % N] <= tr.len) m++;
+  let M = 0, peak = 0;
+  for (; M < m; M++) { const i = (tr.head - M + N) % N; ribbonPoint(tr, M, i, i, 0); peak = Math.max(peak, tr.I[i]); }
+  if (m > 0 && m < tr.n) {                                    // tail point interpolated exactly at the visible duration
+    const a = (tr.head - m + 1 + N) % N, b = (tr.head - m + N) % N;
+    ribbonPoint(tr, M++, a, b, clamp((tr.len - tr.age[a]) / Math.max(1e-6, tr.age[b] - tr.age[a]), 0, 1));
+    tr.n = m + 1;                                             // older samples are never shown again
+  }
+  const tailAge = M > 1 ? _rA[(M - 1) * 5] : 0;
+  if (M < 2 || tailAge < 1e-4 || peak < 0.003) { tr.geo.setDrawRange(0, 0); return; }
+  const vp = tr.vp, vd = tr.vd;
+  let dist = 0;
+  for (let q = 0; q < M; q++) {
+    const q0 = Math.max(0, q - 1), q1 = Math.min(M - 1, q + 1);
+    _tT.set(_rP[q0 * 3] - _rP[q1 * 3], _rP[q0 * 3 + 1] - _rP[q1 * 3 + 1], _rP[q0 * 3 + 2] - _rP[q1 * 3 + 2]);
+    _tC.set(cam.x - _rP[q * 3], cam.y - _rP[q * 3 + 1], cam.z - _rP[q * 3 + 2]);
+    if (q > 0) dist += Math.hypot(_rP[q * 3] - _rP[q * 3 - 3], _rP[q * 3 + 1] - _rP[q * 3 - 2], _rP[q * 3 + 2] - _rP[q * 3 - 1]);
+    const camD = _tC.length();
+    _tS.crossVectors(_tT, _tC);                               // ribbon faces the camera
+    if (_tS.lengthSq() > 1e-10) { _tS.normalize(); if (q > 0 && _tS.dot(_tS0) < 0) _tS.negate(); } else _tS.copy(_tS0);
+    _tS0.copy(_tS);
+    const o5 = q * 5, age = _rA[o5], I = _rA[o5 + 1], C = _rA[o5 + 2], W = _rA[o5 + 3], K = _rA[o5 + 4], t = Math.min(1, age / tailAge);
+    const hw = 0.5 * W * (0.25 + 1.1 * Math.pow(t, 0.7));   // narrow at the nozzle, widening backward
+    const a = I * Math.exp(-K * age) * Math.pow(1 - t, 1.2) * smooth01(0, 0.25, dist) * smooth01(0.8, 2.6, camD);
+    const c = C * Math.pow(1 - t, 2);
+    for (let s = 0; s < 2; s++) {
+      const o = (2 * q + s) * 3, sg = s ? 1 : -1;
+      vp[o] = _rP[q * 3] + _tS.x * hw * sg; vp[o + 1] = _rP[q * 3 + 1] + _tS.y * hw * sg; vp[o + 2] = _rP[q * 3 + 2] + _tS.z * hw * sg;
+      vd[o] = sg; vd[o + 1] = a; vd[o + 2] = c;
+    }
+  }
+  tr.geo.attributes.position.needsUpdate = true;
+  tr.geo.attributes.tdata.needsUpdate = true;
+  tr.geo.setDrawRange(0, (M - 1) * 6);
+}
+const trail = makeTrail(), jet = makeTrail();    // trail: horizontal flight / dash / dodge (behind); jet: Vertical Boost (under the feet)
+const _tq = new THREE.Quaternion(), _tDown = new THREE.Vector3(), _tN = new THREE.Vector3(), _tV = new THREE.Vector3(), _tD = new THREE.Vector3();
+let jetPow = 0, trailDashT = 0;
+function updateTrails(dt, hs) {
+  const fly = st.flying && !st.grounded, rnd = a => (Math.random() - 0.5) * a;
+  tilt.getWorldQuaternion(_tq);
+  _tDown.set(0, -1, 0).applyQuaternion(_tq);                 // character's own "down" axis (follows lean)
+  tilt.getWorldPosition(_tC);                                 // body center
+  // ---- main trail: from behind the character, opposite to the motion (dash: opposite to the dash direction)
+  if (st.dashT > 0) _tD.copy(st.dashDir); else if (hs > 1) _tD.set(vel.x / hs, 0, vel.z / hs); else _tD.copy(trail.dir);
+  trail.dir.lerp(_tD, damp(18, dt));
+  if (trail.dir.lengthSq() < 1e-4) trail.dir.copy(_tD); else trail.dir.normalize();
+  const cruise = smooth01(4, 16, hs), boost = smooth01(22, 50, hs) * smooth01(0.05, 0.6, st.boostT);
+  const dashE = fly ? st.dashFx : 0, dodgeE = fly && st.dodgeFx > 0 ? Math.sin(Math.PI * (1 - st.dodgeFx)) : 0;
+  trail.brk += ((st.action === 'BRAKE' ? 1 : 0) - trail.brk) * damp(6, dt);
+  let I = fly ? (0.26 * cruise + 0.8 * boost) * (1 - 0.6 * trail.brk) + 0.35 * dodgeE : 0;
+  let C = fly ? 0.1 * cruise + 0.9 * boost * boost : 0;
+  let W = 0.16 + 0.08 * cruise + 0.76 * boost + 0.15 * dodgeE;
+  let lenT = fly ? 0.05 + 0.07 * cruise + 0.24 * boost : 0, lenK = fly ? 6 : 4;
+  if (dashE > 0) { I = Math.max(I, 1.7 * dashE); C = Math.max(C, 1.4 * dashE); W = Math.max(W, 0.3 + 0.4 * dashE); }
+  if (st.dashT > 0) { lenT = 0.08; lenK = 5; }                // dash: very short, very bright, fades fast (K); the old part fades out
+  const facing = Math.abs(trail.dir.x * Math.sin(st.heading) + trail.dir.z * Math.cos(st.heading));   // the minifig is wider than deep
+  _tN.copy(_tC).addScaledVector(_tDown, 0.3).addScaledVector(trail.dir, -(0.56 - 0.22 * facing));
+  stepTrail(trail, dt, _tN, _tV.copy(vel).multiplyScalar(TRAIL_INHERIT), I, C, W, 11 * dashE, lenT, lenK);
+  if (st.dashT > 0 && trailDashT <= 0)                        // dash start: short flash of tiny sparks out of the nozzle
+    for (let k = 0; k < 12; k++) { const s = 8 + Math.random() * 12;
+      emit(_tN, vel.x * 0.4 - trail.dir.x * s + rnd(8), vel.y * 0.4 + rnd(6), vel.z * 0.4 - trail.dir.z * s + rnd(8), 0.18 + Math.random() * 0.17, 1.3, 0.16); }
+  trailDashT = st.dashT;
+  if (boost > 0.3 && fly) { const n = Math.floor(26 * boost * dt + Math.random());   // a few tiny sparks in the boost stream
+    for (let k = 0; k < n; k++) { const s = 6 + Math.random() * 6;
+      emit(_tN, vel.x * 0.55 - trail.dir.x * s + rnd(2.5), vel.y * 0.55 + rnd(2.5), vel.z * 0.55 - trail.dir.z * s + rnd(2.5), 0.25 + Math.random() * 0.2, 0.9, 0.15); } }
+  // ---- Vertical Boost jet: from under the feet along the character's down axis; longer with stronger vertical acceleration
+  const jT = fly && st.vboost ? 0.4 + 0.6 * clamp((st.lift - G) / VBOOST_ACC, 0, 1) : 0;
+  jetPow += (jT - jetPow) * damp(jT > jetPow ? 14 : 9, dt);
+  body.getWorldPosition(_tN).addScaledVector(_tDown, 0.1);    // body origin = feet
+  _tV.copy(vel).multiplyScalar(TRAIL_INHERIT).addScaledVector(_tDown, 8 + 18 * jetPow);
+  stepTrail(jet, dt, _tN, _tV, 1.3 * jetPow, 1.2 * jetPow, 0.35 + 0.9 * jetPow, 0, st.vboost && fly ? 0.1 + 0.16 * jetPow : 0, st.vboost ? 8 : 10);
+  if (jetPow > 0.2) { const n = Math.floor(40 * jetPow * dt + Math.random());
+    for (let k = 0; k < n; k++) { const s = 12 + Math.random() * 12;
+      emit(_tN, vel.x * 0.3 + _tDown.x * s + rnd(3), vel.y * 0.3 + _tDown.y * s + rnd(3), vel.z * 0.3 + _tDown.z * s + rnd(3), 0.22 + Math.random() * 0.18, 1, 0.16); } }
+  buildTrail(trail, camera.position);
+  buildTrail(jet, camera.position);
 }
 
 // ---------------------------------------------------------------- model loading
@@ -567,16 +705,15 @@ function requestDash(inp) {
   const along = vel.x * d.x + vel.z * d.z;
   st.dashTarget = Math.min(DASH_MAX, Math.max(along, 0) + DASH_DV);
   st.dashT = DASH_TIME; st.dashCd = DASH_CD; st.dashFx = 1; st.lockT = DASH_TIME + 0.1; st.dodgeT = 0;
-  burst(24, 4, 0.4, 1.4);
 }
-function startVBoost() {   // bright energy pulse under the feet at the start of a Vertical Boost
-  st.pulse = 0; st.vboostFx = 1;
+function startVBoost() {   // energy pulse under the feet at the start of a Vertical Boost (shock ring + sparks; the jet ribbon does the rest)
+  st.vboostFx = 1;
   st.shockT = 0; shock.position.set(pos.x, pos.y + 0.05, pos.z);
   const p = new THREE.Vector3();
   for (let i = 0; i < 36; i++) {
     const a = Math.random() * Math.PI * 2, r = 4 + Math.random() * 5;
     p.set(pos.x, pos.y + 0.05, pos.z);
-    emit(p, vel.x + Math.cos(a) * r, vel.y - 4 - Math.random() * 4, vel.z + Math.sin(a) * r, 0.35 + Math.random() * 0.3, 1.4);
+    emit(p, vel.x + Math.cos(a) * r, vel.y - 4 - Math.random() * 4, vel.z + Math.sin(a) * r, 0.35 + Math.random() * 0.3, 1.4, 0.2);
   }
 }
 function restartRoute() {
@@ -584,6 +721,7 @@ function restartRoute() {
   Object.assign(st, { grounded: true, flying: false, spool: 0, launchT: 0, dashT: 0, dodgeT: 0, hovering: false,
     holdEngaged: false, heading: Math.PI, pitch: 0, roll: 0, vboost: false, boostT: 0 });
   st.acc.set(0, 0, 0); lag.set(0, 0, 0); _prevV.set(0, 0, 0);
+  trail.n = jet.n = 0; jetPow = 0;
   camYaw = moveYaw = 0; camPitch = 0.28;
   Object.assign(course, { idx: 0, hits: 0, t0: null, time: 0, done: false });
   coursePrevValid = false;
@@ -901,41 +1039,38 @@ function updateVisuals(dt, inp) {
   st.glow += (glowT - st.glow) * damp(5, dt);
   st.pulse = Math.min(1, st.pulse + dt / 0.6);
   st.landPulse = Math.min(1, st.landPulse + dt / 0.5);
-  const flash = Math.max((1 - st.pulse) * (1 - st.pulse), st.dashFx * 0.8, st.dodgeFx * 0.4, st.vboostFx * 0.7);
+  // dash / dodge / vertical boost light up the glows but no longer inflate them: the energy jet ribbon carries those effects
+  const pulseFlash = (1 - st.pulse) * (1 - st.pulse), jetFlash = Math.max(st.dashFx * 0.8, st.dodgeFx * 0.4, st.vboostFx * 0.7);
+  const flash = Math.max(pulseFlash, jetFlash);
   footGlow.material.opacity = clamp(st.glow + flash, 0, 1);
-  footGlow.scale.setScalar(0.5 + st.glow * 1.1 + flash * 1.5 + st.vboostFx * 0.8);
+  footGlow.scale.setScalar(0.5 + st.glow * 0.6 + pulseFlash * 1.5 + jetFlash * 0.3);
   for (const hg of handGlows) {
     hg.material.opacity = clamp(st.glow * 0.8 + flash, 0, 1);
-    hg.scale.setScalar(0.25 + st.glow * 0.5 + flash * 0.9);
+    hg.scale.setScalar(0.25 + st.glow * 0.5 + pulseFlash * 0.9 + jetFlash * 0.25);
   }
-  const cp = Math.max(1 - st.pulse, (1 - st.landPulse) * 0.6, st.vboostFx * 0.55);
+  const cp = Math.max(1 - st.pulse, (1 - st.landPulse) * 0.6);
   cone.material.opacity = 0.85 * cp;
-  coneHolder.scale.set(1 + (1 - cp) * 1.6, 0.6 + (1 - cp) * 1.2 + st.vboostFx * 0.8, 1 + (1 - cp) * 1.6);
+  coneHolder.scale.set(1 + (1 - cp) * 1.6, 0.6 + (1 - cp) * 1.2, 1 + (1 - cp) * 1.6);
   coneHolder.visible = cp > 0.01;
   st.shockT += dt;
   shock.visible = st.shockT < 0.6;
   if (shock.visible) { const t = st.shockT / 0.6; shock.scale.setScalar(1 + 7 * t); shock.material.opacity = 0.8 * (1 - t); }
 
-  // particles: speed trail (grows with speed), dash (dense, short), dodge, vertical-boost jet, braking air
-  const ts = clamp((speed - 25) / 35, 0, 1);
+  // particles: braking air (the flight / dash / dodge / vertical-boost trail is the energy jet ribbon, see updateTrails)
   const spawn = (rate, fn) => { const n = Math.floor(rate * dt + Math.random()); for (let i = 0; i < n; i++) fn(); };
   tilt.getWorldPosition(_cp);
   const rnd = a => (Math.random() - 0.5) * a;
-  if (ts > 0) spawn(220 * ts * ts, () => emit(_tmp.set(_cp.x + rnd(0.5), _cp.y + rnd(0.9), _cp.z + rnd(0.5)), rnd(0.8), rnd(0.8), rnd(0.8), 0.45 + Math.random() * 0.35, 0.45 + 0.7 * ts));
-  if (st.dashT > 0) spawn(420, () => emit(_tmp.set(_cp.x + rnd(0.35), _cp.y + rnd(0.7), _cp.z + rnd(0.35)), rnd(0.4), rnd(0.4), rnd(0.4), 0.22 + Math.random() * 0.12, 1.5));
-  if (st.dodgeT > 0) spawn(160, () => emit(_tmp.set(_cp.x + rnd(0.5), _cp.y + rnd(0.9), _cp.z + rnd(0.5)), rnd(0.8), rnd(0.8), rnd(0.8), 0.35, 1));
-  if (st.vboost) spawn(220, () => emit(_tmp.set(pos.x + rnd(0.3), pos.y + 0.05, pos.z + rnd(0.3)), vel.x * 0.3 + rnd(2), -5 - Math.random() * 5, vel.z * 0.3 + rnd(2), 0.3 + Math.random() * 0.2, 1.2));
   const braking = st.flying && st.action === 'BRAKE' && hs > 12;
-  if (braking && !st.braking && hs > 18) {                                   // air-brake ring, keeps flying forward
+  if (braking && !st.braking && hs > 18) {                                   // air-brake ring (fine sparks), keeps flying forward
     const ux = vel.x / hs, uz = vel.z / hs;
     for (let i = 0; i < 28; i++) {
       const a = i / 28 * Math.PI * 2, rx = -uz * Math.cos(a), rz = ux * Math.cos(a), ry = Math.sin(a);
-      emit(_tmp.set(_cp.x + ux * 0.8 + rx * 0.6, _cp.y + ry * 0.6, _cp.z + uz * 0.8 + rz * 0.6), vel.x * 0.9 + rx * 5, vel.y + ry * 5, vel.z * 0.9 + rz * 5, 0.5, 1);
+      emit(_tmp.set(_cp.x + ux * 0.8 + rx * 0.6, _cp.y + ry * 0.6, _cp.z + uz * 0.8 + rz * 0.6), vel.x * 0.9 + rx * 5, vel.y + ry * 5, vel.z * 0.9 + rz * 5, 0.5, 1, 0.3);
     }
   }
   st.braking = braking;
   if (braking && st.aFwd < -8) spawn(140 * clamp((-st.aFwd - 8) / 30, 0.2, 1), () =>
-    emit(_tmp.set(_cp.x + vel.x / hs * 0.8 + rnd(0.8), _cp.y + rnd(0.9), _cp.z + vel.z / hs * 0.8 + rnd(0.8)), vel.x + rnd(2), vel.y + rnd(2), vel.z + rnd(2), 0.45, 0.8));
+    emit(_tmp.set(_cp.x + vel.x / hs * 0.8 + rnd(0.8), _cp.y + rnd(0.9), _cp.z + vel.z / hs * 0.8 + rnd(0.8)), vel.x + rnd(2), vel.y + rnd(2), vel.z + rnd(2), 0.45, 0.8, 0.3));
   updateParticles(dt);
   updateCourse(dt);
 
@@ -962,6 +1097,7 @@ function updateVisuals(dt, inp) {
   st.camRoll += ((st.flying ? st.roll * 0.22 : 0) - st.camRoll) * damp(4, dt);   // light bank with the character on turns / dodges
   camera.rotateZ(-st.camRoll);
   sky.position.copy(camera.position);
+  updateTrails(dt, hs);                                         // after the camera: ribbons are built facing it
 
   // sun / shadow follow player's shadow point
   const shp = _tmp.copy(pos).addScaledVector(SUN_DIR, -pos.y / SUN_DIR.y);
