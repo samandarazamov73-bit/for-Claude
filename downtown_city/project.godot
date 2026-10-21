@@ -1,0 +1,57 @@
+; Engine configuration file.
+; Downtown City — Godot 4.x reconstruction of the Quaternius "Downtown City MegaKit" trailer city.
+
+config_version=5
+
+[application]
+
+config/name="Downtown City"
+config/description="Interactive downtown city reconstructed from the Downtown City MegaKit trailer."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.4", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/vsync/vsync_mode=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=false
+
+[physics]
+
+common/physics_ticks_per_second=60
+3d/physics_engine="GodotPhysics3D"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+textures/default_filters/anisotropic_filtering_level=3
+anti_aliasing/quality/screen_space_aa=1
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2
+lights_and_shadows/positional_shadow/atlas_size=1024
+environment/ssao/quality=1
+environment/ssao/half_size=true
+environment/screen_space_reflection/roughness_quality=0
+global_illumination/sdfgi/probe_ray_count=0
+mesh_lod/lod_change/threshold_pixels=2.0
+occlusion_culling/use_occlusion_culling=false
+textures/vram_compression/import_etc2_astc=true
+
+[shader_globals]
+
+night_factor={
+"type": "float",
+"value": 0.0
+}
+city_noise={
+"type": "sampler2D",
+"value": "res://textures/T_Noise.png"
+}
+wind_strength={
+"type": "float",
+"value": 1.0
+}
