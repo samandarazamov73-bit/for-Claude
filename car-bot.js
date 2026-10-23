@@ -21,6 +21,8 @@
  *   PRICE_MAX=30000           строки нет — без верхней границы (обеих нет = любая цена)
  *   CITY_ID=4                 только Ташкент; пусто — весь Узбекистан
  *   ONLY_PRIVATE=1            без автосалонов (только частные лица)
+ *   MODELS=Cobalt,Gentra,Nexia 3,Кобальт
+ *                             только эти модели (через запятую); пусто — любые
  *   CAR_CATEGORY_IDS=...      номер раздела «Легковые автомобили» на OLX;
  *                             пусто — бот найдёт сам при первом запуске
  *
@@ -86,6 +88,17 @@ function priceOk(usd) {
 }
 const CITY_ID = Number(process.env.CITY_ID) || null;
 const ONLY_PRIVATE = ['1', 'true', 'yes'].includes(String(process.env.ONLY_PRIVATE || '').trim().toLowerCase());
+// Для сравнения моделей: «Nexia-3», «NEXIA3», «nexia 3» → «nexia 3» (регистр, ё, знаки и слитные цифры не мешают).
+function normalizeModel(text) {
+  return String(text || '').toLowerCase().replace(/ё/g, 'е')
+    .replace(/(\p{L})(\p{N})/gu, '$1 $2').replace(/(\p{N})(\p{L})/gu, '$1 $2')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+// Только эти модели. Ищутся в параметре «Модель» и в названии объявления целыми словами:
+// «Nexia» — любая Nexia, «Nexia 3» — только третья. Пусто — любые модели.
+const MODEL_NAMES = String(process.env.MODELS || '').split(/[,;]+/).map((name) => name.trim()).filter(Boolean);
+const MODELS = MODEL_NAMES.map(normalizeModel).filter(Boolean);
+const modelsText = () => (MODEL_NAMES.length ? MODEL_NAMES.join(', ') : 'любые');
 const ENV_CATEGORY_IDS = String(process.env.CAR_CATEGORY_IDS || '').split(/[,\s]+/).map(Number).filter((id) => id > 0);
 
 const OLX_API = 'https://www.olx.uz/api/v1/offers/';
@@ -401,7 +414,7 @@ async function pollUpdates() {
             saveSubscribers();
             console.log(`➕ Новый подписчик: ${name} (${chatId}). Всего: ${subscribers.size}`);
           }
-          text = `✅ Готово! Буду присылать новые машины с OLX ${PRICE_FILTER ? `за ${priceRangeText()}` : 'любой цены'}, пока они ещё на проверке у OLX (до публикации).\n\nОтключить — /stop`;
+          text = `✅ Готово! Буду присылать новые машины с OLX ${PRICE_FILTER ? `за ${priceRangeText()}` : 'любой цены'}${MODEL_NAMES.length ? ` (модели: ${modelsText()})` : ''}, пока они ещё на проверке у OLX (до публикации).\n\nОтключить — /stop`;
         } else {
           if (subscribers.delete(chatId)) {
             saveSubscribers();
@@ -876,11 +889,25 @@ function isCar(raw) {
   return false;
 }
 
-// Могло бы это объявление уйти клиенту (раздел, город, цена)? Статус и возраст не смотрим.
+// Модель из параметров объявления («Модель»), если OLX её дал.
+function carModel(raw) {
+  const param = (raw?.params || []).find((item) => /model/i.test(String(item?.key || '')) || /модел/i.test(String(item?.name || '')));
+  return oneLine(param?.value?.label);
+}
+
+// Подходит ли модель (без MODELS подходит любая).
+function modelOk(raw) {
+  if (!MODELS.length) return true;
+  const text = ` ${normalizeModel(`${carModel(raw)} ${raw?.title || ''}`)} `;
+  return MODELS.some((model) => text.includes(` ${model} `));
+}
+
+// Могло бы это объявление уйти клиенту (раздел, город, цена, модель)? Статус и возраст не смотрим.
 function looksLikeOurCar(raw) {
   if (!raw?.id || !isCar(raw)) return false;
   if (CITY_ID && raw.location?.city?.id !== CITY_ID) return false;
   if (ONLY_PRIVATE && raw.business) return false;
+  if (!modelOk(raw)) return false;
   return priceOk(priceUsd(raw));
 }
 
@@ -1009,6 +1036,7 @@ function whyNotOurs(raw) {
   const usd = priceUsd(raw);
   if (PRICE_FILTER && usd === null) return 'цена не указана';
   if (!priceOk(usd)) return `цена ${money(usd)} $ — не подходит (нужно ${priceRangeText()})`;
+  if (!modelOk(raw)) return `другая модель (${truncate(carModel(raw) || oneLine(raw.title), 40)}; нужны: ${modelsText()})`;
   if (!isNewAd(raw)) return `старое объявление, создано ${formatAge(Date.now() - Date.parse(raw.created_time))} назад (платное поднятие)`;
   return null;
 }
@@ -1029,7 +1057,7 @@ function handleAd(raw, source) {
       console.log(`❓ Транспорт в цене, но незнакомый раздел ${raw.category.id}: ${label}. Если это легковая — напишите, добавим.`);
     } else if (isCar(raw) && usd === null) {
       diag.noPrice += 1;
-    } else if (isCar(raw) && inRange && !isNewAd(raw)) {
+    } else if (isCar(raw) && inRange && modelOk(raw) && !isNewAd(raw)) {
       diag.ageCut += 1;
       sample(diag.ageSamples, `${label}, создано ${formatAge(Date.now() - Date.parse(raw.created_time))} назад`);
       console.log(`🕰 Машина в цене отсечена как «старая» (создана ${formatAge(Date.now() - Date.parse(raw.created_time))} назад, опубликована ${formatAge(Date.now() - publishedAt(raw))} назад): ${label}`);
@@ -1593,7 +1621,7 @@ function report() {
     for (const lane of lanes) lane.requests = 0;
   }
   console.log(`🚦 За 5 мин: проверено номеров ${stats.checked}, открытых объявлений ${stats.open}, из них машин (любой цены) ${stats.cars}. `
-    + `Отправлено «на проверке» (цена: ${priceRangeText()}): ${stats.sentPending} (из отправленных раньше замечено опубликованными ${stats.pendingPublished}); не отправлено — бот увидел их только опубликованными: ${stats.missed}. `
+    + `Отправлено «на проверке» (цена: ${priceRangeText()}, модели: ${modelsText()}):${stats.sentPending} (из отправленных раньше замечено опубликованными ${stats.pendingPublished}); не отправлено — бот увидел их только опубликованными: ${stats.missed}. `
     + `Подписчиков: ${subscribers.size}. Перебор на номере ${probe.cursor}. `
     + `Темп: 1 запрос в ${(probeIntervalMs() * olx.pace / 1000).toFixed(1)} сек. Курс ≈ ${money(usdRate)} сум/$.`);
   Object.assign(stats, { checked: 0, open: 0, cars: 0, sentPending: 0, pendingPublished: 0, missed: 0, reopened: 0, reopenedCars: 0, reopenedWait: 0 });
@@ -1716,9 +1744,10 @@ async function main() {
     console.error(`❌ TELEGRAM_TOKEN не подходит: ${error.message}`);
     process.exit(1);
   }
-  console.log(`🤖 @${me.username}: машины ${priceRangeText()}, ${CITY_ID ? `город № ${CITY_ID}` : 'весь Узбекистан'}${ONLY_PRIVATE ? ', только частные' : ''} → подписчиков: ${subscribers.size}${CHAT_IDS.length ? `, постоянных чатов: ${CHAT_IDS.length}` : ''}`);
+  console.log(`🤖 @${me.username}: машины ${priceRangeText()}${MODEL_NAMES.length ? ` (${modelsText()})` : ''}, ${CITY_ID ? `город № ${CITY_ID}` : 'весь Узбекистан'}${ONLY_PRIVATE ? ', только частные' : ''} → подписчиков: ${subscribers.size}${CHAT_IDS.length ? `, постоянных чатов: ${CHAT_IDS.length}` : ''}`);
   console.log('⚙️ Настройки, которые бот реально взял из .env:');
   console.log(`   цена: ${priceRangeText()} (PRICE_MIN=${process.env.PRICE_MIN ?? 'нет строки'}, PRICE_MAX=${process.env.PRICE_MAX ?? 'нет строки'})`);
+  console.log(`   модели: ${modelsText()} (MODELS=${process.env.MODELS ?? 'нет строки'})`);
   console.log(`   город: ${CITY_ID ? `только № ${CITY_ID}` : 'весь Узбекистан'} · только частные: ${ONLY_PRIVATE ? 'да' : 'нет'}`);
   console.log(`   темп: 1 запрос в ${PROBE_INTERVAL_MS} мс на поток · потоков: ${lanes.length} (≈${Math.round((60_000 / PROBE_INTERVAL_MS) * lanes.length)} запросов/мин)`);
   if (LOG_REQUESTS && LOG_REQUESTS !== '0') console.log(`🔬 Режим «вижу каждый запрос»: ${LOG_REQUESTS === '2' ? 'только открывшиеся номера' : 'все номера подряд'} (LOG_REQUESTS=${LOG_REQUESTS}). Чтобы выключить — уберите строку из .env.`);
