@@ -21,8 +21,9 @@
  *   PRICE_MAX=30000           строки нет — без верхней границы (обеих нет = любая цена)
  *   CITY_ID=4                 только Ташкент; пусто — весь Узбекистан
  *   ONLY_PRIVATE=1            без автосалонов (только частные лица)
- *   MODELS=Cobalt,Gentra,Nexia 3,Кобальт
- *                             только эти модели (через запятую); пусто — любые
+ *   MODELS=BYD,Tesla,Zeekr    только эти марки / модели (через запятую); пусто — любые.
+ *                             Марку из списка BRANDS бот сам ищет и по её моделям
+ *                             (BYD → Song, Han, Chazor…). Можно и просто модели: Cobalt,Nexia 3
  *   CAR_CATEGORY_IDS=...      номер раздела «Легковые автомобили» на OLX;
  *                             пусто — бот найдёт сам при первом запуске
  *
@@ -94,10 +95,55 @@ function normalizeModel(text) {
     .replace(/(\p{L})(\p{N})/gu, '$1 $2').replace(/(\p{N})(\p{L})/gu, '$1 $2')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
+// Марки, которые бот знает: в MODELS достаточно написать марку (BYD) — бот ищет и её модели,
+// потому что марку в названии пишут не всегда («Champion Smart 2025yil» — это BYD Song Plus).
+// brand и models — ищутся целыми словами в названии объявления и в параметре «Модель».
+// codes — короткие обозначения (M9, L7, 001): такие бывают и у других марок (BMW M5, Audi S6),
+// поэтому ищутся только в параметре «Модель» (с начала) и только у электро и гибридов.
+const BRANDS = [
+  { brand: ['BYD', 'БИД', 'БЯД'],
+    models: ['Song', 'Сонг', 'Han', 'Tang', 'Танг', 'Qin', 'Цин', 'Yuan', 'Юань', 'Dolphin', 'Seal', 'Sealion', 'Seagull',
+      'Atto', 'Chazor', 'Чазор', 'Champion', 'Чемпион', 'Destroyer', 'Frigate', 'Xia', 'Shark', 'Yangwang', 'Fangchengbao', 'Leopard'],
+    codes: ['E2', 'E3', 'E5', 'E6', 'F3', 'G6', 'S6', 'M6', 'T3', 'D1', 'U7', 'U8', 'U9', 'Bao 5', 'Bao 8'] },
+  { brand: ['Aito', 'Айто', 'Seres', 'Серес'], models: [], codes: ['M5', 'M6', 'M7', 'M8', 'M9', 'SF5'] },
+  { brand: ['Avatr', 'Avatar', 'Аватр', 'Аватар'], models: [], codes: ['05', '06', '07', '11', '12'] },
+  { brand: ['Denza', 'Денза'], models: [], codes: ['D9', 'N7', 'N8', 'N8L', 'N9', 'Z9', 'Z9 GT'] },
+  { brand: ['Enovate', 'Tianmei'], models: [], codes: ['ME5', 'ME7', 'ME-S'] },
+  { brand: ['Huawei', 'Хуавей', 'Хуавэй'], models: ['Aito', 'Seres', 'Luxeed', 'Stelato', 'Maextro', 'Shangjie'],
+    codes: ['M5', 'M6', 'M7', 'M8', 'M9', 'S7', 'R7', 'V9', 'S9', 'S800'] },
+  { brand: ['Leapmotor', 'Leap Motor', 'Липмотор'], models: [],
+    codes: ['T03', 'S01', 'C01', 'C10', 'C11', 'C16', 'B01', 'B05', 'B10', 'A05', 'A10', 'D19', 'D99'] },
+  { brand: ['Li', 'Li Auto', 'LiAuto', 'Lixiang', 'Li Xiang', 'Ли Авто', 'Лисян'], models: [], codes: ['One', 'L6', 'L7', 'L8', 'L9', 'Mega', 'i6', 'i8'] },
+  { brand: ['Neta', 'Нета', 'Hozon'], models: ['Aya'], codes: ['V', 'U', 'S', 'X', 'L', 'GT'] },
+  { brand: ['Nio', 'Нио'], models: ['Onvo', 'Firefly'],
+    codes: ['ES6', 'ES7', 'ES8', 'ES9', 'EC6', 'EC7', 'ET5', 'ET5T', 'ET7', 'ET9', 'EL6', 'EL7', 'EL8', 'L60', 'L80', 'L90'] },
+  { brand: ['ORA', 'GWM ORA'], models: ['Good Cat', 'Funky Cat', 'Ballet Cat', 'Lightning Cat', 'Black Cat', 'White Cat', 'Punk Cat'], codes: ['03', '07', 'R1', 'R2'] },
+  { brand: ['Rox Stone', 'Rox', 'Rox Motor', 'Polestones', 'Рокс'], models: ['Adamas'], codes: ['01'] },
+  { brand: ['Tesla', 'Тесла'], models: ['Cybertruck'], codes: ['Model 3', 'Model Y', 'Model S', 'Model X', 'Roadster'] },
+  { brand: ['Voyah', 'Воя', 'Вояж'], models: ['Zhiyin', 'Taishan', 'Zhuiguang'], codes: ['Free', 'Dream', 'Passion', 'Courage'] },
+  { brand: ['Weltmeister', 'WM Motor', 'Вельтмайстер'], models: ['Maven'], codes: ['EX5', 'EX6', 'E5', 'W6', 'M7'] },
+  { brand: ['Wuling', 'Вулинг', 'Улинг'], models: ['Hongguang', 'Mini EV', 'Bingo', 'Binguo', 'Starlight', 'Xingguang', 'Cloud EV', 'Air EV', 'Jiachen'],
+    codes: ['Cloud', 'Air', 'Nano', 'Mini'] },
+  { brand: ['Xiaomi', 'Сяоми', 'Ксиаоми', 'Ксяоми'], models: ['SU7', 'YU7', 'YU9'], codes: [] },
+  { brand: ['Zeekr', 'Зикр', 'Зекр'], models: [], codes: ['001', '007', '009', '7X', '7GT', '8X', '9X', 'X', 'Mix'] },
+  { brand: ['Xpeng', 'Xiaopeng', 'Сяопэн'], models: ['Mona'], codes: ['P5', 'P7', 'P7i', 'G3', 'G3i', 'G6', 'G7', 'G9', 'X9', 'M03'] }
+];
 // Только эти модели. Ищутся в параметре «Модель» и в названии объявления целыми словами:
-// «Nexia» — любая Nexia, «Nexia 3» — только третья. Пусто — любые модели.
+// «Nexia» — любая Nexia, «Nexia 3» — только третья. Марка из списка выше — это все её модели.
+// Пусто — любые модели.
 const MODEL_NAMES = String(process.env.MODELS || '').split(/[,;]+/).map((name) => name.trim()).filter(Boolean);
-const MODELS = MODEL_NAMES.map(normalizeModel).filter(Boolean);
+const MODEL_WORDS = new Set();
+const MODEL_CODES = new Set();
+for (const name of MODEL_NAMES) {
+  const key = normalizeModel(name);
+  const known = BRANDS.find((item) => item.brand.some((alias) => normalizeModel(alias) === key));
+  if (!known) {
+    if (key) MODEL_WORDS.add(key);
+    continue;
+  }
+  for (const word of [...known.brand, ...known.models]) MODEL_WORDS.add(normalizeModel(word));
+  for (const code of known.codes) MODEL_CODES.add(normalizeModel(code));
+}
 const modelsText = () => (MODEL_NAMES.length ? MODEL_NAMES.join(', ') : 'любые');
 const ENV_CATEGORY_IDS = String(process.env.CAR_CATEGORY_IDS || '').split(/[,\s]+/).map(Number).filter((id) => id > 0);
 
@@ -895,11 +941,25 @@ function carModel(raw) {
   return oneLine(param?.value?.label);
 }
 
+// Электро или гибрид по параметру «Вид топлива». Параметра нет — не знаем, значит может быть.
+function electricOrHybrid(raw) {
+  const fuel = (raw?.params || []).find((item) => /fuel/i.test(String(item?.key || '')) || /топлив/i.test(String(item?.name || '')));
+  const label = oneLine(fuel?.value?.label).toLowerCase();
+  return !label || /электр|гибрид|elektr|gibrid|electr|hybrid/.test(label);
+}
+
 // Подходит ли модель (без MODELS подходит любая).
 function modelOk(raw) {
-  if (!MODELS.length) return true;
-  const text = ` ${normalizeModel(`${carModel(raw)} ${raw?.title || ''}`)} `;
-  return MODELS.some((model) => text.includes(` ${model} `));
+  if (!MODEL_NAMES.length) return true;
+  const model = normalizeModel(carModel(raw));
+  const text = ` ${model} ${normalizeModel(raw?.title)} `;
+  for (const word of MODEL_WORDS) if (text.includes(` ${word} `)) return true;
+  if (!model || !MODEL_CODES.size || !electricOrHybrid(raw)) return false;
+  // «M9» подходит к «M9» и «M9 Ultra». Одна буква (Neta X) — только точно: иначе «X» поймает BMW «X5».
+  for (const code of MODEL_CODES) {
+    if (model === code || (code.length > 1 && model.startsWith(`${code} `))) return true;
+  }
+  return false;
 }
 
 // Могло бы это объявление уйти клиенту (раздел, город, цена, модель)? Статус и возраст не смотрим.
@@ -1036,7 +1096,7 @@ function whyNotOurs(raw) {
   const usd = priceUsd(raw);
   if (PRICE_FILTER && usd === null) return 'цена не указана';
   if (!priceOk(usd)) return `цена ${money(usd)} $ — не подходит (нужно ${priceRangeText()})`;
-  if (!modelOk(raw)) return `другая модель (${truncate(carModel(raw) || oneLine(raw.title), 40)}; нужны: ${modelsText()})`;
+  if (!modelOk(raw)) return `другая модель (${truncate(carModel(raw) || oneLine(raw.title), 40)}) — нет в MODELS`;
   if (!isNewAd(raw)) return `старое объявление, создано ${formatAge(Date.now() - Date.parse(raw.created_time))} назад (платное поднятие)`;
   return null;
 }
@@ -1747,7 +1807,7 @@ async function main() {
   console.log(`🤖 @${me.username}: машины ${priceRangeText()}${MODEL_NAMES.length ? ` (${modelsText()})` : ''}, ${CITY_ID ? `город № ${CITY_ID}` : 'весь Узбекистан'}${ONLY_PRIVATE ? ', только частные' : ''} → подписчиков: ${subscribers.size}${CHAT_IDS.length ? `, постоянных чатов: ${CHAT_IDS.length}` : ''}`);
   console.log('⚙️ Настройки, которые бот реально взял из .env:');
   console.log(`   цена: ${priceRangeText()} (PRICE_MIN=${process.env.PRICE_MIN ?? 'нет строки'}, PRICE_MAX=${process.env.PRICE_MAX ?? 'нет строки'})`);
-  console.log(`   модели: ${modelsText()} (MODELS=${process.env.MODELS ?? 'нет строки'})`);
+  console.log(`   модели: ${modelsText()}${MODEL_NAMES.length ? ` — ищу ${MODEL_WORDS.size} названий и ${MODEL_CODES.size} обозначений моделей` : ''} (MODELS=${process.env.MODELS ?? 'нет строки'})`);
   console.log(`   город: ${CITY_ID ? `только № ${CITY_ID}` : 'весь Узбекистан'} · только частные: ${ONLY_PRIVATE ? 'да' : 'нет'}`);
   console.log(`   темп: 1 запрос в ${PROBE_INTERVAL_MS} мс на поток · потоков: ${lanes.length} (≈${Math.round((60_000 / PROBE_INTERVAL_MS) * lanes.length)} запросов/мин)`);
   if (LOG_REQUESTS && LOG_REQUESTS !== '0') console.log(`🔬 Режим «вижу каждый запрос»: ${LOG_REQUESTS === '2' ? 'только открывшиеся номера' : 'все номера подряд'} (LOG_REQUESTS=${LOG_REQUESTS}). Чтобы выключить — уберите строку из .env.`);
