@@ -6,7 +6,8 @@
  * Движок поиска — тот же, что в боте машин (car-bot.js): «перебор» номеров
  * объявлений подряд (видит объявление через секунды после публикации) + список
  * раздела раз в 30 сек как страховка. Без ИИ, без подписок, без проверок
- * автора — только поймать и сразу отправить.
+ * автора — только поймать и сразу отправить. При запуске, после паузы и если
+ * перебор отстал — рывок скачками к самому последнему номеру за несколько секунд.
  *
  * Шлёт ТОЛЬКО квартиры, которые ещё на проверке у OLX (до публикации).
  * Уже опубликованные объявления не шлёт.
@@ -1741,6 +1742,80 @@ function unstickProbe(ids) {
 }
 
 // ============================================================================
+// Рывок к последнему номеру
+// ============================================================================
+// Список OLX показывает только опубликованные объявления, а самые новые номера — ещё на
+// проверке, выше. После запуска, паузы из-за блока OLX или сна Mac перебор отстаёт на
+// десятки и сотни номеров и шагами по 1-6 догоняет минутами. Поэтому — скачками:
+// +10, +20, +40, +80… (в каждой точке до 6 номеров подряд). Нашёлся открытый — прыгаем на
+// него и скачем вдвое дальше. В точке всё закрыто — последний номер где-то до неё: дальше
+// скачки вдвое короче, пока шаг не станет меньше 10 (это уже обычный перебор досмотрит).
+// Перепрыгнутые номера (последние 300) — в очередь перепроверок: среди них как раз те,
+// что сейчас на проверке у OLX.
+const CATCHUP_FIRST_STEP = 10;
+const CATCHUP_MAX_STEP = 10_240;
+const CATCHUP_SAMPLES = 6;
+const CATCHUP_QUEUE_MAX = 300;
+const CATCHUP_PAUSE_AFTER_MS = 60_000; // бот стоял дольше минуты (блок OLX, сон Mac) — рывок
+const CATCHUP_EVERY_MS = 60_000; // впереди почти всё открыто (отстаёт) — рывок не чаще раза в минуту
+let lastCatchUpAt = 0;
+
+function jumpFront(id) {
+  probe.cursor = id;
+  resetFront();
+  probe.lastFrontHitAt = Date.now();
+  probe.recentScans = [];
+}
+
+// После рывка: последние CATCHUP_QUEUE_MAX перепрыгнутых номеров — в начало очереди перепроверок.
+function queueJumped(from) {
+  const at = Date.now();
+  for (let gap = Math.max(from + 1, probe.cursor - CATCHUP_QUEUE_MAX); gap < probe.cursor; gap += 1) {
+    if (probe.retries.has(gap) || probeLog.get(gap)?.relevant === false || probe.retries.size >= PROBE_MAX_RETRIES) continue;
+    probe.retries.set(gap, { attempt: -1, fast: false, unchecked: true, firstAt: at, dueAt: at });
+  }
+}
+
+// Первый открытый номер среди CATCHUP_SAMPLES подряд, начиная с from (или null).
+async function catchUpPoint(from) {
+  for (let k = 0; k < CATCHUP_SAMPLES && !shuttingDown; k += 1) {
+    const id = from + k;
+    const { status, data } = await olxApi(`${id}/`);
+    countCheck(status, data);
+    logProbe(id, status, data);
+    traceRequest('front', olx, id, status, data, `(рывок +${id - probe.cursor})`);
+    await sleep(PROBE_FAST_INTERVAL_MS);
+    if (status === 200 && data?.id) return { data, requests: k + 1 };
+  }
+  return { data: null, requests: CATCHUP_SAMPLES };
+}
+
+async function catchUp(reason) {
+  lastCatchUpAt = Date.now();
+  const from = probe.cursor;
+  const startedAt = Date.now();
+  let requests = 0;
+  let step = CATCHUP_FIRST_STEP;
+  let shrinking = false;
+  while (step >= CATCHUP_FIRST_STEP && step <= CATCHUP_MAX_STEP && !shuttingDown) {
+    const point = await catchUpPoint(probe.cursor + step);
+    requests += point.requests;
+    if (point.data) {
+      if (Number(point.data.id) > probe.cursor) jumpFront(Number(point.data.id));
+      onProbeHit(point.data);
+    } else {
+      shrinking = true;
+    }
+    step = shrinking ? Math.floor(step / 2) : step * 2;
+  }
+  queueJumped(from);
+  const ahead = probe.cursor - from;
+  if (ahead > 0 || reason === 'запуск') {
+    console.log(`⏩ Рывок (${reason}): ${ahead > 0 ? `${from} → ${probe.cursor}, +${ahead} номеров` : `уже на последнем номере ${probe.cursor}`} за ${requests} запросов, ${formatAge(Date.now() - startedAt)}.`);
+  }
+}
+
+// ============================================================================
 // Способ 2: список раздела раз в 30 сек (страховка + учит новые подразделы)
 // ============================================================================
 
@@ -1910,6 +1985,7 @@ async function runEngine() {
   let lastGeneral = Date.now();
   let lastSave = 0;
   let lastReport = Date.now();
+  let lastLoopAt = Date.now();
   let started = false;
   while (!shuttingDown) {
     const now = Date.now();
@@ -1927,7 +2003,10 @@ async function runEngine() {
         const savedCursor = probe.cursor;
         await syncProbeStart();
         queueGapSince(savedCursor);
+        // Список даёт последний ОПУБЛИКОВАННЫЙ номер, а новые (на проверке) — выше: рывок к ним.
+        await catchUp('запуск');
         started = true;
+        lastLoopAt = Date.now();
         probe.startCursor = probe.cursor;
         probe.startedAt = Date.now();
         console.log(`🚀 Ловлю квартиры: перебор с номера ${probe.cursor + 1}${listCategoryIds().length ? `, список раздела № ${listCategoryIds().join(', ')} — раз в 30 сек` : ', список включится, когда бот узнает подразделы'}. IP: ${lanes.map((lane) => lane.name).join(', ')}.`);
@@ -1949,7 +2028,11 @@ async function runEngine() {
         lastList = now;
         await listSweep({ warmUp });
       }
+      // Бот стоял (блок OLX, сон Mac) или впереди почти всё открыто (отстаёт) — рывок к последнему номеру.
+      if (now - lastLoopAt > CATCHUP_PAUSE_AFTER_MS) await catchUp(`бот стоял ${formatAge(now - lastLoopAt)}`);
+      else if (isProbeBehind() && now - lastCatchUpAt > CATCHUP_EVERY_MS) await catchUp('отстал');
       await probeTick(olx);
+      lastLoopAt = Date.now();
       if (now - lastSave >= 30_000) {
         lastSave = now;
         saveProbeState();
@@ -2028,4 +2111,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, handleAd, probeTick, listSweep, onProbeHit };
+module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, catchUp, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, handleAd, probeTick, listSweep, onProbeHit };
