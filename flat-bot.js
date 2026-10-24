@@ -8,8 +8,9 @@
  * раздела раз в 30 сек как страховка. Без ИИ, без подписок, без проверок
  * автора — только поймать и сразу отправить.
  *
- * Шлёт ТОЛЬКО квартиры, которые ещё на проверке у OLX (до публикации).
- * Уже опубликованные объявления не шлёт.
+ * Шлёт квартиры, которые ещё на проверке у OLX (до публикации), а если на проверке
+ * поймать не удалось (многие объявления OLX на проверке не показывает) — свежие,
+ * в первые MAX_AGE_MINUTES минут после публикации.
  *
  * .env:
  *   TELEGRAM_TOKEN=...        токен ОТДЕЛЬНОГО бота (@BotFather), не бота машин
@@ -31,6 +32,8 @@
  *                             в любом написании (Юнусабадский, Юнусобод, Yunusobod…).
  *                             Можно и свои слова: Ц-1, Кара-су, Массив Ялангач
  *   ONLY_PRIVATE=1            без агентств и риэлторов (только частные лица)
+ *   MAX_AGE_MINUTES=5         опубликованные позже этого не шлёт (по умолчанию 5 мин)
+ *   ONLY_PENDING=1            только «на проверке», опубликованные не шлёт (как бот машин)
  *   FLAT_CATEGORY_IDS=...     номер раздела «Квартиры» на OLX;
  *                             пусто — бот найдёт сам при первом запуске
  *
@@ -137,9 +140,10 @@ const dealText = () => (DEAL ? DEAL_NAMES[DEAL] : 'продажа и аренд�
 const CITY_ID = Number(process.env.CITY_ID) || null;
 const ONLY_PRIVATE = ['1', 'true', 'yes'].includes(String(process.env.ONLY_PRIVATE || '').trim().toLowerCase());
 // Для сравнения районов: «Мирзо-Улугбек», «Mirzo Ulug'bek», «МИРЗО УЛУГБЕК» → «мирзо улугбек»
-// (регистр, ё, апострофы, знаки и слитные цифры не мешают: «Ц-1», «ц1» → «ц 1»).
+// (регистр, ё, узбекские ғ ҳ қ ў, апострофы, знаки и слитные цифры не мешают: «Ц-1», «ц1» → «ц 1»).
 function normalizeName(text) {
-  return String(text || '').toLowerCase().replace(/ё/g, 'е').replace(/[ʻʼ'‘’`´]/g, '')
+  return String(text || '').toLowerCase().replace(/ё/g, 'е').replace(/ғ/g, 'г').replace(/ҳ/g, 'х').replace(/қ/g, 'к').replace(/ў/g, 'у')
+    .replace(/[ʻʼ'‘’`´]/g, '')
     .replace(/(\p{L})(\p{N})/gu, '$1 $2').replace(/(\p{N})(\p{L})/gu, '$1 $2')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
@@ -153,7 +157,7 @@ const TASHKENT_DISTRICTS = [
   ['Бектемир', 'Bektemir'],
   ['Мирабад', 'Миробод', 'Mirobod', 'Mirabad'],
   ['Мирзо Улугбек', 'Мирзо-Улугбек', 'М Улугбек', 'Улугбек', 'Mirzo Ulugbek', "Mirzo Ulug'bek", 'Ulugbek'],
-  ['Сергели', 'Sergeli'],
+  ['Сергели', 'Сиргали', 'Sergeli', "Sirg'ali", 'Sirgali'],
   ['Учтепа', 'Учтепин', 'Uchtepa', 'Uchtepinsk', 'Акмал Икрамов', 'Akmal Ikramov'],
   ['Чиланзар', 'Чилонзор', 'Chilonzor', 'Chilanzar'],
   ['Шайхантахур', 'Шайхантаур', 'Шайхонтохур', 'Shayxontohur', 'Shayhontohur', 'Shaykhantakhur', 'Shaykhantaur'],
@@ -221,15 +225,18 @@ const TRANSIENT_RETRY_MS = 30_000;
 const LIST_INTERVAL_MS = 30_000;
 const LIST_LIMIT = 50;
 const API_MAX_AGE_MINUTES = 180; // создано не раньше 3 ч назад — отсекает платные поднятия старых
-// Объявления из списка, которые при запуске уже на OLX дольше MAX_AGE_MINUTES (по умолчанию 2 мин),
+// Опубликованную квартиру (не пойманную на проверке) шлём, только если она на OLX не дольше
+// MAX_AGE_MINUTES (по умолчанию 5 мин). Объявления из списка, которые при запуске уже старше,
 // бот молча помечает просмотренными.
-const PUBLISHED_MAX_AGE_MINUTES = Number(process.env.MAX_AGE_MINUTES) || 2;
+const PUBLISHED_MAX_AGE_MINUTES = Number(process.env.MAX_AGE_MINUTES) || 5;
+// ONLY_PENDING=1 — как в боте машин: только «на проверке», опубликованные не шлём совсем.
+const ONLY_PENDING = ['1', 'true', 'yes'].includes(String(process.env.ONLY_PENDING || '').trim().toLowerCase());
 const LIST_PUBLISHED_MAX_AGE_MINUTES = PUBLISHED_MAX_AGE_MINUTES;
 // OLX ругнулся (429/403): пауза 1 мин, повторно — 3, дальше — 5. Заодно бот сам
 // замедляется на 30%, а через 10 спокойных минут понемногу разгоняется обратно.
 const OLX_BLOCK_PAUSES_MS = [60_000, 3 * 60_000, 5 * 60_000];
-// Бот шлёт ТОЛЬКО квартиры, которые OLX ещё проверяет: одно сообщение сразу, со ссылкой
-// (ссылка заработает после публикации). Уже опубликованные квартиры не шлёт.
+// Квартиру, которую OLX ещё проверяет, бот шлёт сразу, одним сообщением, со ссылкой
+// (ссылка заработает после публикации). После публикации второй раз её не шлёт.
 // Квартиру в нужной цене со статусом из SKIP_STATUSES смотрим каждые 10 сек
 // (а не по общему расписанию 30 сек … 3 мин) — вдруг статус сменится. Таких единицы.
 const WATCH_INTERVAL_MS = 10_000;
@@ -321,7 +328,7 @@ const diag = {
   ticks: 0, behindTicks: 0, lagReports: 0, reports: 0, jumps: 0,
   reopened: 0, reopenedFlats: 0, reopenedWaitSum: 0, reopenedWaitMax: 0,
   unknownFlats: 0, unknownSamples: [], ageCut: 0, ageSamples: [], noPrice: 0, missed: 0,
-  sent: 0, foundAgeSum: 0, foundAgeMax: 0, deliverSum: 0, deliverMax: 0, photoFallbacks: 0, timeouts: 0,
+  sent: 0, sentPublished: 0, foundAgeSum: 0, foundAgeMax: 0, deliverSum: 0, deliverMax: 0, photoFallbacks: 0, timeouts: 0,
   sleeps: 0, sleepMax: 0, clockSkew: null, bigJumps: 0
 };
 
@@ -848,7 +855,11 @@ function dealsText() {
   return Object.entries(names).filter(([, ids]) => ids.length).map(([deal, ids]) => `${DEAL_NAMES[deal]} № ${ids.join(', ')}`).join('; ') || 'ещё не известно';
 }
 
+// Обход подразделов идёт в фоне; если запуск повторился (OLX ответил блоком), второй не начинаем.
+let harvesting = null;
+
 async function detectFlatCategories() {
+  if (harvesting) return;
   const slugs = flats.parents.size ? [] : await findParentCategory();
   // Подразделы (продажа / аренда) обходим всегда, даже если родитель известен: их всего 2-4,
   // а без них не работает DEAL и в сообщении не видно, продажа это или аренда. В фоне, перебор не ждёт.
@@ -859,7 +870,9 @@ async function detectFlatCategories() {
   }
   const list = [...new Set([...slugs, ...FALLBACK_SECTION_SLUGS])];
   console.log(`🔎 Обхожу страницы подразделов (${list.join(', ')}) в фоне, чтобы узнать, где продажа, а где аренда. Займёт ~${Math.ceil(list.length * 6 / 60)} мин, поиск квартир уже работает.`);
-  harvestSectionPages(list).catch((error) => { if (!shuttingDown) console.warn(`[Подразделы] ${firstLine(error)}`); });
+  harvesting = harvestSectionPages(list)
+    .catch((error) => { if (!shuttingDown) console.warn(`[Подразделы] ${firstLine(error)}`); })
+    .finally(() => { harvesting = null; });
 }
 
 async function harvestSectionPages(allSlugs) {
@@ -990,7 +1003,7 @@ function flatRooms(raw) {
 function flatArea(raw) {
   const fromParam = paramNumber(areaParam(raw));
   if (fromParam) return fromParam;
-  const match = String(raw?.title || '').match(/(\d{2,3}(?:[.,]\d)?)\s*(?:м²|м2|кв\.?\s*м|kv\.?\s*m|kv\b|кв\b)/i);
+  const match = String(raw?.title || '').match(/(\d{2,3}(?:[.,]\d)?)\s*(?:м²|м2|кв\.?\s*м|kv\.?\s*m|kv|кв)(?!\p{L})/iu);
   return match ? Number(match[1].replace(',', '.')) : null;
 }
 
@@ -1140,7 +1153,7 @@ function buildMessage(raw, { pending = false } = {}) {
   return { text, url, photo: photoUrl(raw), keyboard: { inline_keyboard: [[{ text: pending ? '🔗 Открыть (после публикации)' : '🔗 Открыть на OLX', url }]] } };
 }
 
-const stats = { checked: 0, open: 0, flats: 0, sentPending: 0, pendingPublished: 0, missed: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 };
+const stats = { checked: 0, open: 0, flats: 0, sentPending: 0, sentPublished: 0, pendingPublished: 0, missed: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 };
 const handledIds = new Set(loadJson(HANDLED_FILE, []).map(Number));
 // Номера, по которым уже отправлено уведомление «на проверке» — чтобы не слать повторно.
 const pendingAlerted = new Set();
@@ -1235,22 +1248,32 @@ function handleAd(raw, source) {
     }
     return;
   }
-  if (handledIds.has(Number(raw.id))) return;
-  rememberHandled(raw.id);
-  saveHandledSoon();
-  // Уже отправили это объявление «на проверке» — второй раз (после публикации) не шлём.
-  if (pendingAlerted.has(Number(raw.id))) {
-    stats.pendingPublished += 1;
-    note(raw.id, '✅ опубликовано (уже отправляли «на проверке»)');
+  if (handledIds.has(Number(raw.id))) {
+    // Уже отправили это объявление «на проверке» — второй раз (после публикации) не шлём.
+    if (pendingAlerted.delete(Number(raw.id))) {
+      stats.pendingPublished += 1;
+      note(raw.id, '✅ опубликовано (уже отправляли «на проверке»)');
+    }
     return;
   }
-  // Бот шлёт только квартиры «на проверке». Эту OLX на проверке не показывал (отвечал 404/410) —
-  // бот увидел её уже опубликованной и не шлёт.
+  rememberHandled(raw.id);
+  saveHandledSoon();
+  const age = formatAge(Date.now() - publishedAt(raw));
+  const where = source === 'probe' ? 'перебор' : 'список';
+  // На проверке её поймать не удалось: OLX многие объявления на проверке не показывает
+  // (отвечает 404 без данных), или бот не успел проверить номер. Свежую — шлём сейчас.
+  if (!ONLY_PENDING && isFresh(raw, source)) {
+    stats.sentPublished += 1;
+    diag.sentPublished += 1;
+    note(raw.id, `⚡ отправлено через ${age} после публикации (на проверке не поймал)`);
+    deliver(raw, source).catch((error) => console.error(`[Отправка] ${raw.id}: ${error.message}`));
+    return;
+  }
   stats.missed += 1;
   diag.missed += 1;
-  const age = formatAge(Date.now() - publishedAt(raw));
-  note(raw.id, `не отправлено: бот увидел его уже опубликованным (${age} назад), а шлёт только «на проверке»`);
-  console.log(`⏭ Не отправляю: уже опубликовано (${age} назад), на проверке не видел · ${truncate(oneLine(raw.title), 50)} · ${source === 'probe' ? 'перебор' : 'список'}`);
+  const why = ONLY_PENDING ? 'шлю только «на проверке» (ONLY_PENDING=1)' : `поздно, лимит ${PUBLISHED_MAX_AGE_MINUTES} мин (MAX_AGE_MINUTES)`;
+  note(raw.id, `не отправлено: бот увидел его уже опубликованным (${age} назад) — ${why}`);
+  console.log(`⏭ Не отправляю №${raw.id}: опубликовано ${age} назад — ${why} · ${truncate(oneLine(raw.title), 50)} · ${oneLine(apiParam(raw, 'price')?.label) || 'без цены'} · ${where}`);
 }
 
 // ============================================================================
@@ -1294,6 +1317,16 @@ function saveProbeState() {
   saveJson(PROBE_STATE_FILE, { cursor: probe.cursor, savedAt: Date.now(), retries });
 }
 
+// Номера, созданные, пока бот был выключен (если перерыв короткий), — в очередь перепроверок:
+// часть из них ещё на проверке или только что опубликована.
+const RESTART_GAP_MAX = 300;
+function queueGapSince(savedCursor) {
+  if (!savedCursor || probe.cursor - savedCursor > RESTART_GAP_MAX) return;
+  for (let id = savedCursor + 1; id < probe.cursor; id += 1) {
+    if (!probe.retries.has(id)) scheduleRetry(id, 0);
+  }
+}
+
 async function syncProbeStart() {
   const { data } = await olxApi('?offset=0&limit=50&sort_by=created_at:desc');
   const ids = (Array.isArray(data) ? data : []).filter((ad) => !ad.promotion?.top_ad).map((ad) => Number(ad.id)).filter(Boolean);
@@ -1308,7 +1341,7 @@ function quickPlanSec() {
 }
 
 function scheduleRetry(id, attempt, fast = false) {
-  const plan = flats.parents.size ? RETRY_PLAN_WITH_LIST : RETRY_PLAN;
+  const plan = listCategoryIds().length ? RETRY_PLAN_WITH_LIST : RETRY_PLAN;
   // С 3+ IP обычные перепроверки вдвое чаще, а окно ожидания то же (~11 мин): шагов вдвое больше.
   const scale = lanes.length >= 3 ? 0.5 : 1;
   const delays = (fast ? plan.fast : plan.slow).flatMap((delay) => Array(Math.ceil(1 / scale)).fill(delay * scale));
@@ -1407,6 +1440,9 @@ function alertPending(raw) {
   if (!isNewAd(raw)) return true;
   pendingAlerted.add(id);
   while (pendingAlerted.size > HANDLED_KEEP) pendingAlerted.delete(pendingAlerted.values().next().value);
+  // И в файл: после перезапуска бот не пришлёт её второй раз и не запишет в «пропущенные».
+  rememberHandled(id);
+  saveHandledSoon();
   stats.sentPending += 1;
   const foundAge = Date.now() - Date.parse(raw.created_time);
   diag.sent += 1;
@@ -1686,8 +1722,15 @@ function unstickProbe(ids) {
 // Способ 2: список раздела раз в 30 сек (страховка + учит новые подразделы)
 // ============================================================================
 
+// Какие разделы читать списком: общий раздел «Квартиры», а если его найти не удалось —
+// подразделы продажи и аренды (с DEAL — только нужный).
+function listCategoryIds() {
+  if (flats.parents.size) return [...flats.parents];
+  return [...flats.deals].filter(([, deal]) => (DEAL ? deal === DEAL : deal !== 'other')).map(([id]) => id);
+}
+
 async function listSweep({ warmUp = false } = {}) {
-  for (const categoryId of flats.parents) {
+  for (const categoryId of listCategoryIds()) {
     const city = CITY_ID ? `&city_id=${CITY_ID}` : '';
     const { data } = await olxApi(`?offset=0&limit=${LIST_LIMIT}&category_id=${categoryId}${city}&sort_by=created_at:desc`);
     const ads = Array.isArray(data) ? data : [];
@@ -1729,12 +1772,12 @@ function diagReport() {
     `${ok(d.unknownFlats)} 8. Похожие на квартиры в цене из незнакомых разделов: ${d.unknownFlats}${d.unknownSamples.length ? `\n    ${d.unknownSamples.map(esc).join('\n    ')}` : ''}`,
     `${ok(d.ageCut)} 9. Квартиры в цене, отсечённые как «старые» (созданы больше 3 ч назад): ${d.ageCut}${d.ageSamples.length ? `\n    ${d.ageSamples.map(esc).join('\n    ')}` : ''}`,
     `ℹ️ 10. Квартиры без цены (пропущены): ${d.noPrice}`,
-    `${ok(d.missed)} 11. Квартиры, которые бот увидел только опубликованными (на проверке OLX их не показал, не отправлено): ${d.missed}`,
+    `ℹ️ 11. Квартиры, которые на проверке поймать не удалось: отправлены свежими после публикации ${d.sentPublished}; не отправлено (позже ${PUBLISHED_MAX_AGE_MINUTES} мин${ONLY_PENDING ? ' или ONLY_PENDING=1' : ''}) ${d.missed}`,
     `ℹ️ 12. От создания объявления до отправки «на проверке»: в среднем ${avg(d.foundAgeSum, d.sent)}, дольше всего ${d.sent ? formatAge(d.foundAgeMax) : '—'} (отправлено ${d.sent})`,
-    `${ok(d.deliverMax > 5_000 || d.photoFallbacks)} 13. Доставка в Telegram: в среднем ${d.sent ? `${(d.deliverSum / d.sent / 1000).toFixed(1)} сек` : '—'}, дольше всего ${(d.deliverMax / 1000).toFixed(1)} сек; фото не прошло ${d.photoFallbacks}, зависало ${d.timeouts}`,
+    `${ok(d.deliverMax > 5_000 || d.photoFallbacks)} 13. Доставка в Telegram: в среднем ${d.sent + d.sentPublished ? `${(d.deliverSum / (d.sent + d.sentPublished) / 1000).toFixed(1)} сек` : '—'}, дольше всего ${(d.deliverMax / 1000).toFixed(1)} сек; фото не прошло ${d.photoFallbacks}, зависало ${d.timeouts}`,
     `${ok(d.sleeps)} 14. Mac спал / бот стоял: ${d.sleeps ? `${d.sleeps} раз, дольше всего ${formatAge(d.sleepMax)}` : 'нет'}`,
     `${ok(skew !== null && Math.abs(skew) > 30)} 15. Часы Mac: ${skew === null ? 'ещё не измерено' : Math.abs(skew) <= 30 ? `точные (разница с OLX ${skew} сек)` : `${skew > 0 ? 'отстают' : 'спешат'} на ${Math.abs(skew)} сек`}`,
-    `${ok(!flats.parents.size)} 16. Список-страховка: ${flats.parents.size ? 'работает' : 'общий раздел квартир не найден — поздние объявления ловит только перебор'}`,
+    `${ok(!listCategoryIds().length)} 16. Список-страховка: ${listCategoryIds().length ? `работает (раздел № ${listCategoryIds().join(', ')})` : 'раздел квартир не найден — поздние объявления ловит только перебор'}`,
     `${ok(lanes.some((lane) => lane.blocks))} 17. IP-адресов работает: ${lanes.length} (${lanes.map((lane) => `${esc(lane.name)}${lane.blocks ? `, блоков ${lane.blocks}` : ''}`).join('; ')})`
   ];
   return lines.join('\n');
@@ -1792,10 +1835,10 @@ function report() {
     for (const lane of lanes) lane.requests = 0;
   }
   console.log(`🚦 За 5 мин: проверено номеров ${stats.checked}, открытых объявлений ${stats.open}, из них квартир (любой цены) ${stats.flats}. `
-    + `Отправлено «на проверке» (${filtersText()}): ${stats.sentPending} (из отправленных раньше замечено опубликованными ${stats.pendingPublished}); не отправлено — бот увидел их только опубликованными: ${stats.missed}. `
+    + `Отправлено (${filtersText()}): «на проверке» ${stats.sentPending} (из отправленных раньше замечено опубликованными ${stats.pendingPublished}), свежих после публикации ${stats.sentPublished}; не отправлено — опубликованы раньше чем ${PUBLISHED_MAX_AGE_MINUTES} мин назад${ONLY_PENDING ? ' или ONLY_PENDING=1' : ''}: ${stats.missed}. `
     + `Подписчиков: ${subscribers.size}. Перебор на номере ${probe.cursor}. `
     + `Темп: 1 запрос в ${(probeIntervalMs() * olx.pace / 1000).toFixed(1)} сек. Курс ≈ ${money(usdRate)} сум/$.`);
-  Object.assign(stats, { checked: 0, open: 0, flats: 0, sentPending: 0, pendingPublished: 0, missed: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 });
+  Object.assign(stats, { checked: 0, open: 0, flats: 0, sentPending: 0, sentPublished: 0, pendingPublished: 0, missed: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 });
 }
 
 function easePace(lane, now) {
@@ -1852,25 +1895,29 @@ async function runEngine() {
       if (!started) {
         await ensureOlxSession();
         await detectFlatCategories();
-        if (!probe.cursor) await syncProbeStart();
+        // Всегда с самых новых номеров: после перерыва перебор иначе долго догоняет старые
+        // (они уже опубликованы), а свежие в это время никто не смотрит.
+        const savedCursor = probe.cursor;
+        await syncProbeStart();
+        queueGapSince(savedCursor);
         started = true;
         probe.startCursor = probe.cursor;
         probe.startedAt = Date.now();
-        console.log(`🚀 Ловлю квартиры: перебор с номера ${probe.cursor + 1}${flats.parents.size ? ', список — раз в 30 сек' : ''}. IP: ${lanes.map((lane) => lane.name).join(', ')}.`);
+        console.log(`🚀 Ловлю квартиры: перебор с номера ${probe.cursor + 1}${listCategoryIds().length ? `, список раздела № ${listCategoryIds().join(', ')} — раз в 30 сек` : ', список включится, когда бот узнает подразделы'}. IP: ${lanes.map((lane) => lane.name).join(', ')}.`);
         for (const lane of lanes.slice(1)) laneWorker(lane).catch((error) => console.error(`[${lane.name}] ${error.message}`));
       }
       if (olx.runtime && now - olx.openedAt >= OLX_BROWSER_RESTART_MS) {
         console.log('🔄 Плановый перезапуск браузера.');
         await openOlxSession();
       }
-      if (!flats.parents.size && now - lastGeneral >= GENERAL_LIST_INTERVAL_MS) {
+      if (!listCategoryIds().length && now - lastGeneral >= GENERAL_LIST_INTERVAL_MS) {
         // Без списка квартир: раз в минуту общий список OLX — только чтобы заметить,
         // что перебор застрял (OLX перескочил номера дальше, чем смотрит перебор).
         lastGeneral = now;
         const { data } = await olxApi('?offset=0&limit=50&sort_by=created_at:desc');
         if (Array.isArray(data)) unstickProbe(data.filter((ad) => !ad.promotion?.top_ad).map((ad) => ad.id));
       }
-      if (flats.parents.size && now - lastList >= LIST_INTERVAL_MS) {
+      if (listCategoryIds().length && now - lastList >= LIST_INTERVAL_MS) {
         const warmUp = lastList === 0;
         lastList = now;
         await listSweep({ warmUp });
@@ -1927,7 +1974,9 @@ async function main() {
   console.log(`   город: ${CITY_ID ? `только № ${CITY_ID}` : 'весь Узбекистан'} · только частные (без агентств): ${ONLY_PRIVATE ? 'да' : 'нет'}`);
   console.log(`   темп: 1 запрос в ${PROBE_INTERVAL_MS} мс на поток · потоков: ${lanes.length} (≈${Math.round((60_000 / PROBE_INTERVAL_MS) * lanes.length)} запросов/мин)`);
   if (LOG_REQUESTS && LOG_REQUESTS !== '0') console.log(`🔬 Режим «вижу каждый запрос»: ${LOG_REQUESTS === '2' ? 'только открывшиеся номера' : 'все номера подряд'} (LOG_REQUESTS=${LOG_REQUESTS}). Чтобы выключить — уберите строку из .env.`);
-  console.log('🕓 Шлю ТОЛЬКО квартиры «на проверке» у OLX — сразу, до публикации (со ссылкой). Уже опубликованные не шлю.');
+  console.log(ONLY_PENDING
+    ? '🕓 Шлю ТОЛЬКО квартиры «на проверке» у OLX — сразу, до публикации (со ссылкой). Уже опубликованные не шлю (ONLY_PENDING=1).'
+    : `🕓 Шлю квартиры «на проверке» у OLX — сразу, до публикации (со ссылкой), а не пойманные на проверке — в первые ${PUBLISHED_MAX_AGE_MINUTES} мин после публикации.`);
   if (!recipients().length) console.warn(`⚠️ Пока никто не подписан: откройте @${me.username} в Telegram и нажмите /start.`);
   pollUpdates();
   await runEngine();
@@ -1954,4 +2003,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, handleAd, probeTick, listSweep, onProbeHit };
+module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, handleAd, probeTick, listSweep, onProbeHit };
