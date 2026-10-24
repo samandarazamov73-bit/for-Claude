@@ -216,7 +216,10 @@ const PROBE_LOOKAHEAD_MAX = 60;
 // бот захлёбывался и находил объявления позже лимита свежести (на модели терялась ~половина).
 // Теперь: 0,5 → 1 → 2 → 4 мин (~7,5 мин), с 3+ потоками — шаги вдвое чаще.
 const RETRY_PLAN = { fast: [0.5, 1, 2, 4], slow: [0.5, 1, 2, 4] };
-const RETRY_PLAN_WITH_LIST = RETRY_PLAN;
+// С 2+ потоками запросов хватает, чтобы в первую минуту смотреть номер чаще: короткое окно
+// «на проверке» иначе проскакивает между проверками. Вместе с быстрыми взглядами (10, 10 сек):
+// 10 → 20 → 35 сек → 1:05 → 2:05 → 4:05 → 8:05 (7 проверок вместо 5).
+const RETRY_PLAN_DENSE = { fast: [0.25, 0.5, 1, 2, 4], slow: [0.25, 0.5, 1, 2, 4] };
 const PROBE_MAX_RETRIES = 3_000;
 const PROBE_JUMP_MAX_SCHEDULE = 1_000;
 const PROBE_STUCK_MS = 90_000;
@@ -1281,7 +1284,9 @@ function handleAd(raw, source) {
 //   не показывал (так бывает часто: на olx.uz многие объявления на проверке отвечают 404);
 // — последняя проверка задолго до публикации или проверок не было → бот не успел: между
 //   проверками она могла быть видна «на проверке». Тут помогают HOME_LANES=2 или PROXIES.
-const HIDDEN_GAP_MS = 30_000;
+// 10 сек: окно «на проверке» короче этого бот поймать не может в принципе. Если последняя проверка
+// была раньше — объявление могло мелькнуть между проверками, это «не успел», а не «OLX прятал».
+const HIDDEN_GAP_MS = 10_000;
 function missReason(raw) {
   const seen = closedLog.get(Number(raw.id));
   if (!seen) return { kind: 'missedUnseen', text: 'до публикации бот этот номер не проверял — не успел' };
@@ -1357,14 +1362,15 @@ async function syncProbeStart() {
 }
 
 // Быстрые взгляды на номер, который только что остался позади фронта: такие часто
-// открываются через секунды. С 1-2 IP — один взгляд через 15 сек (больше не потянуть),
-// с 3 и больше — каждые 3-5 сек первые полминуты (по модели: новые объявления за ~4 сек).
+// открываются через секунды. С 1 потоком — один взгляд через 15 сек (больше не потянуть),
+// с 2 — через 10 и ещё через 10 сек, с 3 и больше — каждые 3-5 сек первые полминуты.
 function quickPlanSec() {
-  return lanes.length >= 3 ? [3, 3, 4, 5, 5, 10] : [GAP_QUICK_RETRY_MS / 1000];
+  if (lanes.length >= 3) return [3, 3, 4, 5, 5, 10];
+  return lanes.length === 2 ? [10, 10] : [GAP_QUICK_RETRY_MS / 1000];
 }
 
 function scheduleRetry(id, attempt, fast = false) {
-  const plan = listCategoryIds().length ? RETRY_PLAN_WITH_LIST : RETRY_PLAN;
+  const plan = lanes.length >= 2 ? RETRY_PLAN_DENSE : RETRY_PLAN;
   // С 3+ IP обычные перепроверки вдвое чаще, а окно ожидания то же (~11 мин): шагов вдвое больше.
   const scale = lanes.length >= 3 ? 0.5 : 1;
   const delays = (fast ? plan.fast : plan.slow).flatMap((delay) => Array(Math.ceil(1 / scale)).fill(delay * scale));
@@ -1523,16 +1529,20 @@ function probeIntervalMs() {
   return Math.round(PROBE_INTERVAL_MS - share * (PROBE_INTERVAL_MS - PROBE_CATCHUP_RETRY_INTERVAL_MS));
 }
 
+const YOUNG_RETRY_MS = 2 * 60_000;
+
 // Номера, которые прямо сейчас проверяются (при нескольких IP — чтобы не проверять дважды).
 const inFlight = new Set();
 
 // Порядок очереди: наши квартиры на проверке → непроверенные номера позади фронта → остальные по сроку.
-function pickDue(now) {
+// youngMs — только номера, которые в очереди не дольше youngMs (и наши квартиры на проверке).
+function pickDue(now, youngMs = 0) {
   const rank = (retry) => (retry.watch ? 0 : retry.unchecked ? 1 : 2);
   let due = null;
   for (const entry of probe.retries) {
     const [id, retry] = entry;
     if (retry.dueAt > now || inFlight.has(id)) continue;
+    if (youngMs && !retry.watch && now - (retry.firstAt || now) > youngMs) continue;
     if (!due || rank(retry) < rank(due[1]) || (rank(retry) === rank(due[1]) && retry.dueAt < due[1].dueAt)) due = entry;
   }
   return due;
@@ -1676,7 +1686,13 @@ async function probeTick(lane = olx) {
   diag.ticks += 1;
   if (isProbeBehind()) diag.behindTicks += 1;
   if (lanes.length === 1 || (lane !== olx && Date.now() < olx.blockedUntil)) return mixedStep(lane);
-  if (lane === olx) return frontStep(lane);
+  if (lane === olx) {
+    // Новых объявлений в минуту меньше, чем у главного потока запросов, — через раз он помогает
+    // очереди с самыми свежими номерами (первые 2 мин), а новые номера ищет не реже раза в 2 хода.
+    lane.helpTurn = !lane.helpTurn;
+    const young = lane.helpTurn && !isProbeBehind() ? pickDue(Date.now(), YOUNG_RETRY_MS) : null;
+    return young ? retryStep(young, lane) : frontStep(lane);
+  }
   const due = isProbeBehind() ? null : pickDue(Date.now());
   if (due) return retryStep(due, lane);
   probe.retryLagAvg *= 0.9;
@@ -1928,7 +1944,7 @@ function report() {
   Object.assign(answers, { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0 });
   if (lanes.length > 1) {
     const now = Date.now();
-    console.log(`🌐 IP: ${lanes.map((lane) => `${lane.name} ${now < lane.blockedUntil ? `⛔ пауза ${formatAge(lane.blockedUntil - now)}` : '✅'} ${lane.requests} запр.${lane === olx ? ' (ищет новые)' : ' (очередь)'}`).join(' · ')}. Всего запросов в минуту: ~${Math.round(lanes.reduce((sum, lane) => sum + lane.requests, 0) / 5)}.`);
+    console.log(`🌐 IP: ${lanes.map((lane) => `${lane.name} ${now < lane.blockedUntil ? `⛔ пауза ${formatAge(lane.blockedUntil - now)}` : '✅'} ${lane.requests} запр.${lane === olx ? ' (новые + свежая очередь)' : ' (очередь)'}`).join(' · ')}. Всего запросов в минуту: ~${Math.round(lanes.reduce((sum, lane) => sum + lane.requests, 0) / 5)}.`);
     for (const lane of lanes) lane.requests = 0;
   }
   console.log(`🚦 За 5 мин: проверено номеров ${stats.checked}, открытых объявлений ${stats.open}, из них квартир (любой цены) ${stats.flats}. `
