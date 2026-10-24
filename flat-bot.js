@@ -32,6 +32,9 @@
  *                             в любом написании (Юнусабадский, Юнусобод, Yunusobod…).
  *                             Можно и свои слова: Ц-1, Кара-су, Массив Ялангач
  *   ONLY_PRIVATE=1            без агентств и риэлторов (только частные лица)
+ *   SEND_PUBLISHED_SEC=60     если на проверке поймать не удалось (OLX прятал) — прислать
+ *                             квартиру, опубликованную не больше 60 сек назад (с пометкой ⚡).
+ *                             Строки нет — только «на проверке»
  *   HOME_LANES=2              больше проверок в минуту (по умолчанию 1 поток) — больше
  *                             квартир ловится на проверке, но OLX может начать отвечать блоком
  *   FLAT_CATEGORY_IDS=...     номер раздела «Квартиры» на OLX;
@@ -231,6 +234,9 @@ const API_MAX_AGE_MINUTES = 180; // создано не раньше 3 ч наз
 // Объявления из списка, которые при запуске уже на OLX дольше MAX_AGE_MINUTES (по умолчанию 2 мин),
 // бот молча помечает просмотренными.
 const PUBLISHED_MAX_AGE_MINUTES = Number(process.env.MAX_AGE_MINUTES) || 2;
+// SEND_PUBLISHED_SEC=60 — квартиру, которую на проверке поймать не удалось, всё же прислать, если она
+// опубликована не больше 60 сек назад (с пометкой ⚡). Строки нет (или 0) — только «на проверке».
+const SEND_PUBLISHED_SEC = Math.max(0, numberFromEnv('SEND_PUBLISHED_SEC', 0));
 const LIST_PUBLISHED_MAX_AGE_MINUTES = PUBLISHED_MAX_AGE_MINUTES;
 // OLX ругнулся (429/403): пауза 1 мин, повторно — 3, дальше — 5. Заодно бот сам
 // замедляется на 30%, а через 10 спокойных минут понемногу разгоняется обратно.
@@ -328,7 +334,7 @@ const diag = {
   ticks: 0, behindTicks: 0, lagReports: 0, reports: 0, jumps: 0,
   reopened: 0, reopenedFlats: 0, reopenedWaitSum: 0, reopenedWaitMax: 0,
   unknownFlats: 0, unknownSamples: [], ageCut: 0, ageSamples: [], noPrice: 0, missed: 0,
-  sent: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, foundAgeSum: 0, foundAgeMax: 0, deliverSum: 0, deliverMax: 0, photoFallbacks: 0, timeouts: 0,
+  sent: 0, sentPublished: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, foundAgeSum: 0, foundAgeMax: 0, deliverSum: 0, deliverMax: 0, photoFallbacks: 0, timeouts: 0,
   sleeps: 0, sleepMax: 0, clockSkew: null, bigJumps: 0
 };
 
@@ -1153,7 +1159,7 @@ function buildMessage(raw, { pending = false } = {}) {
   return { text, url, photo: photoUrl(raw), keyboard: { inline_keyboard: [[{ text: pending ? '🔗 Открыть (после публикации)' : '🔗 Открыть на OLX', url }]] } };
 }
 
-const stats = { checked: 0, open: 0, flats: 0, sentPending: 0, pendingPublished: 0, missed: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 };
+const stats = { checked: 0, open: 0, flats: 0, sentPending: 0, sentPublished: 0, pendingPublished: 0, missed: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 };
 const handledIds = new Set(loadJson(HANDLED_FILE, []).map(Number));
 // Номера, по которым уже отправлено уведомление «на проверке» — чтобы не слать повторно.
 const pendingAlerted = new Set();
@@ -1267,10 +1273,20 @@ function handleAd(raw, source) {
     note(raw.id, 'создано до запуска бота — не проверял');
     return;
   }
-  // Бот шлёт только квартиры «на проверке». Эту на проверке поймать не удалось — не шлём,
-  // но пишем почему: OLX её прятал или бот не успел проверить номер.
-  const age = formatAge(Date.now() - publishedAt(raw));
+  // Эту на проверке поймать не удалось: OLX её прятал или бот не успел проверить номер.
+  const ageMs = Date.now() + (diag.clockSkew || 0) - publishedAt(raw); // publishedAt — по часам OLX
+  const age = formatAge(ageMs);
   const miss = missReason(raw);
+  // SEND_PUBLISHED_SEC: совсем свежую (опубликована только что) всё же шлём — с пометкой ⚡.
+  if (SEND_PUBLISHED_SEC && ageMs <= SEND_PUBLISHED_SEC * 1000) {
+    stats.sentPublished += 1;
+    diag.sentPublished += 1;
+    note(raw.id, `⚡ отправлено через ${age} после публикации (на проверке не поймал: ${miss.text})`);
+    console.log(`⚡ Шлю №${raw.id} через ${age} после публикации (на проверке не поймал: ${miss.text}) · ${truncate(oneLine(raw.title), 45)} · ${source === 'probe' ? 'перебор' : 'список'}`);
+    deliver(raw, source).catch((error) => console.error(`[Отправка] ${raw.id}: ${error.message}`));
+    return;
+  }
+  // Иначе не шлём (только «на проверке»), но пишем почему.
   stats.missed += 1;
   diag.missed += 1;
   stats[miss.kind] += 1;
@@ -1885,9 +1901,9 @@ function diagReport() {
     `${ok(d.unknownFlats)} 8. Похожие на квартиры в цене из незнакомых разделов: ${d.unknownFlats}${d.unknownSamples.length ? `\n    ${d.unknownSamples.map(esc).join('\n    ')}` : ''}`,
     `${ok(d.ageCut)} 9. Квартиры в цене, отсечённые как «старые» (созданы больше 3 ч назад): ${d.ageCut}${d.ageSamples.length ? `\n    ${d.ageSamples.map(esc).join('\n    ')}` : ''}`,
     `ℹ️ 10. Квартиры без цены (пропущены): ${d.noPrice}`,
-    `${ok(d.missedLate + d.missedUnseen)} 11. Квартиры, которые на проверке поймать не удалось (не отправлено): ${d.missed} — OLX на проверке не показывал ${d.missedHidden}, бот не успел ${d.missedLate + d.missedUnseen}${d.missedLate + d.missedUnseen ? ' (помогут HOME_LANES=2 или PROXIES)' : ''}`,
+    `${ok(d.missedLate + d.missedUnseen)} 11. Квартиры, которые на проверке поймать не удалось: ${SEND_PUBLISHED_SEC ? `отправлены свежими (до ${SEND_PUBLISHED_SEC} сек после публикации) ${d.sentPublished}; ` : ''}не отправлено ${d.missed} — OLX на проверке не показывал ${d.missedHidden}, бот не успел ${d.missedLate + d.missedUnseen}${d.missedLate + d.missedUnseen ? ' (помогут HOME_LANES=2 или PROXIES)' : ''}`,
     `ℹ️ 12. От создания объявления до отправки «на проверке»: в среднем ${avg(d.foundAgeSum, d.sent)}, дольше всего ${d.sent ? formatAge(d.foundAgeMax) : '—'} (отправлено ${d.sent})`,
-    `${ok(d.deliverMax > 5_000 || d.photoFallbacks)} 13. Доставка в Telegram: в среднем ${d.sent ? `${(d.deliverSum / d.sent / 1000).toFixed(1)} сек` : '—'}, дольше всего ${(d.deliverMax / 1000).toFixed(1)} сек; фото не прошло ${d.photoFallbacks}, зависало ${d.timeouts}`,
+    `${ok(d.deliverMax > 5_000 || d.photoFallbacks)} 13. Доставка в Telegram: в среднем ${d.sent + d.sentPublished ? `${(d.deliverSum / (d.sent + d.sentPublished) / 1000).toFixed(1)} сек` : '—'}, дольше всего ${(d.deliverMax / 1000).toFixed(1)} сек; фото не прошло ${d.photoFallbacks}, зависало ${d.timeouts}`,
     `${ok(d.sleeps)} 14. Mac спал / бот стоял: ${d.sleeps ? `${d.sleeps} раз, дольше всего ${formatAge(d.sleepMax)}` : 'нет'}`,
     `${ok(skew !== null && Math.abs(skew) > 30)} 15. Часы Mac: ${skew === null ? 'ещё не измерено' : Math.abs(skew) <= 30 ? `точные (разница с OLX ${skew} сек)` : `${skew > 0 ? 'отстают' : 'спешат'} на ${Math.abs(skew)} сек`}`,
     `${ok(!listCategoryIds().length)} 16. Список-страховка: ${listCategoryIds().length ? `работает (раздел № ${listCategoryIds().join(', ')})` : 'раздел квартир не найден — поздние объявления ловит только перебор'}`,
@@ -1948,7 +1964,7 @@ function report() {
     for (const lane of lanes) lane.requests = 0;
   }
   console.log(`🚦 За 5 мин: проверено номеров ${stats.checked}, открытых объявлений ${stats.open}, из них квартир (любой цены) ${stats.flats}. `
-    + `Отправлено «на проверке» (${filtersText()}): ${stats.sentPending} (из отправленных раньше замечено опубликованными ${stats.pendingPublished}); не поймано на проверке: ${stats.missed} — OLX не показывал ${stats.missedHidden}, не успел ${stats.missedLate + stats.missedUnseen}. `
+    + `Отправлено «на проверке» (${filtersText()}): ${stats.sentPending} (из отправленных раньше замечено опубликованными ${stats.pendingPublished}); ${SEND_PUBLISHED_SEC ? `свежих после публикации (до ${SEND_PUBLISHED_SEC} сек) ${stats.sentPublished}; ` : ''}не поймано и не отправлено: ${stats.missed} — OLX не показывал ${stats.missedHidden}, не успел ${stats.missedLate + stats.missedUnseen}. `
     + `Подписчиков: ${subscribers.size}. Перебор на номере ${probe.cursor}. `
     + `Темп: 1 запрос в ${(probeIntervalMs() * olx.pace / 1000).toFixed(1)} сек. Курс ≈ ${money(usdRate)} сум/$.`);
   // Не успевает проверять номера — подсказка, что поможет (сам бот темп не поднимает: OLX ответит блоком).
@@ -1958,7 +1974,7 @@ function report() {
     console.log(`💡 За 5 мин бот ${late} раз не успел проверить квартиру, пока она была на проверке. Больше проверок в минуту — больше пойманных: `
       + `${lanes.length === 1 ? 'добавьте в .env HOME_LANES=2' : 'попробуйте HOME_LANES=3 или прокси (PROXIES=…)'}. Если OLX начнёт отвечать блоком (429/403) — верните как было.`);
   }
-  Object.assign(stats, { checked: 0, open: 0, flats: 0, sentPending: 0, pendingPublished: 0, missed: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 });
+  Object.assign(stats, { checked: 0, open: 0, flats: 0, sentPending: 0, sentPublished: 0, pendingPublished: 0, missed: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 });
 }
 
 function easePace(lane, now) {
@@ -2102,7 +2118,9 @@ async function main() {
   console.log(`   город: ${CITY_ID ? `только № ${CITY_ID}` : 'весь Узбекистан'} · только частные (без агентств): ${ONLY_PRIVATE ? 'да' : 'нет'}`);
   console.log(`   темп: 1 запрос в ${PROBE_INTERVAL_MS} мс на поток · потоков: ${lanes.length} (≈${Math.round((60_000 / PROBE_INTERVAL_MS) * lanes.length)} запросов/мин)`);
   if (LOG_REQUESTS && LOG_REQUESTS !== '0') console.log(`🔬 Режим «вижу каждый запрос»: ${LOG_REQUESTS === '2' ? 'только открывшиеся номера' : 'все номера подряд'} (LOG_REQUESTS=${LOG_REQUESTS}). Чтобы выключить — уберите строку из .env.`);
-  console.log('🕓 Шлю ТОЛЬКО квартиры «на проверке» у OLX — сразу, до публикации (со ссылкой). Уже опубликованные не шлю.');
+  console.log(SEND_PUBLISHED_SEC
+    ? `🕓 Шлю квартиры «на проверке» у OLX — сразу, до публикации (со ссылкой); не пойманные на проверке — если опубликованы не больше ${SEND_PUBLISHED_SEC} сек назад (⚡, SEND_PUBLISHED_SEC=${SEND_PUBLISHED_SEC}).`
+    : '🕓 Шлю ТОЛЬКО квартиры «на проверке» у OLX — сразу, до публикации (со ссылкой). Уже опубликованные не шлю.');
   if (!recipients().length) console.warn(`⚠️ Пока никто не подписан: откройте @${me.username} в Telegram и нажмите /start.`);
   pollUpdates();
   await runEngine();
