@@ -1225,7 +1225,8 @@ function handleAd(raw, source) {
   if (!isActive(raw)) return;
   const reason = whyNotOurs(raw);
   if (reason) {
-    if (decisions.has(Number(raw.id))) return;
+    // Уже разобрано (или помечено просмотренным при запуске) — второй раз не пишем.
+    if (decisions.has(Number(raw.id)) || handledIds.has(Number(raw.id))) return;
     note(raw.id, `пропущено: ${reason}`);
     const usd = priceUsd(raw);
     const inRange = priceOk(usd);
@@ -1237,7 +1238,9 @@ function handleAd(raw, source) {
       console.log(`❓ Похоже на квартиру в цене, но незнакомый раздел ${raw.category.id}: ${label}. Если это квартира — напишите, добавим.`);
     } else if (isFlat(raw) && usd === null) {
       diag.noPrice += 1;
-    } else if (reason.startsWith('старое')) {
+    } else if (source === 'probe' && reason.startsWith('старое')) {
+      // Только из перебора: в списке раздела старые объявления, которые агентства «поднимают»
+      // за деньги, идут постоянно — это норма, лог ими не засоряем.
       diag.ageCut += 1;
       sample(diag.ageSamples, `${label}, создано ${formatAge(Date.now() - Date.parse(raw.created_time))} назад`);
       console.log(`🕰 Квартира в цене отсечена как «старая» (создана ${formatAge(Date.now() - Date.parse(raw.created_time))} назад, опубликована ${formatAge(Date.now() - publishedAt(raw))} назад): ${label}`);
