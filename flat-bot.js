@@ -1952,9 +1952,11 @@ function report() {
     + `Подписчиков: ${subscribers.size}. Перебор на номере ${probe.cursor}. `
     + `Темп: 1 запрос в ${(probeIntervalMs() * olx.pace / 1000).toFixed(1)} сек. Курс ≈ ${money(usdRate)} сум/$.`);
   // Не успевает проверять номера — подсказка, что поможет (сам бот темп не поднимает: OLX ответит блоком).
-  if (stats.missedLate + stats.missedUnseen > stats.missedHidden && lanes.length < 3) {
-    console.log(`💡 Чаще всего квартиру бот не успел проверить, пока она была на проверке. Больше проверок в минуту — больше пойманных: `
-      + `${lanes.length === 1 ? 'добавьте в .env HOME_LANES=2' : 'добавьте прокси (PROXIES=…)'}. Если OLX начнёт отвечать блоком (429/403) — уберите.`);
+  // Одна-две квартиры за 5 минут — ещё не повод: подсказываем, только когда «не успел» уже 3 и больше.
+  const late = stats.missedLate + stats.missedUnseen;
+  if (late >= 3 && late > stats.missedHidden && lanes.length < 3) {
+    console.log(`💡 За 5 мин бот ${late} раз не успел проверить квартиру, пока она была на проверке. Больше проверок в минуту — больше пойманных: `
+      + `${lanes.length === 1 ? 'добавьте в .env HOME_LANES=2' : 'попробуйте HOME_LANES=3 или прокси (PROXIES=…)'}. Если OLX начнёт отвечать блоком (429/403) — верните как было.`);
   }
   Object.assign(stats, { checked: 0, open: 0, flats: 0, sentPending: 0, pendingPublished: 0, missed: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 });
 }
