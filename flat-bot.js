@@ -223,6 +223,11 @@ const RETRY_PLAN = { fast: [0.5, 1, 2, 4], slow: [0.5, 1, 2, 4] };
 // «на проверке» иначе проскакивает между проверками. Вместе с быстрыми взглядами (10, 10 сек):
 // 10 → 20 → 35 сек → 1:05 → 2:05 → 4:05 → 8:05 (7 проверок вместо 5).
 const RETRY_PLAN_DENSE = { fast: [0.25, 0.5, 1, 2, 4], slow: [0.25, 0.5, 1, 2, 4] };
+// Ещё плотнее — пока очередь успевает (свободные запросы есть): 10 → 20 → 35 → 50 сек → 1:20 → 1:50
+// → 2:50 → 4:50 → 8:50 (9 проверок, в первые 2 мин зазор не больше 30 сек). Очередь начала опаздывать
+// больше чем на 10 сек — обратно на RETRY_PLAN_DENSE, сам темп запросов не растёт.
+const RETRY_PLAN_DENSER = { fast: [0.25, 0.25, 0.5, 0.5, 1, 2, 4], slow: [0.25, 0.25, 0.5, 0.5, 1, 2, 4] };
+const DENSER_MAX_LAG_MS = 10_000;
 const PROBE_MAX_RETRIES = 3_000;
 const PROBE_JUMP_MAX_SCHEDULE = 1_000;
 const PROBE_STUCK_MS = 90_000;
@@ -339,7 +344,7 @@ const diag = {
   reopened: 0, reopenedFlats: 0, reopenedWaitSum: 0, reopenedWaitMax: 0,
   unknownFlats: 0, unknownSamples: [], ageCut: 0, ageSamples: [], noPrice: 0, missed: 0,
   sent: 0, sentPublished: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, foundAgeSum: 0, foundAgeMax: 0, deliverSum: 0, deliverMax: 0, photoFallbacks: 0, timeouts: 0,
-  sleeps: 0, sleepMax: 0, clockSkew: null, bigJumps: 0
+  sleeps: 0, sleepMax: 0, clockSkew: null, bigJumps: 0, cached404: 0, listPage2: 0
 };
 
 function sample(list, text) {
@@ -624,7 +629,8 @@ async function browserTransport(url, lane = olx) {
   const request = runtime.listPage.evaluate(async ({ target, timeoutMs }) => {
     try {
       const response = await fetch(target, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'include', signal: AbortSignal.timeout(timeoutMs) });
-      return { status: response.status, text: await response.text(), date: response.headers.get('date') };
+      const headers = response.headers;
+      return { status: response.status, text: await response.text(), date: headers.get('date'), cache: headers.get('cf-cache-status') || headers.get('x-cache') || '', age: headers.get('age') };
     } catch (error) {
       return { status: 0, text: String(error) };
     }
@@ -638,19 +644,45 @@ async function browserTransport(url, lane = olx) {
 }
 
 // Что отвечал OLX за 5 минут — по этим цифрам видно, не принял ли он бота за робота.
-const answers = { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0 };
+const answers = { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0, cached: 0 };
+
+// Не отдаёт ли OLX ответ «нет такого» из кэша (CDN)? Тогда перепроверка видит старый 404, хотя
+// объявление уже на проверке. Заметили 3 таких ответа — к номеру добавляется ?_=время (обход кэша).
+// CACHE_BUST=1 в .env — включить сразу.
+let cacheBust = ['1', 'true', 'yes'].includes(String(process.env.CACHE_BUST || '').trim().toLowerCase());
+// Разные тексты ответа 404: если у «номера нет» и «прячет на проверке» текст разный — это зацепка.
+const notFoundKinds = new Map(); // текст (цифры → #) -> сколько раз
+
+function inspectNotFound(pathAndQuery, text, cache, age) {
+  if (/hit/i.test(cache || '') || Number(age) > 0) {
+    answers.cached += 1;
+    diag.cached404 += 1;
+    if (!cacheBust && diag.cached404 >= 3) {
+      cacheBust = true;
+      console.warn(`🧊 OLX отдаёт «нет такого» из кэша (${cache || `age ${age}`}) — включаю обход кэша: к номеру добавляется ?_=время.`);
+    }
+  }
+  const kind = oneLine(text).slice(0, 200).replace(/\d+/g, '#');
+  if (!notFoundKinds.has(kind) && notFoundKinds.size < 5) {
+    console.log(`🔬 Вид ответа 404 № ${notFoundKinds.size + 1} (${pathAndQuery.replace(/\?.*$/, '')}): ${kind || '(пусто)'}${cache ? ` · кэш: ${cache}` : ''}${age ? ` · age: ${age}` : ''}`);
+  }
+  notFoundKinds.set(kind, (notFoundKinds.get(kind) || 0) + 1);
+}
 
 async function olxApi(pathAndQuery, lane = olx) {
   lane.requests += 1;
-  const { status, text, date } = await (lane.transport ? lane.transport(`${OLX_API}${pathAndQuery}`) : browserTransport(`${OLX_API}${pathAndQuery}`, lane));
+  const target = `${OLX_API}${cacheBust && /^\d+\/$/.test(pathAndQuery) ? `${pathAndQuery}?_=${Date.now()}` : pathAndQuery}`;
+  const { status, text, date, cache, age } = await (lane.transport ? lane.transport(target) : browserTransport(target, lane));
   // Часы Mac против часов OLX (среднее; точность ~1 сек).
   const serverTime = Date.parse(date || '');
   if (Number.isFinite(serverTime)) {
     const skew = serverTime - Date.now();
     diag.clockSkew = diag.clockSkew === null ? skew : diag.clockSkew * 0.95 + skew * 0.05;
   }
-  if (status === 404) answers.notFound += 1;
-  else if (status === 410) answers.hidden += 1;
+  if (status === 404) {
+    answers.notFound += 1;
+    inspectNotFound(pathAndQuery, text, cache, age);
+  } else if (status === 410) answers.hidden += 1;
   else if (status === 0 || status >= 500) {
     answers.failed += 1;
     diag.netFails += 1;
@@ -1390,7 +1422,7 @@ function quickPlanSec() {
 }
 
 function scheduleRetry(id, attempt, fast = false) {
-  const plan = lanes.length >= 2 ? RETRY_PLAN_DENSE : RETRY_PLAN;
+  const plan = lanes.length < 2 ? RETRY_PLAN : probe.retryLagAvg < DENSER_MAX_LAG_MS ? RETRY_PLAN_DENSER : RETRY_PLAN_DENSE;
   // С 3+ IP обычные перепроверки вдвое чаще, а окно ожидания то же (~11 мин): шагов вдвое больше.
   const scale = lanes.length >= 3 ? 0.5 : 1;
   const delays = (fast ? plan.fast : plan.slow).flatMap((delay) => Array(Math.ceil(1 / scale)).fill(delay * scale));
@@ -1862,11 +1894,27 @@ function listCategoryIds() {
   return [...flats.deals].filter(([, deal]) => (DEAL ? deal === DEAL : deal !== 'other')).map(([id]) => id);
 }
 
+// Номера с первой страницы списка в прошлый раз (без платных «топов» — они висят всегда).
+const listLastSeen = new Map(); // раздел -> Set номеров
+
 async function listSweep({ warmUp = false } = {}) {
   for (const categoryId of listCategoryIds()) {
     const city = CITY_ID ? `&city_id=${CITY_ID}` : '';
-    const { data } = await olxApi(`?offset=0&limit=${LIST_LIMIT}&category_id=${categoryId}${city}&sort_by=created_at:desc`);
+    const query = (offset) => `?offset=${offset}&limit=${LIST_LIMIT}&category_id=${categoryId}${city}&sort_by=created_at:desc`;
+    const { data } = await olxApi(query(0));
     const ads = Array.isArray(data) ? data : [];
+    // Вся первая страница новая (ни одного номера с прошлого раза) — за 15 сек вышло или «поднялось»
+    // больше 50 объявлений, и новое могло уйти на вторую страницу. Читаем и её.
+    const ids = (list) => list.filter((ad) => !ad.promotion?.top_ad).map((ad) => Number(ad.id));
+    const before = listLastSeen.get(categoryId);
+    if (!warmUp && before && ads.length >= LIST_LIMIT && !ids(ads).some((id) => before.has(id))) {
+      diag.listPage2 += 1;
+      console.log(`📄 Первая страница раздела № ${categoryId} вся новая — читаю вторую, чтобы ничего не проскочило.`);
+      await sleep(300);
+      const { data: more } = await olxApi(query(LIST_LIMIT));
+      if (Array.isArray(more)) ads.push(...more);
+    }
+    listLastSeen.set(categoryId, new Set(ids(ads).slice(0, LIST_LIMIT)));
     for (const raw of ads) learnCategory(raw);
     if (!warmUp) unstickProbe(ads.filter((ad) => !ad.promotion?.top_ad).map((ad) => ad.id));
     for (const raw of ads) {
@@ -1960,8 +2008,8 @@ function report() {
   const total = Object.values(answers).reduce((sum, value) => sum + value, 0) || 1;
   const pct = (value) => `${Math.round((value * 100) / total)}%`;
   console.log(`🚦 Ответы OLX: открыто ${pct(answers.ok)}, «нет такого» ${pct(answers.notFound)}, «скрыто» ${pct(answers.hidden)}, `
-    + `блок 429/403: ${answers.blocked}, капча/не данные: ${answers.notJson}, сбои сети: ${answers.failed}. Самопроверка: ${lastSelfCheck}.`);
-  Object.assign(answers, { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0 });
+    + `блок 429/403: ${answers.blocked}, капча/не данные: ${answers.notJson}, сбои сети: ${answers.failed}, «нет такого» из кэша: ${answers.cached}${cacheBust ? ' (обход кэша включён)' : ''}, видов ответа 404: ${notFoundKinds.size}. Самопроверка: ${lastSelfCheck}.`);
+  Object.assign(answers, { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0, cached: 0 });
   if (lanes.length > 1) {
     const now = Date.now();
     console.log(`🌐 IP: ${lanes.map((lane) => `${lane.name} ${now < lane.blockedUntil ? `⛔ пауза ${formatAge(lane.blockedUntil - now)}` : '✅'} ${lane.requests} запр.${lane === olx ? ' (новые + свежая очередь)' : ' (очередь)'}`).join(' · ')}. Всего запросов в минуту: ~${Math.round(lanes.reduce((sum, lane) => sum + lane.requests, 0) / 5)}.`);
