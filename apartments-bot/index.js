@@ -4471,7 +4471,7 @@ function isChannelActive(channel) {
   return Number.isFinite(expiry) && expiry > Date.now();
 }
 
-// Categories to scrape: everything active subscribers AND active channels want.
+// Categories to scrape: everything subscribers (and those whose subscription ended — teasers) AND active channels want.
 // (Channels used to be ignored here, so a channel set to "sale" got nothing
 // unless some personal subscriber also wanted "sale".)
 function wantedCategories() {
@@ -4480,8 +4480,10 @@ function wantedCategories() {
     if (category === 'all') ['rent', 'sale', 'land', 'land_rent'].forEach((item) => wanted.add(item));
     else wanted.add(category);
   };
-  for (const chatId of Object.keys(dbUsers)) {
-    if (isSubscribed(chatId)) add(effectiveCategory(dbUsers[chatId]?.filters));
+  for (const [chatId, user] of Object.entries(dbUsers)) {
+    // Clients whose subscription ended count too: they get teasers for apartments that
+    // match their search (maybeSendTeaser), which only works if their section is searched.
+    if (isSubscribed(chatId) || (isPlainObject(user) && user.until && !user.blockedAt)) add(effectiveCategory(user?.filters));
   }
   for (const channel of Object.values(dbChannels)) {
     if (isChannelActive(channel)) add(effectiveCategory(channel.filters));
@@ -5846,7 +5848,14 @@ function reportEngine() {
   console.log(`🚦 ${pace}${probe.behindChecks ? ` (в режиме разгона: ${Math.round((probe.behindChecks * 100) / Math.max(1, engineStats.checked))}% времени)` : ''}.`);
   probe.reportCursor = probe.cursor;
   probe.behindChecks = 0;
-  const wanted = [...wantedCategories()].map((category) => categoryLabel(category, 'ru')).join(', ');
+  // Each section with the number of active clients who search it (a client with "all" counts for every section).
+  const demand = new Map();
+  for (const chatId of Object.keys(dbUsers)) {
+    if (!isSubscribed(chatId)) continue;
+    const category = effectiveCategory(dbUsers[chatId]?.filters);
+    for (const item of category === 'all' ? ['rent', 'sale', 'land', 'land_rent'] : [category]) demand.set(item, (demand.get(item) || 0) + 1);
+  }
+  const wanted = [...wantedCategories()].map((category) => `${categoryLabel(category, 'ru')} (клиентов ${demand.get(category) || 0})`).join(', ');
   const subscribers = Object.keys(dbUsers).filter((chatId) => isSubscribed(chatId)).length;
   const freshest = engineStats.freshestAgeMs === null ? '—' : formatAge(engineStats.freshestAgeMs);
   console.log(`📊 За 5 мин: проверено номеров ${engineStats.checked}, открытых объявлений ${engineStats.open}, закрытых (на проверке/удалены) ${engineStats.closed}. `
