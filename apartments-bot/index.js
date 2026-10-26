@@ -27,6 +27,10 @@ const recentLogLines = [];
  * Required environment variables:
  * TELEGRAM_TOKEN, ADMIN_TOKEN, ADMIN_CHAT_ID, GEMINI_API_KEY, CARD_NUMBER, CARD_NAME
  * Optional: SUPPORT_HANDLE, GEMINI_MODEL
+ *   HOME_LANES=2          parallel checkers on this IP (default 2; 1 = the old single one)
+ *   PENDING_ALERTS=0      do not send ads while OLX still reviews them (default: send, marked 🕓)
+ *   CACHE_BUST=0          do not add ?_=time to OLX requests (default: on, past CloudFront's cache)
+ *   LIST_INTERVAL_SEC=30  how often the category lists are read (default 30)
  *
  * TEST_MODE=1 — for a separate test bot. Everything works as usual, including
  * the search for new ads (if playwright is installed), but reminders are not
@@ -1183,7 +1187,7 @@ const T = {
     seekerRequestsOnButton: '🔔 Получать заявки клиентов',
     seekerRequestsOn: '🔔 Заявки клиентов включены. Новые заявки будут приходить в этот чат.',
     seekerRequestsOff: '🔕 Заявки клиентов выключены. Включить обратно можно здесь же, в Настройках.',
-    help: (role) => `🤖 <b>Как работает бот</b>\n\n🏠 Бот круглосуточно следит за объявлениями о недвижимости и проверяет новые каждые <b>30 секунд</b>. Те, что подходят под ваш поиск, приходят в этот чат примерно через минуту после публикации — не нужно весь день сидеть и обновлять объявления самому.\n\n📩 <b>В каждом объявлении:</b>\n• фото;\n• цена, район и время публикации;\n• описание и параметры;\n• кто разместил: собственник или риелтор;\n• кнопка «📞 Связаться» под объявлением — открывает его, там можно позвонить.\n\n🚀 <b>Как начать</b>\n1️⃣ Оформите подписку в <b>«📅 Подписка»</b>.\n2️⃣ В <b>«🔍 Мой поиск»</b> выберите район, категорию и цену.\n3️⃣ Всё — дальше объявления приходят сами, ничего нажимать не нужно.${role === 'makler' ? `\n\n🧑‍💼 <b>Для маклеров</b>\n• Заявки людей, которые ищут жильё, приходят в этот чат. Отключить: ⚙️ Настройки.\n• Можно подключить свой Telegram-канал — бот будет сам публиковать там объявления. ⚙️ Настройки → 📢 Подключить мой канал.` : ''}${role === 'seeker' ? `\n\n🆘 <b>Срочно нужна квартира?</b>\nНажмите «🆘 Срочно найти квартиру» и ответьте на несколько вопросов. Заявку получат маклеры и сами вам позвонят. Это бесплатно.` : ''}\n\n🕵️ <b>Проверка любого объявления</b>\nПришлите ссылку на объявление OLX или его номер — бот подскажет, собственник это или маклер. Доступно с подпиской.\n\nВопросы: ${SUPPORT}`,
+    help: (role) => `🤖 <b>Как работает бот</b>\n\n🏠 Бот круглосуточно следит за объявлениями о недвижимости и проверяет новые каждые <b>30 секунд</b>. Те, что подходят под ваш поиск, приходят в этот чат примерно через минуту после публикации — не нужно весь день сидеть и обновлять объявления самому.\n\n📩 <b>В каждом объявлении:</b>\n• фото;\n• цена, район и время публикации;\n• описание и параметры;\n• кто разместил: собственник или риелтор;\n• кнопки под объявлением: «📞 Телефон» — номер продавца прямо здесь, «🔗 OLX» — открыть объявление.\n\n🕓 Часть квартир приходит ещё <b>до публикации</b> — пока OLX их проверяет: вы звоните первым.\n\n🚀 <b>Как начать</b>\n1️⃣ Оформите подписку в <b>«📅 Подписка»</b>.\n2️⃣ В <b>«🔍 Мой поиск»</b> выберите район, категорию и цену.\n3️⃣ Всё — дальше объявления приходят сами, ничего нажимать не нужно.${role === 'makler' ? `\n\n🧑‍💼 <b>Для маклеров</b>\n• Заявки людей, которые ищут жильё, приходят в этот чат. Отключить: ⚙️ Настройки.\n• Можно подключить свой Telegram-канал — бот будет сам публиковать там объявления. ⚙️ Настройки → 📢 Подключить мой канал.` : ''}${role === 'seeker' ? `\n\n🆘 <b>Срочно нужна квартира?</b>\nНажмите «🆘 Срочно найти квартиру» и ответьте на несколько вопросов. Заявку получат маклеры и сами вам позвонят. Это бесплатно.` : ''}\n\n🕵️ <b>Проверка любого объявления</b>\nПришлите ссылку на объявление OLX или его номер — бот подскажет, собственник это или маклер. Доступно с подпиской.\n\nВопросы: ${SUPPORT}`,
     chooseLanguage: `🌐 <b>Выберите язык</b>`,
     languageChanged: `✅ Язык изменён.`,
     support: `👨‍💻 <b>Нужна помощь?</b>\n\nНапишите в поддержку: ${SUPPORT}\n\nОпишите, что случилось, — так мы ответим быстрее.`,
@@ -1326,7 +1330,7 @@ const T = {
     seekerRequestsOnButton: '🔔 Mijoz arizalarini olish',
     seekerRequestsOn: '🔔 Mijoz arizalari yoqildi. Yangi arizalar shu chatga keladi.',
     seekerRequestsOff: "🔕 Mijoz arizalari o'chirildi. Qayta yoqish shu yerda, Sozlamalarda.",
-    help: (role) => `🤖 <b>Bot qanday ishlaydi</b>\n\n🏠 Bot ko'chmas mulk e'lonlarini kecha-kunduz kuzatadi va har <b>30 soniyada</b> yangilarini tekshiradi. Qidiruvingizga moslari e'lon qilinganidan taxminan bir daqiqa o'tib shu chatga keladi — e'lonlarni kun bo'yi o'zingiz yangilab o'tirishingiz shart emas.\n\n📩 <b>Har bir e'londa:</b>\n• rasmlar;\n• narx, tuman va e'lon vaqti;\n• tavsif va ma'lumotlar;\n• kim joylagan: mulkdor yoki rieltor;\n• e'lon ostidagi «📞 Bog'lanish» tugmasi — e'lonni ochadi, u yerda qo'ng'iroq qilish mumkin.\n\n🚀 <b>Qanday boshlash</b>\n1️⃣ <b>«📅 Obuna»</b> bo'limida obunani rasmiylashtiring.\n2️⃣ <b>«🔍 Mening qidiruvim»</b> bo'limida tuman, kategoriya va narxni tanlang.\n3️⃣ Tamom — e'lonlar o'zi keladi, hech narsa bosish shart emas.${role === 'makler' ? `\n\n🧑‍💼 <b>Maklerlar uchun</b>\n• Uy-joy qidirayotgan odamlarning arizalari shu chatga keladi. O'chirish: ⚙️ Sozlamalar.\n• O'z Telegram kanalingizni ulashingiz mumkin — bot u yerga e'lonlarni o'zi joylaydi. ⚙️ Sozlamalar → 📢 Kanalimni ulash.` : ''}${role === 'seeker' ? `\n\n🆘 <b>Uy shoshilinch kerakmi?</b>\n«🆘 Tezda uy topish» tugmasini bosing va bir nechta savolga javob bering. Arizani maklerlar oladi va o'zlari qo'ng'iroq qilishadi. Bu bepul.` : ''}\n\n🕵️ <b>Istalgan e’lonni tekshirish</b>\nOLX e’loni havolasini yoki raqamini yuboring — bot muallif egasimi yoki maklermi, aytib beradi. Obuna bilan ishlaydi.\n\nSavollar: ${SUPPORT}`,
+    help: (role) => `🤖 <b>Bot qanday ishlaydi</b>\n\n🏠 Bot ko'chmas mulk e'lonlarini kecha-kunduz kuzatadi va har <b>30 soniyada</b> yangilarini tekshiradi. Qidiruvingizga moslari e'lon qilinganidan taxminan bir daqiqa o'tib shu chatga keladi — e'lonlarni kun bo'yi o'zingiz yangilab o'tirishingiz shart emas.\n\n📩 <b>Har bir e'londa:</b>\n• rasmlar;\n• narx, tuman va e'lon vaqti;\n• tavsif va ma'lumotlar;\n• kim joylagan: mulkdor yoki rieltor;\n• e'lon ostidagi tugmalar: «📞 Telefon» — sotuvchining raqami shu yerda, «🔗 OLX» — e'lonni ochish.\n\n🕓 Ba'zi kvartiralar <b>e'lon qilinishidan oldin</b> keladi — OLX ularni tekshirayotgan paytda: siz birinchi bo'lib qo'ng'iroq qilasiz.\n\n🚀 <b>Qanday boshlash</b>\n1️⃣ <b>«📅 Obuna»</b> bo'limida obunani rasmiylashtiring.\n2️⃣ <b>«🔍 Mening qidiruvim»</b> bo'limida tuman, kategoriya va narxni tanlang.\n3️⃣ Tamom — e'lonlar o'zi keladi, hech narsa bosish shart emas.${role === 'makler' ? `\n\n🧑‍💼 <b>Maklerlar uchun</b>\n• Uy-joy qidirayotgan odamlarning arizalari shu chatga keladi. O'chirish: ⚙️ Sozlamalar.\n• O'z Telegram kanalingizni ulashingiz mumkin — bot u yerga e'lonlarni o'zi joylaydi. ⚙️ Sozlamalar → 📢 Kanalimni ulash.` : ''}${role === 'seeker' ? `\n\n🆘 <b>Uy shoshilinch kerakmi?</b>\n«🆘 Tezda uy topish» tugmasini bosing va bir nechta savolga javob bering. Arizani maklerlar oladi va o'zlari qo'ng'iroq qilishadi. Bu bepul.` : ''}\n\n🕵️ <b>Istalgan e’lonni tekshirish</b>\nOLX e’loni havolasini yoki raqamini yuboring — bot muallif egasimi yoki maklermi, aytib beradi. Obuna bilan ishlaydi.\n\nSavollar: ${SUPPORT}`,
     chooseLanguage: `🌐 <b>Tilni tanlang</b>`,
     languageChanged: `✅ Til o'zgartirildi.`,
     support: `👨‍💻 <b>Yordam kerakmi?</b>\n\nQo'llab-quvvatlashga yozing: ${SUPPORT}\n\nNima bo'lganini yozing — shunda tezroq javob beramiz.`,
@@ -1644,12 +1648,12 @@ async function sendMediaGroup(token, chatId, text, images, buttons = null, photo
 
 // ---- One message per apartment (#22) -----------------------------------------
 // Telegram allows no buttons under an album, so a client gets ONE card: the main
-// photo with the whole text and the buttons [📞 Связаться] [🖼 Ещё N фото]. The
+// photo with the whole text and the buttons [📞 Телефон] [🔗 OLX] / [🖼 Ещё N фото]. The
 // other photos come as an album only when the client asks for them.
 const MORE_PHOTOS_LABELS = { ru: (count) => `🖼 Ещё ${count} фото`, uz: (count) => `🖼 Yana ${count} ta rasm` };
 const MORE_PHOTOS_FAILED = {
-  ru: 'Не получилось показать остальные фото — откройте объявление кнопкой «📞 Связаться».',
-  uz: 'Qolgan rasmlarni ko‘rsatib bo‘lmadi — e’lonni «📞 Bog‘lanish» tugmasi orqali oching.'
+  ru: 'Не получилось показать остальные фото — откройте объявление кнопкой «🔗 OLX».',
+  uz: 'Qolgan rasmlarni ko‘rsatib bo‘lmadi — e’lonni «🔗 OLX» tugmasi orqali oching.'
 };
 const morePhotosCache = new Map(); // adId -> { fileIds } of the "more photos" album
 
@@ -1663,13 +1667,20 @@ function shuffled(items) {
   return copy;
 }
 
+const PHONE_LABELS = { ru: '📞 Телефон', uz: '📞 Telefon' };
+const OLX_LINK_LABEL = '🔗 OLX';
+
 function adCardMarkup(ad, lang, photoCount) {
-  const contact = adContactMarkup(ad, lang);
-  const row = contact ? [...contact.inline_keyboard[0]] : [];
+  const rows = [];
+  const contact = adContactLink(ad, lang);
+  const first = [];
+  if (ad?.adId) first.push({ text: PHONE_LABELS[lang] || PHONE_LABELS.ru, callback_data: `phone_${ad.adId}` });
+  if (contact) first.push({ text: OLX_LINK_LABEL, url: contact.url });
+  if (first.length) rows.push(first);
   if (photoCount > 1 && ad?.adId) {
-    row.push({ text: (MORE_PHOTOS_LABELS[lang] || MORE_PHOTOS_LABELS.ru)(photoCount - 1), callback_data: `more_photos_${ad.adId}` });
+    rows.push([{ text: (MORE_PHOTOS_LABELS[lang] || MORE_PHOTOS_LABELS.ru)(photoCount - 1), callback_data: `more_photos_${ad.adId}` }]);
   }
-  return row.length ? { inline_keyboard: [row] } : null;
+  return rows.length ? { inline_keyboard: rows } : null;
 }
 
 // A photo OLX does not let Telegram fetch by link: download it and upload it as a file.
@@ -1751,6 +1762,122 @@ async function sendMorePhotos(chatId, adId, lang) {
     while (morePhotosCache.size > 300) morePhotosCache.delete(morePhotosCache.keys().next().value);
   }
   return sendMediaGroup(TELEGRAM_TOKEN, chatId, `🖼 ${escapeHtml(truncate(oneLine(title), 120))}`, rest, null, morePhotosCache.get(String(adId)));
+}
+
+// ---- "📞 Телефон": the seller's number, right in the chat -----------------------
+// OLX is asked only when someone presses the button (never for every ad), and the
+// number is kept in ad_phones.json: the next presses — by any client — get it from
+// there without asking OLX again. Simultaneous presses on one ad share one request.
+// Only for subscribers: it is what they pay for.
+const AD_PHONES_FILE = path.join(__dirname, 'ad_phones.json');
+const AD_PHONES_KEEP = 5_000;
+const PHONE_GAP_MS = 2_000; // to OLX for numbers at most once every 2 s
+const PHONE_RETRY_MS = 30_000; // no number (under review, limit) — OLX is asked again after 30 s at the earliest
+const adPhoneBook = new Map(Object.entries(loadJson(AD_PHONES_FILE, {}))); // ad number -> { phones, at }
+const adPhoneMisses = new Map(); // ad number -> { at, reason }
+const adPhoneInFlight = new Map(); // ad number -> Promise
+let adPhoneQueue = Promise.resolve();
+let lastAdPhoneAt = 0;
+
+const PHONE_TEXTS = {
+  ru: {
+    wait: '📞 Узнаю номер…',
+    needSub: '📞 Номер продавца — только с подпиской.',
+    number: (phones, adId) => `📞 ${phones.join(', ')}\nОбъявление № ${adId}`,
+    hidden: 'OLX не отдал номер — возможно, продавец его скрыл. Откройте объявление кнопкой «🔗 OLX».',
+    login: 'OLX показывает этот номер только после входа в аккаунт — откройте объявление кнопкой «🔗 OLX».',
+    review: '🕓 Объявление ещё на проверке у OLX — номер появится после публикации. Нажмите кнопку чуть позже.',
+    limit: 'OLX временно ограничил показ номеров — попробуйте через минуту.',
+    failed: 'Не получилось узнать номер — попробуйте ещё раз или откройте объявление кнопкой «🔗 OLX».'
+  },
+  uz: {
+    wait: '📞 Raqamni bilib olyapman…',
+    needSub: '📞 Sotuvchining raqami — faqat obuna bilan.',
+    number: (phones, adId) => `📞 ${phones.join(', ')}\nE’lon № ${adId}`,
+    hidden: 'OLX raqamni bermadi — sotuvchi uni yashirgan bo‘lishi mumkin. E’lonni «🔗 OLX» tugmasi orqali oching.',
+    login: 'OLX bu raqamni faqat akkauntga kirgandan keyin ko‘rsatadi — e’lonni «🔗 OLX» tugmasi orqali oching.',
+    review: '🕓 E’lon hali OLX tekshiruvida — raqam e’lon qilingandan keyin chiqadi. Birozdan so‘ng qayta bosing.',
+    limit: 'OLX raqamlarni ko‘rsatishni vaqtincha chekladi — bir daqiqadan keyin urinib ko‘ring.',
+    failed: 'Raqamni bilib bo‘lmadi — qayta urinib ko‘ring yoki e’lonni «🔗 OLX» tugmasi orqali oching.'
+  }
+};
+
+// OLX gives the numbers as a list: { data: { phones: ["+998 …"] } } (other shapes understood too).
+function parseAdPhones(text) {
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const list = body?.data?.phones ?? body?.phones ?? body?.data ?? [];
+  return (Array.isArray(list) ? list : [list])
+    .map((item) => oneLine(item !== null && typeof item === 'object' ? (item.phone ?? item.number ?? item.value) : item))
+    .filter((phone) => phone.replace(/\D/g, '').length >= 7);
+}
+
+// Not through olxApi: there 403 means "OLX blocked the IP" and pauses the whole search,
+// while here 401/403 only means "OLX wants a login for this number".
+async function fetchAdPhones(adId) {
+  const url = `${OLX_API}${encodeURIComponent(adId)}/limited-phones/`;
+  const request = adPhoneQueue.then(async () => {
+    const wait = lastAdPhoneAt + PHONE_GAP_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastAdPhoneAt = Date.now();
+    return (olx.transport || browserTransport)(url);
+  });
+  adPhoneQueue = request.catch(() => {});
+  const { status, text } = await request;
+  if (status === 200) {
+    const phones = parseAdPhones(text);
+    if (phones.length) return { phones };
+    console.warn(`[Телефон] №${adId}: OLX ответил 200, но номера в ответе нет: ${truncate(oneLine(text), 150)}`);
+    return { reason: 'hidden' };
+  }
+  console.warn(`[Телефон] №${adId}: OLX ответил ${status}: ${truncate(oneLine(text), 150)}`);
+  if (status === 401 || status === 403) return { reason: 'login' };
+  if (status === 404 || status === 410) return { reason: 'review' };
+  if (status === 429) return { reason: 'limit' };
+  return { reason: 'failed' };
+}
+
+// The number from the book, or one request to OLX for everyone who pressed.
+async function getAdPhones(adId) {
+  const saved = adPhoneBook.get(String(adId));
+  if (saved) return { phones: saved.phones, fromBook: true };
+  const miss = adPhoneMisses.get(String(adId));
+  if (miss && Date.now() - miss.at < PHONE_RETRY_MS) return { reason: miss.reason };
+  if (!adPhoneInFlight.has(String(adId))) {
+    const request = fetchAdPhones(adId)
+      .catch((error) => {
+        console.error(`[Телефон] №${adId}: ${error.message}`);
+        return { reason: 'failed' };
+      })
+      .then((result) => {
+        if (result.phones) {
+          adPhoneBook.set(String(adId), { phones: result.phones, at: new Date().toISOString() });
+          while (adPhoneBook.size > AD_PHONES_KEEP) adPhoneBook.delete(adPhoneBook.keys().next().value);
+          adPhoneMisses.delete(String(adId));
+          saveJson(AD_PHONES_FILE, Object.fromEntries(adPhoneBook));
+        } else {
+          adPhoneMisses.set(String(adId), { at: Date.now(), reason: result.reason });
+        }
+        return result;
+      })
+      .finally(() => adPhoneInFlight.delete(String(adId)));
+    adPhoneInFlight.set(String(adId), request);
+  }
+  return adPhoneInFlight.get(String(adId));
+}
+
+// The answer comes as a reply to the apartment card; Telegram makes the number tappable.
+async function sendAdPhone(chatId, adId, lang, messageId) {
+  const texts = PHONE_TEXTS[lang] || PHONE_TEXTS.ru;
+  const result = await getAdPhones(adId);
+  console.log(`📞 ${chatId} — №${adId}: ${result.phones ? `номер ${result.fromBook ? 'из базы' : 'получен с OLX и сохранён'}` : `не получен (${result.reason})`}`);
+  const text = result.phones ? texts.number(result.phones, adId) : texts[result.reason] || texts.failed;
+  const reply = messageId ? { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } } : {};
+  return sendMsg(TELEGRAM_TOKEN, chatId, escapeHtml(text), reply);
 }
 
 async function answerCb(token, callbackId, text = '', showAlert = false) {
@@ -2311,6 +2438,19 @@ async function handleCallback(cb) {
   const t = T[lang];
   const state = stateFor(chatId);
   const messageId = cb.message?.message_id;
+
+  // "📞 Телефон" under an apartment card: subscribers (and the admin) get the seller's number.
+  if (data.startsWith('phone_')) {
+    const texts = PHONE_TEXTS[lang] || PHONE_TEXTS.ru;
+    if (!isSubscribed(chatId) && chatId !== ADMIN_CHAT_ID) {
+      await answerCb(TELEGRAM_TOKEN, cb.id, texts.needSub, true);
+      return sendMsg(TELEGRAM_TOKEN, chatId, texts.needSub, { reply_markup: buySubscriptionMenu(lang) });
+    }
+    await answerCb(TELEGRAM_TOKEN, cb.id, texts.wait);
+    // In the background, like "more photos": OLX may take a moment.
+    void sendAdPhone(chatId, data.slice('phone_'.length), lang, messageId).catch((error) => console.error(`[Телефон] ${chatId}: ${error.stack || error.message}`));
+    return;
+  }
 
   // "🖼 Ещё N фото" under an apartment card.
   if (data.startsWith('more_photos_')) {
@@ -4210,12 +4350,14 @@ function formatAdText(ad, { contactLink = null } = {}) {
   // The "ID..." fragment inside the URL is an unrelated internal slug, not this number.
   const numberLine = ad.adId ? `\n\n🔢 № объявления: <code>${escapeHtml(ad.adId)}</code>` : '';
   const header = `🏠 <b>${escapeHtmlToFit(title, 120)}</b>\n\n💰 <b>${escapeHtmlToFit(ad.price, 70)}</b>\n\n📍 ${escapeHtmlToFit(ad.location, 80)}\n\n🕐 <i>${escapeHtmlToFit(time, 40)}</i>${paramBlock}`;
-  // The contact link is a button under the ad (adContactMarkup), not part of the text.
+  // For clients the OLX link is a button under the ad (adCardMarkup); channels get it in the text.
   const linkLine = contactLink?.url ? `\n\n<a href="${escapeHtml(contactLink.url)}">${escapeHtml(contactLink.label)}</a>` : '';
   // How fast the bot found it — shown only when it was within the first minute.
   const foundSeconds = Math.round(Number(ad.foundInMs) / 1000);
   const speedLine = Number.isFinite(foundSeconds) && foundSeconds >= 0 && foundSeconds <= 60 ? `\n⚡ Найдено за ${Math.max(1, foundSeconds)} сек` : '';
-  const footer = `${numberLine}\n\n🎭 ${author}${speedLine}${linkLine}`;
+  // Still under OLX's review: the client knows why the OLX link does not open yet.
+  const pendingLine = ad.pending ? '\n\n🕓 <b>На проверке у OLX</b> — ещё не опубликовано, вы видите его первым. Ссылка на OLX заработает после публикации.' : '';
+  const footer = `${numberLine}\n\n🎭 ${author}${speedLine}${pendingLine}${linkLine}`;
   // The text is sent as a caption on the first photo of the album when the ad has
   // images (tighter ~1,024-char Telegram limit), or as a plain sendMessage when it
   // doesn't (up to ~4,000 chars). Reserve room for all metadata first and give the
@@ -4268,12 +4410,6 @@ function adContactLink(ad, lang = 'ru') {
   const url = String(ad?.url || '');
   if (!/^https:\/\/(?:www\.)?olx\.uz\//i.test(url)) return null;
   return { url, label: CONTACT_LABELS[lang] || CONTACT_LABELS.ru };
-}
-
-function adContactMarkup(ad, lang = 'ru') {
-  const url = String(ad?.url || '');
-  if (!/^https:\/\/(?:www\.)?olx\.uz\//i.test(url)) return null;
-  return { inline_keyboard: [[{ text: CONTACT_LABELS[lang] || CONTACT_LABELS.ru, url }]] };
 }
 
 function adPrice(ad) {
@@ -4643,13 +4779,15 @@ function teaserText(ad, lang, role) {
   if (lang === 'uz') {
     const age = seconds < 90 ? `${seconds} soniya` : `${Math.round(seconds / 60)} daqiqa`;
     const others = role === 'seeker' ? 'uni hali deyarli hech kim ko‘rmagan' : 'boshqa maklerlar uni hali ko‘rmagan';
-    return `🔒 <b>Qidiruvingizga mos kvartira hozirgina chiqdi</b>\n\n🏠 ${categoryLabel(ad.category, 'uz')}${rooms ? `, ${rooms} xonali` : ''}\n📍 ${district}\n💰 ${price}\n⚡ ${age} oldin e’lon qilindi — ${others}.\n\n`
-      + 'Obuna tugagan, shuning uchun kontaktlar yopiq. Obunani uzaytiring — bunday kvartiralar sizga to‘liq, «📞 Bog‘lanish» tugmasi bilan keladi.';
+    const when = ad.pending ? `🕓 Hali OLX tekshiruvida — uni hali hech kim ko‘rmagan` : `⚡ ${age} oldin e’lon qilindi — ${others}`;
+    return `🔒 <b>Qidiruvingizga mos kvartira hozirgina chiqdi</b>\n\n🏠 ${categoryLabel(ad.category, 'uz')}${rooms ? `, ${rooms} xonali` : ''}\n📍 ${district}\n💰 ${price}\n${when}.\n\n`
+      + 'Obuna tugagan, shuning uchun kontaktlar yopiq. Obunani uzaytiring — bunday kvartiralar sizga to‘liq, «📞 Telefon» tugmasi bilan keladi.';
   }
   const age = seconds < 90 ? `${seconds} сек` : `${Math.round(seconds / 60)} мин`;
   const others = role === 'seeker' ? 'её ещё почти никто не видел' : 'другие маклеры её ещё не видят';
-  return `🔒 <b>Только что вышла квартира по вашему поиску</b>\n\n🏠 ${categoryLabel(ad.category, 'ru')}${rooms ? `, ${rooms} комн.` : ''}\n📍 ${district}\n💰 ${price}\n⚡ Опубликована ${age} назад — ${others}.\n\n`
-    + 'Подписка закончилась, поэтому контакты скрыты. Продлите — и такие квартиры будут приходить к вам целиком, с кнопкой «📞 Связаться».';
+  const when = ad.pending ? '🕓 Ещё на проверке у OLX — её пока никто не видит' : `⚡ Опубликована ${age} назад — ${others}`;
+  return `🔒 <b>Только что вышла квартира по вашему поиску</b>\n\n🏠 ${categoryLabel(ad.category, 'ru')}${rooms ? `, ${rooms} комн.` : ''}\n📍 ${district}\n💰 ${price}\n${when}.\n\n`
+    + 'Подписка закончилась, поэтому контакты скрыты. Продлите — и такие квартиры будут приходить к вам целиком, с кнопкой «📞 Телефон».';
 }
 
 async function maybeSendTeaser(chatId, ad) {
@@ -4795,13 +4933,53 @@ const PROBE_LOOKAHEAD_MAX = 60; // the circle widens while nothing is found
 // the capacity the frequent checks need.
 const PROBE_RETRY_FAST_MIN = [0.5, 0.5, 0.5, 0.5, 1, 2, 3, 3, 3, 3, 3, 3, 3, 3]; // 0.5, 1, 1.5, 2, 3, 5, 8, 11 … 29 min
 const PROBE_RETRY_SLOW_MIN = [2, 4, 8, 16]; // 2, 6, 14, 30 min
+// Lanes: parallel checkers sharing the one browser tab (one IP). HOME_LANES=1 in .env
+// brings back the single checker. Each lane adds ~40 requests a minute from the same IP.
+const HOME_LANES = Math.max(1, Math.min(4, Number(process.env.HOME_LANES) || 2));
+// With 2+ lanes there are enough requests to look at a fresh number often in its first
+// minutes. On olx.uz an ad under review mostly answers 404 ("no such ad"), so these are
+// exactly the numbers that may show up "disabled" (under review, visible) for a short
+// while. Quick looks at 10 and 10 s, then (minutes) — about 10, 20, 35, 50 s, 1:20,
+// 1:50, 2:50, 4:50, 8:50, 14:50, 22:50 after the number appeared.
+const PROBE_QUICK_SEC_ONE_LANE = [15];
+const PROBE_QUICK_SEC = [10, 10];
+const PROBE_RETRY_DENSE_MIN = [0.25, 0.25, 0.5, 0.5, 1, 2, 4, 6, 8];
+// While the queue runs late (no spare requests) — fewer checks, same half-hour reach.
+const PROBE_RETRY_DENSE_LAGGING_MIN = [0.5, 1, 2, 4, 8, 16];
+const DENSE_MAX_LAG_MS = 10_000;
+// The main lane mostly looks for new numbers, but every other turn it re-checks a number
+// from the queue that appeared at most 2 minutes ago (OLX creates far fewer new numbers
+// a minute than one lane can check).
+const YOUNG_RETRY_MS = 2 * 60_000;
+// A number checked longer ago than this said nothing when the front passed it: it may
+// not have existed yet. Such numbers go to the front of the queue instead.
+const GAP_STALE_MS = 20_000;
+// Catch-up: after a start, a pause (OLX block, sleep) or when the probe falls behind, it
+// jumps ahead in leaps (+10, +20, +40 …, up to 6 numbers at each point) instead of
+// walking number by number; the last numbers it leapt over go to the re-check queue.
+const CATCHUP_FIRST_STEP = 10;
+const CATCHUP_MAX_STEP = 10_240;
+const CATCHUP_SAMPLES = 6;
+const CATCHUP_QUEUE_MAX = 300;
+const CATCHUP_AFTER_PAUSE_MS = 60_000;
+const CATCHUP_EVERY_MS = 60_000;
+// Ads OLX shows while still reviewing them ("disabled": title, price, photos are visible)
+// are checked like any other (author, AI) and sent right away, marked 🕓, before they go
+// live. PENDING_ALERTS=0 in .env turns this off (then the bot waits until they go live).
+const PENDING_ALERTS = !['0', 'false', 'no'].includes(String(process.env.PENDING_ALERTS || '').trim().toLowerCase());
+// Statuses that mean the ad is gone, not under review: never sent as "under review".
+const PENDING_DEAD_STATUSES = new Set(['removed_by_user', 'removed_by_moderator', 'removed', 'deleted', 'outdated', 'blocked', 'archived', 'expired']);
+// OLX's answers come through AWS CloudFront, which may keep an error answer (404) for
+// ~10 s: a frequent re-check would then see a stale "no such ad". ?_=time makes every
+// request go past the cache. CACHE_BUST=0 turns it off; a 400 answer turns it off by itself.
+let cacheBust = !['0', 'false', 'no'].includes(String(process.env.CACHE_BUST || '').trim().toLowerCase());
 const PROBE_MAX_RETRIES = 3_000;
 const PROBE_JUMP_MAX_SCHEDULE = 1_000;
 // "Stuck" means no new ad at the front for this long. While the probe keeps
 // finding ads it is catching up (e.g. after a restart), not stuck.
 const PROBE_STUCK_MS = 90_000; // numbers queued for re-check when the probe has to jump over a big gap
 const TRANSIENT_RETRY_MS = 30_000; // OLX did not answer: try the same number again soon, without spending an attempt
-const LIST_INTERVAL_MS = 30_000; // the safety net: 1 request per section, cheap, catches late openers sooner
+const LIST_INTERVAL_MS = Math.max(5, Number(process.env.LIST_INTERVAL_SEC) || 30) * 1000; // the safety net: 1 request per section, cheap, catches late openers sooner
 const LIST_LIMIT = 50;
 // An ad counts as new for 3 hours after it was created: OLX sometimes reviews an
 // ad that long, and it is new on the market the moment it opens. Paid bumps of
@@ -4835,10 +5013,9 @@ const olx = {
 
 const probe = {
   cursor: 0, // highest number that opened as an ad
-  scanOffset: 0,
   lookahead: PROBE_LOOKAHEAD_MIN,
-  retries: new Map(), // number -> { attempt, dueAt }
-  lastWasRetry: false,
+  nearOffset: 0, farOffset: 0, farOrder: [], frontToggle: false, hammer: false, // see nextFrontId
+  retries: new Map(), // number -> { attempt, fast, firstAt, dueAt, unchecked }
   retryStreak: 0, // re-checks in a row
   lastFrontOpened: false, // the last check at the front found a new ad
   lastFrontHitAt: 0, // when the probe last found a new ad at the front
@@ -4851,7 +5028,11 @@ const probe = {
 };
 
 // Counters for the 5-minute status line.
-const engineStats = { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, freshestAgeMs: null };
+const engineStats = { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, freshestAgeMs: null };
+
+// Lanes share the one tab; each keeps its own request count for the report.
+const lanes = Array.from({ length: HOME_LANES }, (_, index) => ({ name: `поток ${index + 1}`, requests: 0, helpTurn: false }));
+const mainLane = lanes[0];
 
 const processedOlxIds = new Set();
 let adQueue = Promise.resolve();
@@ -4979,9 +5160,16 @@ async function browserTransport(url) {
 }
 
 // Returns { status, data } where data is the "data" field of OLX's answer.
-async function olxApi(pathAndQuery) {
-  const url = `${OLX_API}${pathAndQuery}`;
+async function olxApi(pathAndQuery, lane = null) {
+  if (lane) lane.requests += 1;
+  const busting = cacheBust && /^\d+\/$/.test(pathAndQuery);
+  const url = `${OLX_API}${pathAndQuery}${busting ? `?_=${Date.now()}` : ''}`;
   const { status, text } = await (olx.transport || browserTransport)(url);
+  if (status === 400 && busting) {
+    cacheBust = false;
+    console.warn('🧊 OLX не принимает ?_=время (ответ 400) — обход кэша выключен.');
+    return { status: 0, data: null };
+  }
   if (status === 403 || status === 429) {
     olx.blockedUntil = Date.now() + OLX_BLOCK_PAUSE_MS;
     if (status === 403 && !olx.transport) await closeOlxSession();
@@ -5370,7 +5558,10 @@ function noteUnknownDistrict(raw) {
 const AD_PROCESS_TIMEOUT_MS = 3 * 60_000;
 const AD_PROCESS_TIMED_OUT = Symbol('ad processing timed out');
 
-function enqueueApiAd(raw, source) {
+// pending: the ad is still under OLX's review (status "disabled"). It goes through the
+// same checks and is sent marked 🕓; when it goes live later, it is not sent again
+// (its number is already processed).
+function enqueueApiAd(raw, source, { pending = false } = {}) {
   if (processedOlxIds.has(raw.id)) return;
   processedOlxIds.add(raw.id);
   while (processedOlxIds.size > PROCESSED_IDS_KEEP) processedOlxIds.delete(processedOlxIds.values().next().value);
@@ -5378,14 +5569,15 @@ function enqueueApiAd(raw, source) {
     .then(async () => {
       // Every step inside has its own time limit; this is the safety net for the
       // whole ad, so the queue never waits forever.
-      const result = await withTimeout(processApiAd(raw, source), AD_PROCESS_TIMEOUT_MS, AD_PROCESS_TIMED_OUT);
+      const result = await withTimeout(processApiAd(raw, source, { pending }), AD_PROCESS_TIMEOUT_MS, AD_PROCESS_TIMED_OUT);
       if (result === AD_PROCESS_TIMED_OUT) console.error(`[OLX] Объявление ${raw.id} обрабатывается дольше 3 мин — перехожу к следующим.`);
     })
     .catch((error) => console.error(`[OLX] Сбой обработки объявления ${raw.id}: ${error.stack || error.message}`));
 }
 
-async function processApiAd(raw, source) {
+async function processApiAd(raw, source, { pending = false } = {}) {
   const ad = apiAdToBotAd(raw);
+  ad.pending = pending;
   if (!ad.category || seenAds.has(ad.url)) return;
   if (isRepost(ad)) {
     engineStats.reposts += 1;
@@ -5439,8 +5631,10 @@ async function processApiAd(raw, source) {
   }
   ad.classification = verdict.classification;
   ad.description = verdict.description;
-  const way = source === 'probe' ? 'перебор' : 'список';
-  ad.foundInMs = Date.now() - ad.publishedAt; // shown as "⚡ Найдено за N сек" when under a minute
+  const way = pending ? 'перебор, 🕓 на проверке у OLX' : source === 'probe' ? 'перебор' : 'список';
+  // Shown as "⚡ Найдено за N сек" when under a minute; an ad under review is not live yet.
+  ad.foundInMs = pending ? null : Date.now() - ad.publishedAt;
+  const when = pending ? 'до публикации' : `через ${formatAge(Date.now() - ad.publishedAt)} после публикации`;
   if (ad.authorId) processAuthorCache(`u${ad.authorId}`); // counted now that the ad is really going out
   const delivered = await sendToSubscribers(ad);
   // Say plainly whether anyone got it: "found" and "delivered" are different things.
@@ -5448,13 +5642,14 @@ async function processApiAd(raw, source) {
     ? `получили: клиентов ${delivered.clients}${delivered.channels ? `, каналов ${delivered.channels}` : ''}`
     : 'никому не подошло (нет подписчика с таким поиском)';
   engineHealth.lastApartmentAt = Date.now();
-  console.log(`✉️ ${ad.classification} (${verdict.roleReason}) · ${way} · через ${formatAge(Date.now() - ad.publishedAt)} после публикации · ${truncate(ad.title, 50)} → ${to}`);
-  if (source === 'probe') engineStats.sentProbe += 1;
+  console.log(`✉️ ${pending ? '🕓 ' : ''}${ad.classification} (${verdict.roleReason}) · ${way} · ${when} · ${truncate(ad.title, 50)} → ${to}`);
+  if (pending) engineStats.sentPending += 1;
+  else if (source === 'probe') engineStats.sentProbe += 1;
   else engineStats.sentList += 1;
   engineStats.delivered += delivered.clients;
   const moved = verdict.moved ? `, раздел исправлен на «${categoryLabel(verdict.category, 'ru')}»` : '';
   const roleName = { owner: 'Собственник', makler: 'Риелтор', unknown: 'Не определён' }[ad.classification] || ad.classification;
-  recordDecision(raw, `${delivered.clients || delivered.channels ? `отправлено (${to.replace('получили: ', '')})` : 'обработано, но никому не подошло по поиску'} — ${way}, через ${formatAge(Date.now() - ad.publishedAt)} после публикации${moved}. Роль: ${roleName} — ${verdict.roleReason}`, verdict.category);
+  recordDecision(raw, `${delivered.clients || delivered.channels ? `отправлено (${to.replace('получили: ', '')})` : 'обработано, но никому не подошло по поиску'} — ${way}, ${when}${moved}. Роль: ${roleName} — ${verdict.roleReason}`, verdict.category);
   seenAds.add(ad.url);
   syncDb('seen');
 }
@@ -5487,17 +5682,37 @@ async function syncProbeStart() {
   if (ids.length) probe.cursor = Math.max(probe.cursor, ...ids);
 }
 
+// Quick looks (seconds) at a number the front just passed: such numbers often open within seconds.
+function quickPlanSec() {
+  return HOME_LANES >= 2 ? PROBE_QUICK_SEC : PROBE_QUICK_SEC_ONE_LANE;
+}
+
+function retryPlanMin(fast) {
+  if (fast) return PROBE_RETRY_FAST_MIN;
+  if (HOME_LANES < 2) return PROBE_RETRY_SLOW_MIN;
+  return probe.retryLagAvg < DENSE_MAX_LAG_MS ? PROBE_RETRY_DENSE_MIN : PROBE_RETRY_DENSE_LAGGING_MIN;
+}
+
+// attempt < 0: one of the quick looks (-2, -1 …), then the plan from attempt 0.
 function scheduleProbeRetry(id, attempt, fast = false) {
-  const delays = fast ? PROBE_RETRY_FAST_MIN : PROBE_RETRY_SLOW_MIN;
-  if (attempt >= delays.length) {
-    probe.retries.delete(id);
-    return;
+  const firstAt = probe.retries.get(id)?.firstAt || Date.now();
+  let delayMs;
+  if (attempt < 0) {
+    const quick = quickPlanSec();
+    delayMs = quick[Math.max(0, quick.length + attempt)] * 1000;
+  } else {
+    const delays = retryPlanMin(fast);
+    if (attempt >= delays.length) {
+      probe.retries.delete(id);
+      return;
+    }
+    delayMs = delays[attempt] * 60_000;
   }
   if (!probe.retries.has(id) && probe.retries.size >= PROBE_MAX_RETRIES) {
     engineStats.retryOverflow += 1; // shown in the report: a number could not be queued
     return;
   }
-  probe.retries.set(id, { attempt, fast, dueAt: Date.now() + delays[attempt] * 60_000 });
+  probe.retries.set(id, { attempt, fast, firstAt, dueAt: Date.now() + delayMs });
 }
 
 // An ad that is not active yet but already shows what it is: worth re-checking
@@ -5518,16 +5733,39 @@ function isLikelyUnderReview(id) {
     || (seen?.status === 200 && seen.olxStatus && seen.olxStatus !== 'active');
 }
 
+// Under review and visible: everything isWantedApiAd checks, except that it is not live
+// yet (so no "published" age either). Created within API_MAX_AGE_MINUTES: an old ad sent
+// back to review after an edit is not news.
+function isWantedPendingAd(raw) {
+  if (!raw?.id || !raw.status || raw.status === 'active' || PENDING_DEAD_STATUSES.has(raw.status)) return false;
+  if (raw.location?.city?.id !== OLX_CITY_TASHKENT || raw.business) return false;
+  const category = OLX_CATEGORY_MAP[raw.category?.id];
+  if (!category || !CATEGORY_FAMILY[category].some((item) => wantedCategories().has(item))) return false;
+  if (apiParam(raw, 'comission')?.key === 'yes') return false;
+  const ageMinutes = (Date.now() - Date.parse(raw.created_time)) / 60_000;
+  return ageMinutes >= -5 && ageMinutes <= API_MAX_AGE_MINUTES;
+}
+
+// An ad that opened but is not live yet. Returns true when its number needs no more
+// re-checks: sent as "under review" now, or nothing the bot would ever send.
+function onPendingAd(raw) {
+  if (!isWorthWaitingFor(raw)) {
+    engineStats.letGo += 1;
+    return true;
+  }
+  if (!PENDING_ALERTS || !isWantedPendingAd(raw)) return false; // wait until it goes live
+  if (!processedOlxIds.has(raw.id)) console.log(`👀 На проверке у OLX [${raw.status}] №${raw.id} · ${truncate(oneLine(raw.title), 50)} → проверяю и отправляю, не дожидаясь публикации`);
+  enqueueApiAd(raw, 'probe', { pending: true });
+  return true;
+}
+
 function onProbeHit(raw) {
-  // Opened, but not active yet (for example still under OLX's review): check it
-  // again later instead of dropping it for good.
+  // Opened, but not active yet (for example still under OLX's review): sent right away
+  // if OLX already shows it, otherwise checked again later instead of dropped for good.
   if (raw.status && raw.status !== 'active') {
-    if (isWorthWaitingFor(raw)) {
-      if (!probe.retries.has(Number(raw.id))) scheduleProbeRetry(Number(raw.id), 0, true);
-    } else {
-      probe.retries.delete(Number(raw.id));
-      engineStats.letGo += 1;
-    }
+    const id = Number(raw.id);
+    if (onPendingAd(raw)) probe.retries.delete(id);
+    else if (!probe.retries.has(id)) scheduleProbeRetry(id, 0, true);
     return;
   }
   if (!isWantedApiAd(raw, wantedCategories(), { ignorePublishedAge: true })) return;
@@ -5575,7 +5813,7 @@ function reportEngine() {
   const subscribers = Object.keys(dbUsers).filter((chatId) => isSubscribed(chatId)).length;
   const freshest = engineStats.freshestAgeMs === null ? '—' : formatAge(engineStats.freshestAgeMs);
   console.log(`📊 За 5 мин: проверено номеров ${engineStats.checked}, открытых объявлений ${engineStats.open}, закрытых (на проверке/удалены) ${engineStats.closed}. `
-    + `Новых квартир: перебором ${engineStats.sentProbe}, списком ${engineStats.sentList}; доставлено клиентам ${engineStats.delivered} раз (активных подписчиков: ${subscribers}). `
+    + `Новых квартир: 🕓 на проверке у OLX ${engineStats.sentPending}, перебором ${engineStats.sentProbe}, списком ${engineStats.sentList}; доставлено клиентам ${engineStats.delivered} раз (активных подписчиков: ${subscribers}). `
     + `Отсеяно: шутки/спам ${engineStats.junk}, посуточно ${engineStats.daily}, повторы ${engineStats.reposts}, старше ${PUBLISHED_MAX_AGE_MINUTES} мин ${engineStats.stale}; исправлен раздел ${engineStats.moved}. `
     + `Пропуски перебора: ${[...missStats.values()].reduce((sum, count) => sum + count, 0)}${missStats.size ? ` (${[...missStats].map(([reason, count]) => `${reason}: ${count}`).join('; ')})` : ''}. `
     + `Учёт номеров: ${(() => { const uncovered = uncoveredNumbers(); return uncovered ? `⚠️ ${uncovered} не проверены и не в очереди` : 'каждый номер проверен или в очереди ✅'; })()}`
@@ -5587,7 +5825,9 @@ function reportEngine() {
       const lag = engineStats.retryLagSum / engineStats.retryDone;
       return lag < 60_000 ? ', перепроверки идут вовремя ✅' : `, перепроверки опаздывают в среднем на ${formatAge(lag)} ⚠️`;
     })()}. Ищу: ${wanted}.`);
-  Object.assign(engineStats, { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, freshestAgeMs: null });
+  console.log(`🌐 Потоков ${lanes.length}: ${lanes.map((lane) => `${lane.name} — ${lane.requests} запр.`).join(', ')} (~${Math.round(lanes.reduce((sum, lane) => sum + lane.requests, 0) / minutes)} в минуту)${engineStats.catchUps ? `, рывков к последнему номеру: ${engineStats.catchUps}` : ''}${engineStats.listPage2 ? `, вторая страница списка: ${engineStats.listPage2} раз` : ''}${cacheBust ? ', обход кэша OLX включён' : ''}.`);
+  Object.assign(engineStats, { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, freshestAgeMs: null });
+  for (const lane of lanes) lane.requests = 0;
   missStats.clear();
 }
 
@@ -5615,87 +5855,258 @@ function rememberScan(opened) {
   if (probe.recentScans.length > PROBE_RECENT_WINDOW) probe.recentScans.shift();
 }
 
-async function probeTick() {
-  // Numbers that were not open yet get re-checked now and then; alternate with
-  // scanning so neither can starve the other. While catching up, the front
-  // comes first and re-checks wait.
-  const behind = isProbeBehind();
-  if (behind) probe.behindChecks += 1;
-  // Extra re-check turns only while the front is quiet: if new numbers keep
-  // opening one after another, the front keeps its usual pace.
-  const lagging = probe.retryLagAvg > RETRY_LAGGING_MS && !probe.lastFrontOpened;
-  const retryTurns = !lagging ? 1 : probe.retryLagAvg > RETRY_LAGGING_HEAVY_MS ? 3 : 2;
-  if (!behind && probe.retryStreak < retryTurns) {
-    // The re-check that has waited longest goes first. (Putting the freshest
-    // numbers first was tried: late-opening ads then starved and were found far later.)
-    const now = Date.now();
-    let due = null;
-    for (const entry of probe.retries) {
-      if (entry[1].dueAt <= now && (!due || entry[1].dueAt < due[1].dueAt)) due = entry;
-    }
-    if (due) {
-      // How late this re-check runs; capped so one odd old entry can't distort the average.
-      const lag = Math.min(Math.max(0, now - due[1].dueAt), 30 * 60_000);
-      engineStats.retryLagSum += lag;
-      engineStats.retryDone += 1;
-      probe.retryLagAvg = probe.retryLagAvg * 0.9 + lag * 0.1;
-    } else {
-      probe.retryLagAvg *= 0.9; // nothing due: the queue is on time
-    }
-    if (due) {
-      probe.lastWasRetry = true;
-      probe.retryStreak += 1;
-      const [id, retry] = due;
-      const { status, data } = await olxApi(`${id}/`);
-      countProbeCheck(status, data);
-      logProbe(id, status, data);
-      if (status === 200 && data?.id && (!data.status || data.status === 'active')) {
-        probe.retries.delete(id);
-        engineStats.reopened += 1;
-        if (retry.fast) engineStats.reopenedFast += 1;
-        else engineStats.reopenedSlow += 1;
-        onProbeHit(data);
-      } else if (status === 200 && data?.id && !isWorthWaitingFor(data)) {
-        probe.retries.delete(id); // not active yet, and nothing the bot would send anyway
-        engineStats.letGo += 1;
-      } else if (status === 0 || status >= 500) {
-        // OLX did not answer properly: that says nothing about the ad, try again soon.
-        probe.retries.set(id, { ...retry, dueAt: Date.now() + TRANSIENT_RETRY_MS });
-      } else {
-        // A 404 number that turns into 410 / "not active" is now under review: switch to fast checks.
-        const fast = retry.fast || status === 410 || (status === 200 && data?.status && data.status !== 'active');
-        scheduleProbeRetry(id, fast && !retry.fast ? 0 : retry.attempt + 1, fast);
-      }
-      return;
-    }
-  }
-  probe.lastWasRetry = false;
-  probe.retryStreak = 0;
+// Numbers being checked right now (with several lanes: never the same number twice at once).
+const inFlight = new Set();
 
-  const id = probe.cursor + 1 + probe.scanOffset;
-  const { status, data } = await olxApi(`${id}/`);
+// The due re-check to do next: our ads under review first, then numbers the front passed
+// unchecked, then the one that has waited longest. youngMs — only numbers queued at most
+// that long ago.
+function pickDue(now, youngMs = 0) {
+  const rank = (retry) => (retry.unchecked ? 0 : 1);
+  let due = null;
+  for (const entry of probe.retries) {
+    const [id, retry] = entry;
+    if (retry.dueAt > now || inFlight.has(id)) continue;
+    if (youngMs && now - (retry.firstAt || now) > youngMs) continue;
+    if (!due || rank(retry) < rank(due[1]) || (rank(retry) === rank(due[1]) && retry.dueAt < due[1].dueAt)) due = entry;
+  }
+  return due;
+}
+
+// One re-check of a number from the queue.
+async function retryStep([id, retry], lane) {
+  // How late this re-check runs; capped so one odd old entry can't distort the average.
+  const lag = Math.min(Math.max(0, Date.now() - retry.dueAt), 30 * 60_000);
+  engineStats.retryLagSum += lag;
+  engineStats.retryDone += 1;
+  probe.retryLagAvg = probe.retryLagAvg * 0.9 + lag * 0.1;
+  inFlight.add(id);
+  let answer;
+  try {
+    answer = await olxApi(`${id}/`, lane);
+  } finally {
+    inFlight.delete(id);
+  }
+  const { status, data } = answer;
   countProbeCheck(status, data);
   logProbe(id, status, data);
-  rememberScan(status === 200 && Boolean(data?.id));
-  probe.lastFrontOpened = status === 200 && Boolean(data?.id);
-  if (status === 200 && data?.id) {
-    // Numbers skipped on the way were not open yet: check them again later.
-    for (let gap = probe.cursor + 1; gap < id; gap += 1) {
-      if (probe.retries.has(gap) || probeLog.get(gap)?.relevant === false) continue;
-      scheduleProbeRetry(gap, 0, isLikelyUnderReview(gap));
-    }
-    probe.cursor = id;
-    probe.scanOffset = 0;
-    probe.lookahead = PROBE_LOOKAHEAD_MIN;
-    probe.lastFrontHitAt = Date.now();
-    onProbeHit(data);
+  const opened = status === 200 && Boolean(data?.id);
+  if (!probe.retries.has(id)) {
+    // Another lane or /why dealt with this number meanwhile.
+    if (opened) onProbeHit(data);
     return;
   }
-  probe.scanOffset += 1;
-  if (probe.scanOffset >= probe.lookahead) {
-    // A whole circle without a single open ad: look a little further next time.
-    probe.scanOffset = 0;
-    probe.lookahead = Math.min(PROBE_LOOKAHEAD_MAX, probe.lookahead + PROBE_LOOKAHEAD_MIN);
+  if (opened && (!data.status || data.status === 'active')) {
+    probe.retries.delete(id);
+    engineStats.reopened += 1;
+    if (retry.fast) engineStats.reopenedFast += 1;
+    else engineStats.reopenedSlow += 1;
+    onProbeHit(data);
+  } else if (opened) {
+    // Not live yet: sent now if OLX shows it under review, let go, or re-checked often.
+    if (onPendingAd(data)) probe.retries.delete(id);
+    else scheduleProbeRetry(id, retry.fast ? retry.attempt + 1 : 0, true);
+  } else if (status === 0 || status >= 500) {
+    // OLX did not answer properly: that says nothing about the ad, try again soon.
+    probe.retries.set(id, { ...retry, dueAt: Date.now() + TRANSIENT_RETRY_MS });
+  } else {
+    // A 404 number that turns into 410 is now under review: switch to fast checks.
+    const fast = retry.fast || status === 410;
+    const next = retry.unchecked ? -quickPlanSec().length : retry.attempt < 0 ? retry.attempt + 1 : fast && !retry.fast ? 0 : retry.attempt + 1;
+    scheduleProbeRetry(id, next, fast);
+  }
+}
+
+function resetFront() {
+  probe.nearOffset = 0;
+  probe.farOffset = 0;
+  probe.farOrder = [];
+  probe.frontToggle = false;
+  probe.lookahead = PROBE_LOOKAHEAD_MIN;
+}
+
+// Which number ahead to check. The very next number (cursor+1) every other time: a new
+// ad most often appears exactly there. In between, +2…+6 in a circle: the next number may
+// be a draft while later ones are already open. While nothing opens (night, or OLX
+// skipped numbers) the circle widens up to +60, far numbers alternating with near ones.
+function nextFrontId() {
+  const far = probe.lookahead > PROBE_LOOKAHEAD_MIN && probe.frontToggle;
+  probe.frontToggle = !probe.frontToggle;
+  if (!far) {
+    probe.hammer = !probe.hammer;
+    if (probe.hammer) return probe.cursor + 1;
+    const offset = 1 + (probe.nearOffset % (PROBE_LOOKAHEAD_MIN - 1));
+    probe.nearOffset = (probe.nearOffset + 1) % (PROBE_LOOKAHEAD_MIN - 1);
+    if (probe.nearOffset === 0 && probe.lookahead === PROBE_LOOKAHEAD_MIN) growLookahead();
+    return probe.cursor + 1 + offset;
+  }
+  // Far numbers not in a row but every fourth: past a gap OLX skipped, a live ad is found sooner.
+  const offset = probe.farOrder[probe.farOffset];
+  probe.farOffset += 1;
+  if (probe.farOffset >= probe.farOrder.length) growLookahead();
+  return probe.cursor + 1 + offset;
+}
+
+function growLookahead() {
+  probe.lookahead = Math.min(PROBE_LOOKAHEAD_MAX, probe.lookahead * 2);
+  probe.farOffset = 0;
+  probe.farOrder = [];
+  for (const start of [0, 2, 1, 3]) {
+    for (let offset = PROBE_LOOKAHEAD_MIN + start; offset < probe.lookahead; offset += 4) probe.farOrder.push(offset);
+  }
+}
+
+// One check of a fresh number ahead.
+async function frontStep(lane) {
+  const id = nextFrontId();
+  const { status, data } = await olxApi(`${id}/`, lane);
+  countProbeCheck(status, data);
+  logProbe(id, status, data);
+  const opened = status === 200 && Boolean(data?.id);
+  rememberScan(opened);
+  probe.lastFrontOpened = opened;
+  if (!opened) return;
+  if (id > probe.cursor) {
+    // Numbers behind the one that opened were created earlier and may be open too.
+    // Closed seconds ago — quick looks; never checked or checked long ago (they may not
+    // have existed then) — to the front of the queue.
+    const at = Date.now();
+    for (let gap = probe.cursor + 1; gap < id; gap += 1) {
+      if (probe.retries.has(gap) || probeLog.get(gap)?.relevant === false) continue;
+      const seen = probeLog.get(gap);
+      if (!seen || at - seen.at > GAP_STALE_MS) probe.retries.set(gap, { attempt: -1, fast: false, unchecked: true, firstAt: at, dueAt: at });
+      else scheduleProbeRetry(gap, -quickPlanSec().length, isLikelyUnderReview(gap));
+    }
+    probe.cursor = id;
+    resetFront();
+    probe.lastFrontHitAt = Date.now();
+  } else if (!data.status || data.status === 'active') {
+    probe.retries.delete(id); // another lane already moved the front further
+  }
+  onProbeHit(data);
+}
+
+// One lane alone: re-checks and fresh numbers take turns (more re-check turns while the
+// queue runs late and the front is quiet). While catching up, the front comes first.
+async function mixedStep(lane) {
+  const behind = isProbeBehind();
+  const lagging = probe.retryLagAvg > RETRY_LAGGING_MS && !probe.lastFrontOpened;
+  const retryTurns = !lagging ? 1 : probe.retryLagAvg > RETRY_LAGGING_HEAVY_MS ? 3 : 2;
+  const due = behind ? null : pickDue(Date.now());
+  // Numbers the front passed unchecked get up to 3 turns in a row: they were created before
+  // an already open number, so most likely they are open too.
+  const turns = due?.[1].unchecked ? Math.max(3, retryTurns) : retryTurns;
+  if (due && probe.retryStreak < turns) {
+    probe.retryStreak += 1;
+    return retryStep(due, lane);
+  }
+  if (!due) probe.retryLagAvg *= 0.9; // nothing due: the queue is on time
+  probe.retryStreak = 0;
+  return frontStep(lane);
+}
+
+// One step of one lane. With several lanes the main one mostly looks for new numbers
+// (every other turn it re-checks a number queued in the last 2 minutes); the others work
+// the queue first and help at the front when it is empty.
+async function probeTick(lane = mainLane) {
+  if (isProbeBehind()) probe.behindChecks += 1;
+  if (lanes.length === 1) return mixedStep(lane);
+  if (lane === mainLane) {
+    lane.helpTurn = !lane.helpTurn;
+    const young = lane.helpTurn && !isProbeBehind() ? pickDue(Date.now(), YOUNG_RETRY_MS) : null;
+    return young ? retryStep(young, lane) : frontStep(lane);
+  }
+  const due = isProbeBehind() ? null : pickDue(Date.now());
+  if (due) return retryStep(due, lane);
+  probe.retryLagAvg *= 0.9;
+  return frontStep(lane);
+}
+
+// ---------- Catch-up: leap to the newest number ----------
+
+let lastCatchUpAt = 0;
+
+// Up to CATCHUP_SAMPLES numbers in a row from `from`: the first open one, or null.
+async function catchUpPoint(from) {
+  for (let k = 0; k < CATCHUP_SAMPLES; k += 1) {
+    const id = from + k;
+    const { status, data } = await olxApi(`${id}/`, mainLane);
+    countProbeCheck(status, data);
+    logProbe(id, status, data);
+    await sleep(PROBE_FAST_INTERVAL_MS);
+    if (status === 200 && data?.id) return { data, requests: k + 1 };
+  }
+  return { data: null, requests: CATCHUP_SAMPLES };
+}
+
+// Leaps of +10, +20, +40 …: an open number found — jump there and leap twice as far;
+// all closed at a point — the newest number is somewhere before it, so leaps get shorter
+// until the step is under 10 (the usual front covers the rest). Lands within a few
+// numbers of the newest open one in ~20-45 requests instead of minutes of walking.
+async function catchUp(reason) {
+  lastCatchUpAt = Date.now();
+  const from = probe.cursor;
+  const startedAt = Date.now();
+  let requests = 0;
+  let step = CATCHUP_FIRST_STEP;
+  let shrinking = false;
+  while (step >= CATCHUP_FIRST_STEP && step <= CATCHUP_MAX_STEP) {
+    const point = await catchUpPoint(probe.cursor + step);
+    requests += point.requests;
+    if (point.data) {
+      if (Number(point.data.id) > probe.cursor) {
+        probe.cursor = Number(point.data.id);
+        resetFront();
+        probe.lastFrontHitAt = Date.now();
+        probe.recentScans = [];
+      }
+      onProbeHit(point.data);
+    } else {
+      shrinking = true;
+    }
+    step = shrinking ? Math.floor(step / 2) : step * 2;
+  }
+  // The last numbers leapt over go to the queue: among them are the ads under review now.
+  const at = Date.now();
+  for (let gap = Math.max(from + 1, probe.cursor - CATCHUP_QUEUE_MAX); gap < probe.cursor; gap += 1) {
+    if (probe.retries.has(gap) || probeLog.get(gap)?.relevant === false || probe.retries.size >= PROBE_MAX_RETRIES) continue;
+    probe.retries.set(gap, { attempt: -1, fast: false, unchecked: true, firstAt: at, dueAt: at });
+  }
+  const ahead = probe.cursor - from;
+  if (ahead > 0 || reason === 'запуск') {
+    engineStats.catchUps += 1;
+    console.log(`⏩ Рывок (${reason}): ${ahead > 0 ? `${from} → ${probe.cursor}, +${ahead} номеров` : `уже на последнем номере ${probe.cursor}`} за ${requests} запросов, ${formatAge(Date.now() - startedAt)}.`);
+  }
+}
+
+// Numbers created while the bot was off (a short restart): to the queue, some of them are
+// still under review or have just gone live.
+function queueGapSince(savedCursor) {
+  if (!savedCursor || probe.cursor - savedCursor > CATCHUP_QUEUE_MAX) return;
+  for (let id = savedCursor + 1; id < probe.cursor; id += 1) {
+    if (!probe.retries.has(id)) scheduleProbeRetry(id, 0);
+  }
+}
+
+// The other lanes: each runs its own loop next to the main one.
+async function laneWorker(lane) {
+  while (true) {
+    const now = Date.now();
+    if (now < olx.blockedUntil) {
+      await sleep(Math.min(5_000, olx.blockedUntil - now));
+      continue;
+    }
+    try {
+      await probeTick(lane);
+    } catch (error) {
+      const blocked = String(error.message).match(/^OLX_BLOCKED (\d+)/);
+      if (blocked) await noticeOlxBlock(blocked[1]);
+      else {
+        console.error(`[OLX] ${lane.name}: ${error.message}`);
+        await sleep(10_000);
+      }
+    }
+    await sleep(Math.max(50, probeIntervalMs() - (Date.now() - now)));
   }
 }
 
@@ -5719,22 +6130,37 @@ function unstickProbe(ids) {
   }
   console.warn(`⚠️ Перебор застрял на номере ${probe.cursor}: впереди большой разрыв. Перехожу к ${highest}, пропущенные номера (${highest - from}) поставлены на проверку.`);
   probe.cursor = highest - 1;
-  probe.scanOffset = 0;
-  probe.lookahead = PROBE_LOOKAHEAD_MIN;
+  resetFront();
   engineStats.jumps += 1;
 }
 
 // warmUp = the first pass after a (re)start: ads older than PUBLISHED_MAX_AGE_MINUTES
 // are only remembered, so a restart doesn't flood clients with older apartments.
+// Numbers on each section's first page last time (without paid "top" ads — those stay there).
+const listLastSeen = new Map(); // OLX category -> Set of numbers
+
 async function listSweep({ warmUp = false } = {}) {
   const wanted = wantedCategories();
   const sections = new Set([...wanted].flatMap((category) => CATEGORY_FAMILY[category] || []));
   let remembered = 0;
   for (const category of sections) {
     for (const olxCategory of OLX_CATEGORY_IDS[category] || []) {
-      const { data } = await olxApi(`?offset=0&limit=${LIST_LIMIT}&category_id=${olxCategory}&city_id=${OLX_CITY_TASHKENT}&sort_by=created_at:desc`);
-      if (!warmUp && Array.isArray(data)) unstickProbe(data.filter((item) => !item.promotion?.top_ad).map((item) => item.id));
-      for (const raw of Array.isArray(data) ? data : []) {
+      const query = (offset) => `?offset=${offset}&limit=${LIST_LIMIT}&category_id=${olxCategory}&city_id=${OLX_CITY_TASHKENT}&sort_by=created_at:desc`;
+      const { data: firstPage } = await olxApi(query(0), mainLane);
+      const data = Array.isArray(firstPage) ? [...firstPage] : [];
+      // Not one number from last time on the first page: more than a page of ads went live
+      // or got bumped since, and a new one may have slid to the second page. Read it too.
+      const plain = (list) => list.filter((item) => !item.promotion?.top_ad).map((item) => Number(item.id));
+      const before = listLastSeen.get(olxCategory);
+      if (!warmUp && before && data.length >= LIST_LIMIT && !plain(data).some((id) => before.has(id))) {
+        engineStats.listPage2 += 1;
+        await sleep(300);
+        const { data: secondPage } = await olxApi(query(LIST_LIMIT), mainLane);
+        if (Array.isArray(secondPage)) data.push(...secondPage);
+      }
+      listLastSeen.set(olxCategory, new Set(plain(data).slice(0, LIST_LIMIT)));
+      if (!warmUp && data.length) unstickProbe(plain(data));
+      for (const raw of data) {
         if (!isWantedApiAd(raw, wanted, { ignorePublishedAge: true })) continue;
         if (warmUp && !isFreshEnough(raw, 'list')) {
           if (!processedOlxIds.has(raw.id)) {
@@ -5825,6 +6251,7 @@ async function runOlxEngine() {
   let lastList = 0;
   let lastSave = 0;
   let lastReport = Date.now();
+  let lastLoopAt = Date.now();
   let started = false;
 
   while (true) {
@@ -5835,16 +6262,23 @@ async function runOlxEngine() {
     }
     try {
       if (!started) {
-        // A fresh saved position (a quick restart) is continued as is: jumping to
-        // the list's newest number would skip the numbers in between.
-        if (!probe.cursor) await syncProbeStart();
+        // Always from the newest numbers: walking through the numbers of a pause one by
+        // one takes minutes while the fresh ones wait. A short gap (≤300 numbers) is queued
+        // for re-checks; published ads of a longer pause come with the list's first pass.
+        const savedCursor = probe.cursor;
+        await syncProbeStart();
+        queueGapSince(savedCursor);
+        // The list gives the newest PUBLISHED number; the ones under review are further ahead.
+        await catchUp('запуск');
         started = true;
+        lastLoopAt = Date.now();
         probe.reportCursor = probe.cursor;
         probe.startCursor = probe.cursor;
         probe.startedAt = Date.now();
         startSilenceWatch();
         const listEvery = LIST_INTERVAL_MS >= 60_000 ? `${Math.round(LIST_INTERVAL_MS / 60_000)} мин` : `${Math.round(LIST_INTERVAL_MS / 1000)} сек`;
-        console.log(`🚀 Ищу новые объявления: перебор с номера ${probe.cursor + 1}, список — раз в ${listEvery}.`);
+        console.log(`🚀 Ищу новые объявления: перебор с номера ${probe.cursor + 1}, список — раз в ${listEvery}. Потоков: ${lanes.length} (~${Math.round((60_000 / PROBE_INTERVAL_MS) * lanes.length)} запросов в минуту)${PENDING_ALERTS ? ', квартиры «на проверке» у OLX шлю сразу (🕓)' : ''}${cacheBust ? ', обход кэша OLX включён' : ''}.`);
+        for (const lane of lanes.slice(1)) laneWorker(lane).catch((error) => console.error(`[OLX] ${lane.name} остановился: ${error.stack || error.message}`));
       }
       if (olx.runtime && now - olx.openedAt >= OLX_BROWSER_RESTART_MS) {
         console.log('🔄 Плановый перезапуск браузера (профилактика памяти).');
@@ -5855,7 +6289,12 @@ async function runOlxEngine() {
         lastList = now;
         await listSweep({ warmUp });
       }
-      await probeTick();
+      // The bot stood still (OLX block, sleep) or nearly every number ahead is open (behind):
+      // leap to the newest number instead of walking there.
+      if (now - lastLoopAt > CATCHUP_AFTER_PAUSE_MS) await catchUp(`бот стоял ${formatAge(now - lastLoopAt)}`);
+      else if (isProbeBehind() && now - lastCatchUpAt > CATCHUP_EVERY_MS) await catchUp('отстал');
+      await probeTick(mainLane);
+      lastLoopAt = Date.now();
       if (now - lastSave >= 30_000) {
         lastSave = now;
         saveProbeCursor();
@@ -5872,7 +6311,7 @@ async function runOlxEngine() {
         await sleep(10_000);
       }
     }
-    await sleep(probeIntervalMs());
+    await sleep(Math.max(50, probeIntervalMs() - (Date.now() - now)));
   }
 }
 
@@ -5895,7 +6334,9 @@ async function explainOlxAd(id) {
     lines.push(`${ok ? '✅' : '❌'} ${text}`);
   };
 
-  check(!raw.status || raw.status === 'active', `Активно на OLX${raw.status && raw.status !== 'active' ? ` — нет, статус «${escapeHtml(raw.status)}»` : ''}`);
+  const underReview = raw.status && raw.status !== 'active' && PENDING_ALERTS && !PENDING_DEAD_STATUSES.has(raw.status);
+  if (underReview) lines.push(`🕓 На проверке у OLX (статус «${escapeHtml(raw.status)}») — такие бот шлёт сразу, до публикации`);
+  else check(!raw.status || raw.status === 'active', `Активно на OLX${raw.status && raw.status !== 'active' ? ` — нет, статус «${escapeHtml(raw.status)}»` : ''}`);
   check(raw.location?.city?.id === OLX_CITY_TASHKENT, `Город Ташкент — ${escapeHtml(ad.location || 'не указан')}`);
   check(Boolean(category), category ? `Раздел: ${categoryLabel(category, 'ru')}` : `Раздел OLX №${escapeHtml(raw.category?.id)} — бот его не смотрит`);
   if (category) check(CATEGORY_FAMILY[category].some((item) => wanted.has(item)), 'Этот раздел ищет хотя бы один клиент или канал');
@@ -5903,7 +6344,7 @@ async function explainOlxAd(id) {
   check(apiParam(raw, 'comission')?.key !== 'yes', apiParam(raw, 'comission')?.key === 'yes' ? 'Без комиссии — нет, указана комиссия' : 'Без комиссии');
   check(ageMs <= API_MAX_AGE_MINUTES * 60_000, `Новое: создано ${formatAge(ageMs)} назад (бот берёт до ${API_MAX_AGE_MINUTES / 60} ч)`);
   const publishedAgeMs = Date.now() - apiPublishedAt(raw);
-  check(publishedAgeMs <= LIST_PUBLISHED_MAX_AGE_MINUTES * 60_000, `Свежее: на OLX с «Опубликовано» прошло ${formatAge(publishedAgeMs)} (бот отправляет до ${PUBLISHED_MAX_AGE_MINUTES} мин, найденное списком — до ${LIST_PUBLISHED_MAX_AGE_MINUTES})`);
+  if (!underReview) check(publishedAgeMs <= LIST_PUBLISHED_MAX_AGE_MINUTES * 60_000, `Свежее: на OLX с «Опубликовано» прошло ${formatAge(publishedAgeMs)} (бот отправляет до ${PUBLISHED_MAX_AGE_MINUTES} мин, найденное списком — до ${LIST_PUBLISHED_MAX_AGE_MINUTES})`);
   // Same order as when sending: the corrected section (if the bot changed it) decides.
   const decidedCategory = adDecisions.get(Number(id))?.category || category;
   const scam = isSuspiciouslyCheap(decidedCategory, ad.priceAmount);
