@@ -5038,7 +5038,7 @@ const probe = {
 };
 
 // Counters for the 5-minute status line.
-const engineStats = { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, freshestAgeMs: null };
+const engineStats = { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, notTaken: new Map(), freshestAgeMs: null };
 
 // Lanes share the one tab; each keeps its own request count for the report.
 const lanes = Array.from({ length: HOME_LANES }, (_, index) => ({ name: `поток ${index + 1}`, requests: 0, helpTurn: false }));
@@ -5605,6 +5605,7 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   const rules = dealByRules(ad);
   const sureKind = rules.priceKind || rules.textKind;
   if (!wanted.has(ad.category) && sureKind === DEAL_KIND[ad.category]) {
+    countNotTaken(`${categoryLabel(ad.category, 'ru')} — никто не ищет`);
     recordDecision(raw, 'пропущено: этот раздел сейчас никто не ищет');
     seenAds.add(ad.url);
     syncDb('seen');
@@ -5626,6 +5627,7 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   }
   ad.category = verdict.category;
   if (!wanted.has(ad.category)) {
+    countNotTaken(`${categoryLabel(ad.category, 'ru')} — никто не ищет`);
     recordDecision(raw, 'пропущено: этот раздел сейчас никто не ищет', ad.category);
     seenAds.add(ad.url);
     syncDb('seen');
@@ -5743,6 +5745,28 @@ function isLikelyUnderReview(id) {
     || (seen?.status === 200 && seen.olxStatus && seen.olxStatus !== 'active');
 }
 
+// Real-estate ads the probe opened but did not take, by reason — for the 5-minute report,
+// so "why did nothing come" is answered by numbers. Counted once per number.
+const notTakenSeen = new Set();
+function noteNotTaken(raw) {
+  const category = OLX_CATEGORY_MAP[raw.category?.id];
+  if (!category || notTakenSeen.has(raw.id)) return;
+  notTakenSeen.add(raw.id);
+  while (notTakenSeen.size > PROCESSED_IDS_KEEP) notTakenSeen.delete(notTakenSeen.values().next().value);
+  const ageMinutes = (Date.now() - Date.parse(raw.created_time)) / 60_000;
+  const reason = raw.location?.city?.id !== OLX_CITY_TASHKENT ? 'не Ташкент'
+    : raw.business ? 'агентство (бизнес-аккаунт)'
+      : apiParam(raw, 'comission')?.key === 'yes' ? 'с комиссией'
+        : !CATEGORY_FAMILY[category].some((item) => wantedCategories().has(item)) ? `${categoryLabel(category, 'ru')} — никто не ищет`
+          : !(ageMinutes >= -5 && ageMinutes <= API_MAX_AGE_MINUTES) ? 'старое (платное поднятие)'
+            : 'другое';
+  countNotTaken(reason);
+}
+
+function countNotTaken(reason) {
+  engineStats.notTaken.set(reason, (engineStats.notTaken.get(reason) || 0) + 1);
+}
+
 // Under review and visible: everything isWantedApiAd checks, except that it is not live
 // yet (so no "published" age either). Created within API_MAX_AGE_MINUTES: an old ad sent
 // back to review after an edit is not news.
@@ -5778,7 +5802,10 @@ function onProbeHit(raw) {
     else if (!probe.retries.has(id)) scheduleProbeRetry(id, 0, true);
     return;
   }
-  if (!isWantedApiAd(raw, wantedCategories(), { ignorePublishedAge: true })) return;
+  if (!isWantedApiAd(raw, wantedCategories(), { ignorePublishedAge: true })) {
+    noteNotTaken(raw);
+    return;
+  }
   if (!isFreshEnough(raw)) {
     skipStale(raw, 'probe');
     return;
@@ -5835,8 +5862,11 @@ function reportEngine() {
       const lag = engineStats.retryLagSum / engineStats.retryDone;
       return lag < 60_000 ? ', перепроверки идут вовремя ✅' : `, перепроверки опаздывают в среднем на ${formatAge(lag)} ⚠️`;
     })()}. Ищу: ${wanted}.`);
+  const notTaken = [...engineStats.notTaken].sort((a, b) => b[1] - a[1]);
+  const notTakenTotal = notTaken.reduce((sum, [, count]) => sum + count, 0);
+  console.log(`🏠 Недвижимость, которую перебор увидел, но не взял: ${notTakenTotal}${notTaken.length ? ` — ${notTaken.map(([reason, count]) => `${reason} ${count}`).join(', ')}` : ''}. Бот берёт только Ташкент, частных лиц без комиссии, из разделов, которые ищут подписчики (сейчас: ${wanted}).`);
   console.log(`🌐 Потоков ${lanes.length}: ${lanes.map((lane) => `${lane.name} — ${lane.requests} запр.`).join(', ')} (~${Math.round(lanes.reduce((sum, lane) => sum + lane.requests, 0) / minutes)} в минуту)${engineStats.catchUps ? `, рывков к последнему номеру: ${engineStats.catchUps}` : ''}${engineStats.listPage2 ? `, вторая страница списка: ${engineStats.listPage2} раз` : ''}${cacheBust ? ', обход кэша OLX включён' : ''}.`);
-  Object.assign(engineStats, { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, freshestAgeMs: null });
+  Object.assign(engineStats, { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, notTaken: new Map(), freshestAgeMs: null });
   for (const lane of lanes) lane.requests = 0;
   missStats.clear();
 }
