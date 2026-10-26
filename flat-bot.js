@@ -37,6 +37,7 @@
  *                             Строки нет — только «на проверке»
  *   HOME_LANES=2              больше проверок в минуту (по умолчанию 1 поток) — больше
  *                             квартир ловится на проверке, но OLX может начать отвечать блоком
+ *   PHONE_BUTTON=0            убрать кнопку «📞 Телефон» (по умолчанию есть)
  *   FLAT_CATEGORY_IDS=...     номер раздела «Квартиры» на OLX;
  *                             пусто — бот найдёт сам при первом запуске
  *
@@ -189,6 +190,8 @@ const PROBE_STATE_FILE = path.join(__dirname, 'flat_probe.json');
 const HANDLED_FILE = path.join(__dirname, 'flat_seen.json');
 const CATEGORIES_FILE = path.join(__dirname, 'flat_categories.json');
 const SUBSCRIBERS_FILE = path.join(__dirname, 'flat_subscribers.json');
+const PHONES_FILE = path.join(__dirname, 'flat_phones.json');
+const PHONE_BUTTON = !['0', 'false', 'no'].includes(String(process.env.PHONE_BUTTON || '').trim().toLowerCase());
 
 // Темп перебора — как в боте машин (подобран симуляцией). Быстрее не надо:
 // OLX начнёт отвечать 429/403, и бот встанет на 5 минут.
@@ -485,9 +488,14 @@ async function pollUpdates() {
   let offset = 0;
   while (true) {
     try {
-      const updates = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'channel_post'] }, 35_000);
+      const updates = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'channel_post', 'callback_query'] }, 35_000);
       for (const update of updates) {
         offset = update.update_id + 1;
+        // Кнопка «📞 Телефон» — в фоне, чтобы /start и другие кнопки не ждали OLX.
+        if (update.callback_query) {
+          onButton(update.callback_query).catch((error) => console.error(`[Кнопка] ${firstLine(error)}`));
+          continue;
+        }
         const message = update.message || update.channel_post;
         const command = String(message?.text || '').match(/^\/(start|stop|why|diag)\b/)?.[1];
         if (!message?.chat || !command) continue;
@@ -529,6 +537,116 @@ async function pollUpdates() {
       await sleep(10_000);
     }
   }
+}
+
+// ============================================================================
+// Телефон продавца — по кнопке «📞 Телефон»
+// ============================================================================
+// Номер берётся у OLX только когда кто-то нажал кнопку (не у всех объявлений подряд) и
+// запоминается в flat_phones.json: следующие нажатия — и других подписчиков тоже — получают его
+// из базы, без нового запроса к OLX. Одновременные нажатия на одно объявление — один запрос.
+
+const phoneBook = new Map(Object.entries(loadJson(PHONES_FILE, {}))); // номер объявления -> { phones, at }
+const PHONES_KEEP = 5_000;
+const PHONE_GAP_MS = 2_000; // к OLX за номерами — не чаще раза в 2 сек
+const PHONE_RETRY_MS = 30_000; // не получилось (на проверке, лимит) — снова спрашиваем OLX не раньше чем через 30 сек
+const phoneMisses = new Map(); // номер объявления -> { at, text }
+const phoneInFlight = new Map(); // номер объявления -> Promise
+let phoneQueue = Promise.resolve();
+let lastPhoneAt = 0;
+
+function savePhoneBook() {
+  while (phoneBook.size > PHONES_KEEP) phoneBook.delete(phoneBook.keys().next().value);
+  saveJson(PHONES_FILE, Object.fromEntries(phoneBook));
+}
+
+// OLX отдаёт номера списком: { data: { phones: ["+998 …"] } } (на всякий случай понимаем и другие виды).
+function parsePhones(text) {
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const list = body?.data?.phones ?? body?.phones ?? body?.data ?? [];
+  return (Array.isArray(list) ? list : [list])
+    .map((item) => oneLine(item !== null && typeof item === 'object' ? (item.phone ?? item.number ?? item.value) : item))
+    .filter((phone) => phone.replace(/\D/g, '').length >= 7); // «+998 90 123 45 67» — цифр 12
+}
+
+async function fetchPhones(adId) {
+  const url = `${OLX_API}${adId}/limited-phones/`;
+  const request = phoneQueue.then(async () => {
+    const wait = lastPhoneAt + PHONE_GAP_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastPhoneAt = Date.now();
+    olx.requests += 1;
+    // Не через olxApi: там 403 считается блоком IP и ставит на паузу весь перебор,
+    // а здесь 401/403 значит только «OLX хочет вход в аккаунт».
+    return olx.transport ? olx.transport(url) : browserTransport(url, olx);
+  });
+  phoneQueue = request.catch(() => {});
+  const { status, text } = await request;
+  if (status === 200) {
+    const list = parsePhones(text);
+    if (list.length) return { phones: list };
+    console.warn(`[Телефон] №${adId}: OLX ответил 200, но номера в ответе нет: ${truncate(oneLine(text), 150)}`);
+    return { error: 'OLX не отдал номер — возможно, продавец его скрыл.' };
+  }
+  console.warn(`[Телефон] №${adId}: OLX ответил ${status}: ${truncate(oneLine(text), 150)}`);
+  if (status === 401 || status === 403) return { error: 'OLX показывает этот номер только после входа в аккаунт — без входа взять не получилось.' };
+  if (status === 404 || status === 410) return { error: 'Объявление ещё на проверке у OLX (или снято) — номер появится после публикации. Нажмите чуть позже.' };
+  if (status === 429) return { error: 'OLX временно ограничил показ номеров — попробуйте через минуту.' };
+  return { error: `OLX не ответил (${status || 'нет связи'}) — попробуйте ещё раз.` };
+}
+
+// Номер из базы, а если его там нет — один запрос к OLX на всех, кто нажал.
+async function getPhones(adId) {
+  const saved = phoneBook.get(String(adId));
+  if (saved) return { phones: saved.phones, fromBook: true };
+  const miss = phoneMisses.get(adId);
+  if (miss && Date.now() - miss.at < PHONE_RETRY_MS) return { error: miss.text };
+  if (!phoneInFlight.has(adId)) {
+    const request = fetchPhones(adId)
+      .catch((error) => ({ error: `Не получилось: ${firstLine(error)}` }))
+      .then((result) => {
+        if (result.phones) {
+          phoneBook.set(String(adId), { phones: result.phones, at: new Date().toISOString() });
+          phoneMisses.delete(adId);
+          savePhoneBook();
+        } else {
+          phoneMisses.set(adId, { at: Date.now(), text: result.error });
+        }
+        return result;
+      })
+      .finally(() => phoneInFlight.delete(adId));
+    phoneInFlight.set(adId, request);
+  }
+  return phoneInFlight.get(adId);
+}
+
+async function onButton(query) {
+  const adId = Number(String(query.data || '').match(/^ph:(\d+)$/)?.[1]);
+  if (!adId) {
+    await tg('answerCallbackQuery', { callback_query_id: query.id }).catch(() => {});
+    return;
+  }
+  const chat = query.message?.chat;
+  const privateChat = chat?.type === 'private';
+  // В личке сразу снимаем «часики» с кнопки, номер придёт сообщением.
+  if (privateChat) await tg('answerCallbackQuery', { callback_query_id: query.id, text: '📞 Узнаю номер…' }).catch(() => {});
+  const result = await getPhones(adId);
+  const who = oneLine([query.from?.first_name, query.from?.last_name].filter(Boolean).join(' ') || query.from?.username || query.from?.id);
+  console.log(`📞 ${who} — №${adId}: ${result.phones ? `номер ${result.fromBook ? 'из базы' : 'получен с OLX и сохранён'}` : result.error}`);
+  const text = result.phones ? `📞 ${result.phones.join(', ')}` : `📞 ${result.error}`;
+  if (privateChat) {
+    // Ответом на сообщение с квартирой; номер в тексте Telegram сам делает кнопкой «позвонить».
+    await tg('sendMessage', { chat_id: chat.id, text: `${text}\nОбъявление № ${adId}`, reply_parameters: { message_id: query.message.message_id, allow_sending_without_reply: true } })
+      .catch((error) => console.error(`[Телефон] Не отправил в ${chat.id}: ${error.message}`));
+    return;
+  }
+  // Канал или группа: номер видит только тот, кто нажал (во всплывающем окне).
+  await tg('answerCallbackQuery', { callback_query_id: query.id, text: truncate(text, 200), show_alert: true }).catch(() => {});
 }
 
 // ============================================================================
@@ -1220,7 +1338,9 @@ function buildMessage(raw, { pending = false } = {}) {
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
   const room = 1_000 - text.length - 10;
   if (description && room > 60) text = [...head, '', `<i>${esc(truncate(description, room))}</i>`, '', ...tail].join('\n');
-  return { text, url, photo: photoUrl(raw), keyboard: { inline_keyboard: [[{ text: pending ? '🔗 Открыть (после публикации)' : '🔗 Открыть на OLX', url }]] } };
+  const buttons = [[{ text: pending ? '🔗 Открыть (после публикации)' : '🔗 Открыть на OLX', url }]];
+  if (PHONE_BUTTON) buttons.push([{ text: '📞 Телефон', callback_data: `ph:${raw.id}` }]);
+  return { text, url, photo: photoUrl(raw), keyboard: { inline_keyboard: buttons } };
 }
 
 const stats = { checked: 0, open: 0, flats: 0, sentPending: 0, sentPublished: 0, pendingPublished: 0, missed: 0, missedHidden: 0, missedLate: 0, missedUnseen: 0, reopened: 0, reopenedFlats: 0, reopenedWait: 0 };
@@ -2232,4 +2352,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, catchUp, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, kindsText, handleAd, probeTick, listSweep, onProbeHit };
+module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, catchUp, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, kindsText, getPhones, onButton, phoneBook, handleAd, probeTick, listSweep, onProbeHit };
