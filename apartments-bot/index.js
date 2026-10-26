@@ -31,6 +31,9 @@ const recentLogLines = [];
  *   PENDING_ALERTS=0      do not send ads while OLX still reviews them (default: send, marked 🕓)
  *   CACHE_BUST=0          do not add ?_=time to OLX requests (default: on, past CloudFront's cache)
  *   LIST_INTERVAL_SEC=30  how often the category lists are read (default 30)
+ *   ALLOW_AGENCIES=1      also take agencies (OLX business accounts), marked "Риелтор"
+ *   ALLOW_COMMISSION=1    also take ads with a commission, marked "Риелтор"
+ *   RENT_PRICE_MIN_SUM=0  rent price floor in sum (default 1 500 000; 0 = rooms and shared flats too)
  *
  * TEST_MODE=1 — for a separate test bot. Everything works as usual, including
  * the search for new ads (if playwright is installed), but reminders are not
@@ -4306,8 +4309,35 @@ function cleanUrl(href) {
   }
 }
 
-function adMatchesDistrict(location, district) {
+// Every way a Tashkent district is written in ads (Russian, Uzbek Cyrillic and Latin, old names).
+const DISTRICT_ALIASES = {
+  'Мирзо-Улугбекский': ['мирзо улугбек', 'мирзо-улугбек', 'м улугбек', 'mirzo ulugbek', "mirzo ulug'bek", 'улугбек'],
+  'Юнусабадский': ['юнусабад', 'юнусобод', 'yunusobod', 'yunusabad'],
+  'Чиланзарский': ['чиланзар', 'чилонзор', 'chilonzor', 'chilanzar'],
+  'Яккасарайский': ['яккасарай', 'яккасарой', 'yakkasaroy', 'yakkasaray'],
+  'Алмазарский': ['алмазар', 'олмазор', 'olmazor', 'almazar', 'собир рахимов', 'сабир рахимов'],
+  'Сергелийский': ['сергели', 'сиргали', 'sergeli', "sirg'ali", 'sirgali'],
+  'Яшнабадский': ['яшнабад', 'яшнобод', 'yashnobod', 'yashnabad', 'хамза'],
+  'Мирабадский': ['мирабад', 'миробод', 'mirobod', 'mirabad'],
+  'Шайхантахурский': ['шайхантахур', 'шайхантаур', 'шайхонтохур', 'shayxontohur', 'shayhontohur'],
+  'Учтепинский': ['учтепа', 'учтепин', 'uchtepa'],
+  'Бектемирский': ['бектемир', 'bektemir']
+};
+
+// "Мирзо-Улугбек", "Mirzo Ulug'bek", "Улуғбек" → the same letters for comparison.
+function normalizeAddress(text) {
+  return ` ${String(text || '').toLowerCase().replace(/ё/g, 'е').replace(/ғ/g, 'г').replace(/ҳ/g, 'х').replace(/қ/g, 'к').replace(/ў/g, 'у')
+    .replace(/[ʻʼ'‘’`´]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+}
+
+// ad: when OLX gives no district (only the city), the title and description decide —
+// "Юнусабад 4 квартал" must reach a client who searches Yunusabad.
+function adMatchesDistrict(location, district, ad = null) {
   if (!district || district === DISTRICTS[0] || district === DISTRICTS_UZ[0]) return true;
+  if (ad && !String(location || '').includes(',')) {
+    const text = normalizeAddress(`${ad.title || ''} ${ad.description || ''}`);
+    if ((DISTRICT_ALIASES[district] || []).some((alias) => text.includes(normalizeAddress(alias).trimEnd()))) return true;
+  }
   // "Мирзо-Улугбекский" -> "мирзо": OLX writes some district names differently.
   // Spellings differ ("Олмазарский" / "Алмазарский", "Шайхонтохурский" / "Шайхантахурский"):
   // compare with о→а and ё→е on both sides.
@@ -4497,7 +4527,7 @@ function wantedCategories() {
 function adMatchesFilters(ad, filters, { price, rooms }) {
   const category = effectiveCategory(filters);
   if (category !== 'all' && category !== ad.category) return false;
-  if (!adMatchesDistrict(ad.location, filters?.district)) return false;
+  if (!adMatchesDistrict(ad.location, filters?.district, ad)) return false;
   if (filters?.minPrice && price < Number(filters.minPrice)) return false;
   if (filters?.maxPrice && price > Number(filters.maxPrice)) return false;
   if (filters?.author === 'owner' && ad.classification !== 'owner') return false;
@@ -4979,6 +5009,17 @@ const CATCHUP_EVERY_MS = 60_000;
 // are checked like any other (author, AI) and sent right away, marked 🕓, before they go
 // live. PENDING_ALERTS=0 in .env turns this off (then the bot waits until they go live).
 const PENDING_ALERTS = !['0', 'false', 'no'].includes(String(process.env.PENDING_ALERTS || '').trim().toLowerCase());
+// Agencies (OLX business accounts) and ads with a commission are not taken by default: clients
+// pay for private owners. ALLOW_AGENCIES=1 / ALLOW_COMMISSION=1 in .env let them through marked
+// "Риелтор" — clients who search "only owners" still do not get them.
+const ALLOW_AGENCIES = ['1', 'true', 'yes'].includes(String(process.env.ALLOW_AGENCIES || '').trim().toLowerCase());
+const ALLOW_COMMISSION = ['1', 'true', 'yes'].includes(String(process.env.ALLOW_COMMISSION || '').trim().toLowerCase());
+function hasCommission(raw) {
+  return apiParam(raw, 'comission')?.key === 'yes';
+}
+function sellerAllowed(raw) {
+  return (ALLOW_AGENCIES || !raw?.business) && (ALLOW_COMMISSION || !hasCommission(raw));
+}
 // Statuses that mean the ad is gone, not under review: never sent as "under review".
 const PENDING_DEAD_STATUSES = new Set(['removed_by_user', 'removed_by_moderator', 'removed', 'deleted', 'outdated', 'blocked', 'archived', 'expired']);
 // OLX's answers come through AWS CloudFront, which may keep an error answer (404) for
@@ -5302,6 +5343,8 @@ function apiAdToBotAd(raw) {
     rooms: Number.parseInt(String(apiParam(raw, 'number_of_rooms')?.key ?? ''), 10) || null,
     phone: '',
     authorId: raw.user?.id ? String(raw.user.id) : null,
+    business: Boolean(raw.business),
+    commission: hasCommission(raw),
     authorName: oneLine(raw.user?.name || raw.contact?.name)
   };
 }
@@ -5323,8 +5366,7 @@ function isWantedApiAd(raw, wanted, { ignorePublishedAge = false } = {}) {
   if (raw.location?.city?.id !== OLX_CITY_TASHKENT) return false;
   const category = OLX_CATEGORY_MAP[raw.category?.id];
   if (!category || !CATEGORY_FAMILY[category].some((item) => wanted.has(item))) return false;
-  if (raw.business) return false;
-  if (apiParam(raw, 'comission')?.key === 'yes') return false;
+  if (!sellerAllowed(raw)) return false;
   const ageMinutes = (Date.now() - Date.parse(raw.created_time)) / 60_000;
   // Up to 5 minutes "in the future" is allowed: this computer's clock may be a
   // little behind OLX's, and the freshest ads would otherwise be dropped.
@@ -5521,7 +5563,9 @@ async function analyzeApiAd(ad) {
   // usual "owner" default when the AI exists but failed this time.
   let classification;
   let roleReason;
-  if (author.makler) [classification, roleReason] = ['makler', author.reason];
+  if (ad.business) [classification, roleReason] = ['makler', 'агентство (бизнес-аккаунт OLX)'];
+  else if (ad.commission) [classification, roleReason] = ['makler', 'в объявлении указана комиссия'];
+  else if (author.makler) [classification, roleReason] = ['makler', author.reason];
   else if (ai?.classification) [classification, roleReason] = [ai.classification, 'решил ИИ'];
   else [classification, roleReason] = [GEMINI_API_KEY ? 'owner' : 'unknown', GEMINI_API_KEY ? 'ИИ не ответил, по умолчанию' : 'нет ИИ'];
   return { category, classification, roleReason, description: ai?.description || ad.description, moved: category !== ad.category };
@@ -5542,7 +5586,11 @@ function isRepost(ad) {
 // Too cheap to be a real apartment: bait ads and daily rentals priced per night.
 // Rent: 1.5 mln sum (~125 $) a month — real Tashkent apartments for 300 $ must pass.
 // Sale: 4 mln sum (~335 $) — no apartment sells for that.
-const RENT_PRICE_MIN = 1_500_000;
+// RENT_PRICE_MIN_SUM in .env changes it (0 = no floor: rooms and shared flats come too).
+const RENT_PRICE_MIN = (() => {
+  const value = String(process.env.RENT_PRICE_MIN_SUM ?? '').replace(/[\s_]/g, '');
+  return value !== '' && Number.isFinite(Number(value)) ? Number(value) : 1_500_000;
+})();
 const SALE_PRICE_MIN_REAL = 4_000_000;
 
 function isSuspiciouslyCheap(category, amount) {
@@ -5573,7 +5621,10 @@ const AD_PROCESS_TIMED_OUT = Symbol('ad processing timed out');
 // pending: the ad is still under OLX's review (status "disabled"). It goes through the
 // same checks and is sent marked 🕓; when it goes live later, it is not sent again
 // (its number is already processed).
-function enqueueApiAd(raw, source, { pending = false } = {}) {
+// Ads whose sending to clients has started: a failure after that is not retried (no doubles).
+const deliveringIds = new Set();
+
+function enqueueApiAd(raw, source, { pending = false, attempt = 0 } = {}) {
   if (processedOlxIds.has(raw.id)) return;
   processedOlxIds.add(raw.id);
   while (processedOlxIds.size > PROCESSED_IDS_KEEP) processedOlxIds.delete(processedOlxIds.values().next().value);
@@ -5584,7 +5635,17 @@ function enqueueApiAd(raw, source, { pending = false } = {}) {
       const result = await withTimeout(processApiAd(raw, source, { pending }), AD_PROCESS_TIMEOUT_MS, AD_PROCESS_TIMED_OUT);
       if (result === AD_PROCESS_TIMED_OUT) console.error(`[OLX] Объявление ${raw.id} обрабатывается дольше 3 мин — перехожу к следующим.`);
     })
-    .catch((error) => console.error(`[OLX] Сбой обработки объявления ${raw.id}: ${error.stack || error.message}`));
+    .catch((error) => {
+      console.error(`[OLX] Сбой обработки объявления ${raw.id}: ${error.stack || error.message}`);
+      // Failed before anyone got it: one more try in 30 s, so a hiccup does not lose the apartment.
+      if (attempt === 0 && !deliveringIds.has(raw.id)) {
+        console.log(`🔁 Повторю объявление ${raw.id} через 30 сек.`);
+        setTimeout(() => {
+          processedOlxIds.delete(raw.id);
+          enqueueApiAd(raw, source, { pending, attempt: 1 });
+        }, 30_000).unref?.();
+      }
+    });
 }
 
 async function processApiAd(raw, source, { pending = false } = {}) {
@@ -5652,6 +5713,8 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   ad.foundInMs = pending ? null : Date.now() - ad.publishedAt;
   const when = pending ? 'до публикации' : `через ${formatAge(Date.now() - ad.publishedAt)} после публикации`;
   if (ad.authorId) processAuthorCache(`u${ad.authorId}`); // counted now that the ad is really going out
+  deliveringIds.add(raw.id);
+  while (deliveringIds.size > PROCESSED_IDS_KEEP) deliveringIds.delete(deliveringIds.values().next().value);
   const delivered = await sendToSubscribers(ad);
   // Say plainly whether anyone got it: "found" and "delivered" are different things.
   const to = delivered.clients || delivered.channels
@@ -5736,7 +5799,7 @@ function scheduleProbeRetry(id, attempt, fast = false) {
 // wants, a private person). Cars, phones and other cities are let go at once —
 // that keeps the re-check queue small enough to stay on time.
 function isWorthWaitingFor(raw) {
-  if (raw?.location?.city?.id !== OLX_CITY_TASHKENT || raw.business) return false;
+  if (raw?.location?.city?.id !== OLX_CITY_TASHKENT || (raw.business && !ALLOW_AGENCIES)) return false;
   const category = OLX_CATEGORY_MAP[raw.category?.id];
   return Boolean(category) && CATEGORY_FAMILY[category].some((item) => wantedCategories().has(item));
 }
@@ -5759,8 +5822,8 @@ function noteNotTaken(raw) {
   while (notTakenSeen.size > PROCESSED_IDS_KEEP) notTakenSeen.delete(notTakenSeen.values().next().value);
   const ageMinutes = (Date.now() - Date.parse(raw.created_time)) / 60_000;
   const reason = raw.location?.city?.id !== OLX_CITY_TASHKENT ? 'не Ташкент'
-    : raw.business ? 'агентство (бизнес-аккаунт)'
-      : apiParam(raw, 'comission')?.key === 'yes' ? 'с комиссией'
+    : raw.business && !ALLOW_AGENCIES ? 'агентство (бизнес-аккаунт)'
+      : hasCommission(raw) && !ALLOW_COMMISSION ? 'с комиссией'
         : !CATEGORY_FAMILY[category].some((item) => wantedCategories().has(item)) ? `${categoryLabel(category, 'ru')} — никто не ищет`
           : !(ageMinutes >= -5 && ageMinutes <= API_MAX_AGE_MINUTES) ? 'старое (платное поднятие)'
             : 'другое';
@@ -5776,10 +5839,9 @@ function countNotTaken(reason) {
 // back to review after an edit is not news.
 function isWantedPendingAd(raw) {
   if (!raw?.id || !raw.status || raw.status === 'active' || PENDING_DEAD_STATUSES.has(raw.status)) return false;
-  if (raw.location?.city?.id !== OLX_CITY_TASHKENT || raw.business) return false;
+  if (raw.location?.city?.id !== OLX_CITY_TASHKENT || !sellerAllowed(raw)) return false;
   const category = OLX_CATEGORY_MAP[raw.category?.id];
   if (!category || !CATEGORY_FAMILY[category].some((item) => wantedCategories().has(item))) return false;
-  if (apiParam(raw, 'comission')?.key === 'yes') return false;
   const ageMinutes = (Date.now() - Date.parse(raw.created_time)) / 60_000;
   return ageMinutes >= -5 && ageMinutes <= API_MAX_AGE_MINUTES;
 }
@@ -5789,7 +5851,7 @@ function isWantedPendingAd(raw) {
 function onPendingAd(raw) {
   // Another city, an agency or a commission: it will never be sent — no point re-checking it
   // until it goes live. Real estate among these is counted in the 🏠 report line.
-  if (!isWorthWaitingFor(raw) || apiParam(raw, 'comission')?.key === 'yes') {
+  if (!isWorthWaitingFor(raw) || (hasCommission(raw) && !ALLOW_COMMISSION)) {
     noteNotTaken(raw);
     engineStats.letGo += 1;
     return true;
@@ -6192,11 +6254,17 @@ function unstickProbe(ids) {
 // are only remembered, so a restart doesn't flood clients with older apartments.
 // Numbers on each section's first page last time (without paid "top" ads — those stay there).
 const listLastSeen = new Map(); // OLX category -> Set of numbers
+// Every 4th pass (2 min at 30 s) the second page is read anyway: an ad OLX reviewed for long is
+// sorted by its creation time, so when it finally goes live it may sit below the first 50.
+const LIST_DEEP_EVERY = 4;
+let listPasses = 0;
 
 async function listSweep({ warmUp = false } = {}) {
   const wanted = wantedCategories();
   const sections = new Set([...wanted].flatMap((category) => CATEGORY_FAMILY[category] || []));
   let remembered = 0;
+  listPasses += 1;
+  const deep = !warmUp && listPasses % LIST_DEEP_EVERY === 0;
   for (const category of sections) {
     for (const olxCategory of OLX_CATEGORY_IDS[category] || []) {
       const query = (offset) => `?offset=${offset}&limit=${LIST_LIMIT}&category_id=${olxCategory}&city_id=${OLX_CITY_TASHKENT}&sort_by=created_at:desc`;
@@ -6206,7 +6274,7 @@ async function listSweep({ warmUp = false } = {}) {
       // or got bumped since, and a new one may have slid to the second page. Read it too.
       const plain = (list) => list.filter((item) => !item.promotion?.top_ad).map((item) => Number(item.id));
       const before = listLastSeen.get(olxCategory);
-      if (!warmUp && before && data.length >= LIST_LIMIT && !plain(data).some((id) => before.has(id))) {
+      if (!warmUp && data.length >= LIST_LIMIT && (deep || (before && !plain(data).some((id) => before.has(id))))) {
         engineStats.listPage2 += 1;
         await sleep(300);
         const { data: secondPage } = await olxApi(query(LIST_LIMIT), mainLane);
@@ -6394,8 +6462,10 @@ async function explainOlxAd(id) {
   check(raw.location?.city?.id === OLX_CITY_TASHKENT, `Город Ташкент — ${escapeHtml(ad.location || 'не указан')}`);
   check(Boolean(category), category ? `Раздел: ${categoryLabel(category, 'ru')}` : `Раздел OLX №${escapeHtml(raw.category?.id)} — бот его не смотрит`);
   if (category) check(CATEGORY_FAMILY[category].some((item) => wanted.has(item)), 'Этот раздел ищет хотя бы один клиент или канал');
-  check(!raw.business, raw.business ? 'Частное лицо — нет, бизнес-аккаунт (агентство)' : 'Частное лицо');
-  check(apiParam(raw, 'comission')?.key !== 'yes', apiParam(raw, 'comission')?.key === 'yes' ? 'Без комиссии — нет, указана комиссия' : 'Без комиссии');
+  if (raw.business && ALLOW_AGENCIES) lines.push('ℹ️ Бизнес-аккаунт (агентство) — пропускается (ALLOW_AGENCIES=1), помечается «Риелтор»');
+  else check(!raw.business, raw.business ? 'Частное лицо — нет, бизнес-аккаунт (агентство)' : 'Частное лицо');
+  if (hasCommission(raw) && ALLOW_COMMISSION) lines.push('ℹ️ Указана комиссия — пропускается (ALLOW_COMMISSION=1), помечается «Риелтор»');
+  else check(!hasCommission(raw), hasCommission(raw) ? 'Без комиссии — нет, указана комиссия' : 'Без комиссии');
   check(ageMs <= API_MAX_AGE_MINUTES * 60_000, `Новое: создано ${formatAge(ageMs)} назад (бот берёт до ${API_MAX_AGE_MINUTES / 60} ч)`);
   const publishedAgeMs = Date.now() - apiPublishedAt(raw);
   if (!underReview) check(publishedAgeMs <= LIST_PUBLISHED_MAX_AGE_MINUTES * 60_000, `Свежее: на OLX с «Опубликовано» прошло ${formatAge(publishedAgeMs)} (бот отправляет до ${PUBLISHED_MAX_AGE_MINUTES} мин, найденное списком — до ${LIST_PUBLISHED_MAX_AGE_MINUTES})`);
