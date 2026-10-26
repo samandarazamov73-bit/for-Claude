@@ -4555,15 +4555,25 @@ async function sendToSubscribers(ad) {
   // after that (clients and channels) gets Telegram's copies of those photos.
   const photoCache = { fileIds: null };
   const recipients = shuffled(targets);
+  // Counted from Telegram's answers: "matched the search" and "really got it" can differ.
+  let sentOk = 0;
+  const failed = [];
+  const tally = (chatId, ok) => {
+    if (ok) sentOk += 1;
+    else failed.push(chatId);
+  };
   if (recipients.length) {
     const first = recipients.shift();
-    await sendAdCard(TELEGRAM_TOKEN, first, text, ad, getLang(first), photoCache);
+    tally(first, await sendAdCard(TELEGRAM_TOKEN, first, text, ad, getLang(first), photoCache).catch(() => false));
   }
   for (let index = 0; index < recipients.length; index += batchSize) {
-    await Promise.all(recipients.slice(index, index + batchSize).map((chatId) =>
-      sendAdCard(TELEGRAM_TOKEN, chatId, text, ad, getLang(chatId), photoCache)));
+    const batch = recipients.slice(index, index + batchSize);
+    const results = await Promise.all(batch.map((chatId) =>
+      sendAdCard(TELEGRAM_TOKEN, chatId, text, ad, getLang(chatId), photoCache).catch(() => false)));
+    batch.forEach((chatId, position) => tally(chatId, results[position]));
     if (index + batchSize < recipients.length) await sleep(1_000);
   }
+  if (failed.length) console.warn(`⚠️ Telegram не доставил квартиру ${failed.length} из ${targets.length} клиентам (${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ' …' : ''}) — причина в строках [Telegram] выше.`);
   for (const channelId of channelTargets) {
     const ownerId = dbChannels[channelId]?.ownerId;
     // In a channel the contact link goes into the post itself: a button would need
@@ -4577,7 +4587,7 @@ async function sendToSubscribers(ad) {
   for (const chatId of teaserCandidates) {
     await maybeSendTeaser(chatId, ad).catch((error) => console.error(`[Teaser] ${chatId}: ${error.message}`));
   }
-  return { clients: targets.length, channels: channelTargets.length };
+  return { clients: targets.length, sentOk, channels: channelTargets.length };
 }
 
 // recipientLang is the makler's own language — the makler must read the request
@@ -5639,14 +5649,14 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   const delivered = await sendToSubscribers(ad);
   // Say plainly whether anyone got it: "found" and "delivered" are different things.
   const to = delivered.clients || delivered.channels
-    ? `получили: клиентов ${delivered.clients}${delivered.channels ? `, каналов ${delivered.channels}` : ''}`
+    ? `получили: клиентов ${delivered.sentOk}${delivered.sentOk < delivered.clients ? ` из ${delivered.clients} подходящих ⚠️` : ''}${delivered.channels ? `, каналов ${delivered.channels}` : ''}`
     : 'никому не подошло (нет подписчика с таким поиском)';
   engineHealth.lastApartmentAt = Date.now();
   console.log(`✉️ ${pending ? '🕓 ' : ''}${ad.classification} (${verdict.roleReason}) · ${way} · ${when} · ${truncate(ad.title, 50)} → ${to}`);
   if (pending) engineStats.sentPending += 1;
   else if (source === 'probe') engineStats.sentProbe += 1;
   else engineStats.sentList += 1;
-  engineStats.delivered += delivered.clients;
+  engineStats.delivered += delivered.sentOk;
   const moved = verdict.moved ? `, раздел исправлен на «${categoryLabel(verdict.category, 'ru')}»` : '';
   const roleName = { owner: 'Собственник', makler: 'Риелтор', unknown: 'Не определён' }[ad.classification] || ad.classification;
   recordDecision(raw, `${delivered.clients || delivered.channels ? `отправлено (${to.replace('получили: ', '')})` : 'обработано, но никому не подошло по поиску'} — ${way}, ${when}${moved}. Роль: ${roleName} — ${verdict.roleReason}`, verdict.category);
@@ -5754,7 +5764,7 @@ function onPendingAd(raw) {
     return true;
   }
   if (!PENDING_ALERTS || !isWantedPendingAd(raw)) return false; // wait until it goes live
-  if (!processedOlxIds.has(raw.id)) console.log(`👀 На проверке у OLX [${raw.status}] №${raw.id} · ${truncate(oneLine(raw.title), 50)} → проверяю и отправляю, не дожидаясь публикации`);
+  if (!processedOlxIds.has(raw.id)) console.log(`👀 На проверке у OLX [${raw.status}] №${raw.id} · ${truncate(oneLine(raw.title), 50)} → проверяю (автор, ИИ, фильтры клиентов), не дожидаясь публикации; итог — строкой ✉️ или 🗑 ниже`);
   enqueueApiAd(raw, 'probe', { pending: true });
   return true;
 }
