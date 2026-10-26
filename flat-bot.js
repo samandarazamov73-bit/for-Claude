@@ -646,12 +646,15 @@ async function browserTransport(url, lane = olx) {
 // Что отвечал OLX за 5 минут — по этим цифрам видно, не принял ли он бота за робота.
 const answers = { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0, cached: 0 };
 
-// Не отдаёт ли OLX ответ «нет такого» из кэша (CDN)? Тогда перепроверка видит старый 404, хотя
-// объявление уже на проверке. Заметили 3 таких ответа — к номеру добавляется ?_=время (обход кэша).
-// CACHE_BUST=1 в .env — включить сразу.
-let cacheBust = ['1', 'true', 'yes'].includes(String(process.env.CACHE_BUST || '').trim().toLowerCase());
+// OLX стоит за AWS CloudFront (в ответах «Error from cloudfront»), а CloudFront по умолчанию держит
+// ответы-ошибки в кэше ~10 сек. Тогда частая проверка номера видит старое «нет такого», хотя объявление
+// уже на проверке. Поэтому к номеру добавляется ?_=время — каждый запрос мимо кэша, прямо к OLX.
+// CACHE_BUST=0 в .env — выключить. Если OLX на это ответит 400 — бот выключит сам.
+let cacheBust = !['0', 'false', 'no'].includes(String(process.env.CACHE_BUST || '').trim().toLowerCase());
 // Разные тексты ответа 404: если у «номера нет» и «прячет на проверке» текст разный — это зацепка.
-const notFoundKinds = new Map(); // текст (цифры → #) -> сколько раз
+// Для каждого вида считаем, сколько номеров после такого ответа потом открылись (на проверке или опубликованы).
+const notFoundKinds = new Map(); // текст (цифры → #) -> { n, count, opened }
+const lastKindById = new Map(); // номер -> вид последнего 404
 
 function inspectNotFound(pathAndQuery, text, cache, age) {
   if (/hit/i.test(cache || '') || Number(age) > 0) {
@@ -662,11 +665,24 @@ function inspectNotFound(pathAndQuery, text, cache, age) {
       console.warn(`🧊 OLX отдаёт «нет такого» из кэша (${cache || `age ${age}`}) — включаю обход кэша: к номеру добавляется ?_=время.`);
     }
   }
-  const kind = oneLine(text).slice(0, 200).replace(/\d+/g, '#');
-  if (!notFoundKinds.has(kind) && notFoundKinds.size < 5) {
-    console.log(`🔬 Вид ответа 404 № ${notFoundKinds.size + 1} (${pathAndQuery.replace(/\?.*$/, '')}): ${kind || '(пусто)'}${cache ? ` · кэш: ${cache}` : ''}${age ? ` · age: ${age}` : ''}`);
+  const text200 = oneLine(text).slice(0, 200).replace(/\d+/g, '#');
+  let kind = notFoundKinds.get(text200);
+  if (!kind && notFoundKinds.size < 5) {
+    kind = { n: notFoundKinds.size + 1, text: text200, count: 0, opened: 0 };
+    notFoundKinds.set(text200, kind);
+    console.log(`🔬 Вид ответа 404 № ${kind.n} (${pathAndQuery.replace(/\?.*$/, '')}): ${text200 || '(пусто)'}${cache ? ` · кэш: ${cache}` : ''}${age ? ` · age: ${age}` : ''}`);
   }
-  notFoundKinds.set(kind, (notFoundKinds.get(kind) || 0) + 1);
+  if (!kind) return;
+  kind.count += 1;
+  const id = Number(pathAndQuery.match(/^(\d+)\//)?.[1]);
+  if (id) {
+    lastKindById.set(id, kind);
+    while (lastKindById.size > PROBE_LOG_KEEP) lastKindById.delete(lastKindById.keys().next().value);
+  }
+}
+
+function kindsText() {
+  return [...notFoundKinds.values()].map((kind) => `№${kind.n} «${truncate(kind.text || '(пусто)', 40)}» — ответов ${kind.count}, потом открылось номеров ${kind.opened}`).join('; ');
 }
 
 async function olxApi(pathAndQuery, lane = olx) {
@@ -706,10 +722,22 @@ async function olxApi(pathAndQuery, lane = olx) {
     if (status === 403 && !lane.transport) await closeOlxSession(lane.shared || lane);
     throw new Error(`OLX_BLOCKED ${status} ${lane.name}`);
   }
+  // OLX не принял ?_=время (400) — обход кэша выключаем, номер проверится ещё раз позже.
+  if (status === 400 && cacheBust && target.includes('?_=')) {
+    cacheBust = false;
+    console.warn('🧊 OLX не принимает ?_=время (ответ 400) — обход кэша выключен.');
+    return { status: 0, data: null };
+  }
   if (status !== 200) return { status, data: null };
   try {
     const data = JSON.parse(text)?.data ?? null;
     answers.ok += 1;
+    // Номер, который раньше отвечал 404, открылся — засчитываем вид его последнего 404.
+    const openedId = Number(data?.id);
+    if (openedId && lastKindById.has(openedId)) {
+      lastKindById.get(openedId).opened += 1;
+      lastKindById.delete(openedId);
+    }
     return { status, data };
   } catch {
     // Вместо данных пришла страница (капча / проверка «вы не робот?»).
@@ -1303,16 +1331,17 @@ function handleAd(raw, source) {
   }
   rememberHandled(raw.id);
   saveHandledSoon();
-  // Номер не больше того, с которого бот начал перебор, — объявление создано ещё до запуска
-  // (такие приходят в списке раздела). Поймать его на проверке бот не мог — это не пропуск, молчим.
-  if (probe.startCursor && Number(raw.id) <= probe.startCursor) {
-    note(raw.id, 'создано до запуска бота — не проверял');
-    return;
-  }
   // Эту на проверке поймать не удалось: OLX её прятал или бот не успел проверить номер.
   const ageMs = Date.now() + (diag.clockSkew || 0) - publishedAt(raw); // publishedAt — по часам OLX
   const age = formatAge(ageMs);
   const miss = missReason(raw);
+  // Создано или опубликовано ещё до запуска бота (такие приходят в списке раздела и во время
+  // стартового рывка) — поймать его на проверке бот не мог, это не пропуск. Свежее всё же шлём ниже.
+  const beforeStart = (probe.startCursor && Number(raw.id) <= probe.startCursor) || Date.now() - ageMs < engineStartedAt;
+  if (beforeStart && !(SEND_PUBLISHED_SEC && ageMs <= SEND_PUBLISHED_SEC * 1000)) {
+    note(raw.id, 'создано до запуска бота — не проверял');
+    return;
+  }
   // SEND_PUBLISHED_SEC: совсем свежую (опубликована только что) всё же шлём — с пометкой ⚡.
   if (SEND_PUBLISHED_SEC && ageMs <= SEND_PUBLISHED_SEC * 1000) {
     stats.sentPublished += 1;
@@ -2009,6 +2038,7 @@ function report() {
   const pct = (value) => `${Math.round((value * 100) / total)}%`;
   console.log(`🚦 Ответы OLX: открыто ${pct(answers.ok)}, «нет такого» ${pct(answers.notFound)}, «скрыто» ${pct(answers.hidden)}, `
     + `блок 429/403: ${answers.blocked}, капча/не данные: ${answers.notJson}, сбои сети: ${answers.failed}, «нет такого» из кэша: ${answers.cached}${cacheBust ? ' (обход кэша включён)' : ''}, видов ответа 404: ${notFoundKinds.size}. Самопроверка: ${lastSelfCheck}.`);
+  if (notFoundKinds.size > 1) console.log(`🔬 Виды 404 с запуска: ${kindsText()}.`);
   Object.assign(answers, { ok: 0, notFound: 0, hidden: 0, blocked: 0, notJson: 0, failed: 0, cached: 0 });
   if (lanes.length > 1) {
     const now = Date.now();
@@ -2065,7 +2095,10 @@ async function laneWorker(lane) {
   }
 }
 
+let engineStartedAt = Date.now();
+
 async function runEngine() {
+  engineStartedAt = Date.now();
   loadProbeState();
   let lastList = 0;
   let lastGeneral = Date.now();
@@ -2199,4 +2232,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, catchUp, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, handleAd, probeTick, listSweep, onProbeHit };
+module.exports = { alertPending, pendingAlerted, buildMessage, laneWorker, parseProxy, lanes, explainNumber, detectFlatCategories, catchUp, pollUpdates, subscribers, recipients, probeIntervalMs, olx, flats, probe, stats, handledIds, priceUsd, looksLikeOurFlat, whyNotOurs, isFlat, flatRooms, flatArea, dealOf, districtOk, filtersText, listCategoryIds, kindsText, handleAd, probeTick, listSweep, onProbeHit };
