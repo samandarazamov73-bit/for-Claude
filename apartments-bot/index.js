@@ -5608,6 +5608,7 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   const sureKind = rules.priceKind || rules.textKind;
   if (!wanted.has(ad.category) && sureKind === DEAL_KIND[ad.category]) {
     countNotTaken(`${categoryLabel(ad.category, 'ru')} — никто не ищет`);
+    console.log(`🗑 Пропускаю (${categoryLabel(ad.category, 'ru')} — этот раздел сейчас никто не ищет): ${truncate(ad.title, 60)}`);
     recordDecision(raw, 'пропущено: этот раздел сейчас никто не ищет');
     seenAds.add(ad.url);
     syncDb('seen');
@@ -5630,6 +5631,7 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   ad.category = verdict.category;
   if (!wanted.has(ad.category)) {
     countNotTaken(`${categoryLabel(ad.category, 'ru')} — никто не ищет`);
+    console.log(`🗑 Пропускаю (${categoryLabel(ad.category, 'ru')} — этот раздел сейчас никто не ищет): ${truncate(ad.title, 60)}`);
     recordDecision(raw, 'пропущено: этот раздел сейчас никто не ищет', ad.category);
     seenAds.add(ad.url);
     syncDb('seen');
@@ -5785,7 +5787,10 @@ function isWantedPendingAd(raw) {
 // An ad that opened but is not live yet. Returns true when its number needs no more
 // re-checks: sent as "under review" now, or nothing the bot would ever send.
 function onPendingAd(raw) {
-  if (!isWorthWaitingFor(raw)) {
+  // Another city, an agency or a commission: it will never be sent — no point re-checking it
+  // until it goes live. Real estate among these is counted in the 🏠 report line.
+  if (!isWorthWaitingFor(raw) || apiParam(raw, 'comission')?.key === 'yes') {
+    noteNotTaken(raw);
     engineStats.letGo += 1;
     return true;
   }
