@@ -5616,6 +5616,26 @@ async function listSweep({ warmUp = false } = {}) {
   }
 }
 
+async function listWorker() {
+  let warmUp = true;
+  while (true) {
+    const startedAt = Date.now();
+    if (startedAt < olx.blockedUntil) {
+      await sleep(Math.min(5_000, olx.blockedUntil - startedAt));
+      continue;
+    }
+    try {
+      await listSweep({ warmUp });
+      warmUp = false;
+    } catch (error) {
+      const blocked = String(error.message).match(/^OLX_BLOCKED (\d+)/);
+      if (blocked) await noticeOlxBlock(blocked[1]);
+      else console.error(`[OLX] Список: ${error.stack || error.message}`);
+    }
+    await sleep(Math.max(1_000, LIST_INTERVAL_MS - (Date.now() - startedAt)));
+  }
+}
+
 const SILENCE_ALERT_MS = 60 * 60_000;
 const engineHealth = { lastApartmentAt: Date.now(), lastSilenceAlertAt: 0, watching: false };
 
@@ -5668,7 +5688,6 @@ async function runOlxEngine() {
     return;
   }
   loadProbeCursor();
-  let lastList = 0;
   let lastSave = 0;
   let lastReport = Date.now();
   let lastLoopAt = Date.now();
@@ -5694,16 +5713,12 @@ async function runOlxEngine() {
         startSilenceWatch();
         const listEvery = LIST_INTERVAL_MS >= 60_000 ? `${Math.round(LIST_INTERVAL_MS / 60_000)} мин` : `${Math.round(LIST_INTERVAL_MS / 1000)} сек`;
         console.log(`🚀 Ищу новые объявления: перебор с номера ${probe.cursor + 1}, список — раз в ${listEvery}. Потоков: ${lanes.length} (~${Math.round((60_000 / PROBE_INTERVAL_MS) * lanes.length)} запросов в минуту)${PENDING_ALERTS ? ', квартиры «на проверке» у OLX шлю сразу (🕓)' : ''}${cacheBust ? ', обход кэша OLX включён' : ''}.`);
+        listWorker().catch((error) => console.error(`[OLX] Чтение списков остановилось: ${error.stack || error.message}`));
         for (const lane of lanes.slice(1)) laneWorker(lane).catch((error) => console.error(`[OLX] ${lane.name} остановился: ${error.stack || error.message}`));
       }
       if (olx.runtime && now - olx.openedAt >= OLX_BROWSER_RESTART_MS) {
         console.log('🔄 Плановый перезапуск браузера (профилактика памяти).');
         await openOlxSession();
-      }
-      if (now - lastList >= LIST_INTERVAL_MS) {
-        const warmUp = lastList === 0;
-        lastList = now;
-        await listSweep({ warmUp });
       }
       if (now - lastLoopAt > CATCHUP_AFTER_PAUSE_MS) await catchUp(`бот стоял ${formatAge(now - lastLoopAt)}`);
       else if (isProbeBehind() && now - lastCatchUpAt > CATCHUP_EVERY_MS) await catchUp('отстал');
