@@ -34,6 +34,7 @@ const recentLogLines = [];
  *   ALLOW_AGENCIES=1      also take agencies (OLX business accounts), marked "Риелтор"
  *   ALLOW_COMMISSION=1    also take ads with a commission, marked "Риелтор"
  *   RENT_PRICE_MIN_SUM=0  rent price floor in sum (default 1 500 000; 0 = rooms and shared flats too)
+ *   MAX_PUBLISHED_SEC=60  send a published ad only within this many seconds of going live (default 60)
  *
  * TEST_MODE=1 — for a separate test bot. Everything works as usual, including
  * the search for new ads (if playwright is installed), but reminders are not
@@ -5038,15 +5039,19 @@ const LIST_LIMIT = 50;
 // ad that long, and it is new on the market the moment it opens. Paid bumps of
 // old ads are still cut off: those were created days or weeks ago.
 const API_MAX_AGE_MINUTES = 180;
-// The bot sends only ads that went live on OLX at most 15 minutes ago: an older
-// one is no longer news for a makler. Ads OLX reviewed for long are not affected:
-// their "Опубликовано" time is the moment they went live. The same limit applies
-// right after a (re)start: older ads are only remembered.
-const PUBLISHED_MAX_AGE_MINUTES = 15;
-// The showcase (category list) shows an ad 6-18 minutes after it went live. What
-// the probe missed and the showcase found is sent up to 18 minutes: at that
-// moment other maklers searching on OLX only just see it too.
-const LIST_PUBLISHED_MAX_AGE_MINUTES = 18;
+// The bot sends a published ad only if it went live on OLX at most MAX_PUBLISHED_SEC ago
+// (default 60 s): later it is no longer a head start for a makler. Ads under review (🕓)
+// go out at once anyway. Ads OLX reviewed for long are not affected: their "Опубликовано"
+// time is the moment they went live. The same limit for the probe and the category list
+// (the list shows ads with a delay, so it rarely finds one this fresh), and right after
+// a (re)start: older ads are only remembered. Measured by OLX's clock (see clockSkewMs).
+const PUBLISHED_MAX_AGE_SEC = (() => {
+  const value = Number(String(process.env.MAX_PUBLISHED_SEC ?? '').replace(/[\s_]/g, ''));
+  return Number.isFinite(value) && value >= 10 ? value : 60;
+})();
+function freshLimitText() {
+  return PUBLISHED_MAX_AGE_SEC < 120 ? `${PUBLISHED_MAX_AGE_SEC} сек` : `${Math.round(PUBLISHED_MAX_AGE_SEC / 60)} мин`;
+}
 const OLX_BLOCK_PAUSE_MS = 5 * 60_000; // pause after OLX says "too many requests"
 const OLX_BROWSER_RESTART_MS = 6 * 60 * 60_000; // preventive restart against memory growth
 const AUTHOR_CHECK_TIMEOUT_MS = 5_000;
@@ -5194,7 +5199,7 @@ async function browserTransport(url) {
         credentials: 'include',
         signal: AbortSignal.timeout(timeoutMs)
       });
-      return { status: response.status, text: await response.text() };
+      return { status: response.status, text: await response.text(), date: response.headers.get('date') };
     } catch (error) {
       return { status: 0, text: String(error) };
     }
@@ -5217,7 +5222,15 @@ async function olxApi(pathAndQuery, lane = null) {
   if (lane) lane.requests += 1;
   const busting = cacheBust && /^\d+\/$/.test(pathAndQuery);
   const url = `${OLX_API}${pathAndQuery}${busting ? `?_=${Date.now()}` : ''}`;
-  const { status, text } = await (olx.transport || browserTransport)(url);
+  const { status, text, date } = await (olx.transport || browserTransport)(url);
+  // OLX's clock vs ours (a running average; the Date header is to the second).
+  const serverTime = Date.parse(date || '');
+  if (Number.isFinite(serverTime)) {
+    const skew = serverTime - Date.now();
+    clockSkewMs = clockSkewKnown ? clockSkewMs * 0.95 + skew * 0.05 : skew;
+    if (!clockSkewKnown && Math.abs(skew) > 30_000) console.warn(`🕰 Часы этого компьютера ${skew > 0 ? 'отстают' : 'спешат'} от часов OLX на ${formatAge(Math.abs(skew))} — бот считает время по часам OLX.`);
+    clockSkewKnown = true;
+  }
   if (status === 400 && busting) {
     cacheBust = false;
     console.warn('🧊 OLX не принимает ?_=время (ответ 400) — обход кэша выключен.');
@@ -5353,12 +5366,18 @@ function apiAdToBotAd(raw) {
 // person, no commission. Plus "really new": created within 3 hours (cuts paid
 // bumps of old ads) and live on OLX for at most 15 minutes. ignorePublishedAge
 // lets the list still notice ads the probe missed, even when they are too old to send.
-function freshLimitMinutes(source) {
-  return source === 'list' ? LIST_PUBLISHED_MAX_AGE_MINUTES : PUBLISHED_MAX_AGE_MINUTES;
+// OLX's clock minus this computer's (from the Date header of OLX's answers): with a one-minute
+// limit, a computer clock a minute off would send nothing or everything.
+let clockSkewMs = 0;
+let clockSkewKnown = false;
+
+// How long ago the ad went live, by OLX's clock.
+function publishedAgeMs(publishedAt) {
+  return Date.now() + clockSkewMs - publishedAt;
 }
 
-function isFreshEnough(raw, source = 'probe') {
-  return (Date.now() - apiPublishedAt(raw)) / 60_000 <= freshLimitMinutes(source);
+function isFreshEnough(raw) {
+  return publishedAgeMs(apiPublishedAt(raw)) <= PUBLISHED_MAX_AGE_SEC * 1000;
 }
 
 function isWantedApiAd(raw, wanted, { ignorePublishedAge = false } = {}) {
@@ -5381,12 +5400,11 @@ function skipStale(raw, source) {
   seenAds.add(cleanUrl(raw.url) || raw.url);
   syncDb('seen');
   engineStats.stale += 1;
-  // Near the limit the seconds matter: "18 мин 20 сек", not "18 мин — старше 18 мин".
-  const ageMs = Date.now() - apiPublishedAt(raw);
+  // Near the limit the seconds matter: "1 мин 20 сек", not "1 мин — старше 1 мин".
+  const ageMs = publishedAgeMs(apiPublishedAt(raw));
   const age = ageMs < 60 * 60_000 ? `${Math.floor(ageMs / 60_000)} мин ${Math.floor((ageMs % 60_000) / 1000)} сек` : formatAge(ageMs);
-  const limit = freshLimitMinutes(source);
-  console.log(`⏰ Не отправляю (${source === 'probe' ? 'перебор' : 'список'}): на OLX уже ${age} — старше ${limit} мин · ${truncate(oneLine(raw.title), 50)}`);
-  recordDecision(raw, `не отправлено: на OLX уже ${age}, а бот отправляет только первые ${limit} мин`);
+  console.log(`⏰ Не отправляю (${source === 'probe' ? 'перебор' : 'список'}): на OLX уже ${age} — старше ${freshLimitText()} · ${truncate(oneLine(raw.title), 50)}`);
+  recordDecision(raw, `не отправлено: на OLX уже ${age}, а бот отправляет только первые ${freshLimitText()} после публикации`);
 }
 
 // ---------- What the ad really is, and who posted it ----------
@@ -5710,8 +5728,8 @@ async function processApiAd(raw, source, { pending = false } = {}) {
   ad.description = verdict.description;
   const way = pending ? 'перебор, 🕓 на проверке у OLX' : source === 'probe' ? 'перебор' : 'список';
   // Shown as "⚡ Найдено за N сек" when under a minute; an ad under review is not live yet.
-  ad.foundInMs = pending ? null : Date.now() - ad.publishedAt;
-  const when = pending ? 'до публикации' : `через ${formatAge(Date.now() - ad.publishedAt)} после публикации`;
+  ad.foundInMs = pending ? null : publishedAgeMs(ad.publishedAt);
+  const when = pending ? 'до публикации' : `через ${formatAge(publishedAgeMs(ad.publishedAt))} после публикации`;
   if (ad.authorId) processAuthorCache(`u${ad.authorId}`); // counted now that the ad is really going out
   deliveringIds.add(raw.id);
   while (deliveringIds.size > PROCESSED_IDS_KEEP) deliveringIds.delete(deliveringIds.values().next().value);
@@ -5887,7 +5905,7 @@ function countProbeCheck(status, data) {
   if (status === 410) engineStats.closed += 1;
   if (status !== 200 || !data?.id) return;
   engineStats.open += 1;
-  const age = Date.now() - apiPublishedAt(data);
+  const age = publishedAgeMs(apiPublishedAt(data));
   if (Number.isFinite(age) && (engineStats.freshestAgeMs === null || age < engineStats.freshestAgeMs)) engineStats.freshestAgeMs = age;
 }
 
@@ -5927,7 +5945,7 @@ function reportEngine() {
   const freshest = engineStats.freshestAgeMs === null ? '—' : formatAge(engineStats.freshestAgeMs);
   console.log(`📊 За 5 мин: проверено номеров ${engineStats.checked}, открытых объявлений ${engineStats.open}, закрытых (на проверке/удалены) ${engineStats.closed}. `
     + `Новых квартир: 🕓 на проверке у OLX ${engineStats.sentPending}, перебором ${engineStats.sentProbe}, списком ${engineStats.sentList}; доставлено клиентам ${engineStats.delivered} раз (активных подписчиков: ${subscribers}). `
-    + `Отсеяно: шутки/спам ${engineStats.junk}, посуточно ${engineStats.daily}, повторы ${engineStats.reposts}, старше ${PUBLISHED_MAX_AGE_MINUTES} мин ${engineStats.stale}; исправлен раздел ${engineStats.moved}. `
+    + `Отсеяно: шутки/спам ${engineStats.junk}, посуточно ${engineStats.daily}, повторы ${engineStats.reposts}, старше ${freshLimitText()} ${engineStats.stale}; исправлен раздел ${engineStats.moved}. `
     + `Пропуски перебора: ${[...missStats.values()].reduce((sum, count) => sum + count, 0)}${missStats.size ? ` (${[...missStats].map(([reason, count]) => `${reason}: ${count}`).join('; ')})` : ''}. `
     + `Учёт номеров: ${(() => { const uncovered = uncoveredNumbers(); return uncovered ? `⚠️ ${uncovered} не проверены и не в очереди` : 'каждый номер проверен или в очереди ✅'; })()}`
     + `${engineStats.retryOverflow ? `, ⚠️ очередь переполнена (${engineStats.retryOverflow})` : ''}${engineStats.jumps ? `, ⚠️ разрывов номеров: ${engineStats.jumps}` : ''}. `
@@ -6250,7 +6268,7 @@ function unstickProbe(ids) {
   engineStats.jumps += 1;
 }
 
-// warmUp = the first pass after a (re)start: ads older than PUBLISHED_MAX_AGE_MINUTES
+// warmUp = the first pass after a (re)start: ads older than PUBLISHED_MAX_AGE_SEC
 // are only remembered, so a restart doesn't flood clients with older apartments.
 // Numbers on each section's first page last time (without paid "top" ads — those stay there).
 const listLastSeen = new Map(); // OLX category -> Set of numbers
@@ -6284,10 +6302,10 @@ async function listSweep({ warmUp = false } = {}) {
       if (!warmUp && data.length) unstickProbe(plain(data));
       for (const raw of data) {
         if (!isWantedApiAd(raw, wanted, { ignorePublishedAge: true })) continue;
-        if (warmUp && !isFreshEnough(raw, 'list')) {
+        if (warmUp && !isFreshEnough(raw)) {
           if (!processedOlxIds.has(raw.id)) {
             remembered += 1;
-            recordDecision(raw, `при запуске бота запомнено без отправки (было старше ${PUBLISHED_MAX_AGE_MINUTES} мин)`);
+            recordDecision(raw, `при запуске бота запомнено без отправки (было старше ${freshLimitText()})`);
           }
           processedOlxIds.add(raw.id);
           seenAds.add(cleanUrl(raw.url) || raw.url);
@@ -6296,9 +6314,9 @@ async function listSweep({ warmUp = false } = {}) {
         if (!warmUp && !processedOlxIds.has(raw.id) && Number(raw.id) > probe.startCursor && probe.startCursor > 0) {
           const reason = probeMissReason(Number(raw.id));
           missStats.set(reason, (missStats.get(reason) || 0) + 1);
-          console.log(`🕳 Перебор пропустил ID ${raw.id} — причина: ${reason}${isFreshEnough(raw, 'list') ? ' → отправляю через список' : ''}`);
+          console.log(`🕳 Перебор пропустил ID ${raw.id} — причина: ${reason}${isFreshEnough(raw) ? ' → отправляю через список' : ''}`);
         }
-        if (!isFreshEnough(raw, 'list')) {
+        if (!isFreshEnough(raw)) {
           skipStale(raw, 'list');
           continue;
         }
@@ -6309,7 +6327,7 @@ async function listSweep({ warmUp = false } = {}) {
   }
   if (warmUp) {
     syncDb('seen');
-    console.log(`[OLX] Старт: ${remembered} ${pluralRu(remembered, 'квартиру', 'квартиры', 'квартир')} старше ${PUBLISHED_MAX_AGE_MINUTES} мин запомнил без отправки.`);
+    console.log(`[OLX] Старт: ${remembered} ${pluralRu(remembered, 'квартиру', 'квартиры', 'квартир')} старше ${freshLimitText()} запомнил без отправки.`);
   }
 }
 
@@ -6467,8 +6485,8 @@ async function explainOlxAd(id) {
   if (hasCommission(raw) && ALLOW_COMMISSION) lines.push('ℹ️ Указана комиссия — пропускается (ALLOW_COMMISSION=1), помечается «Риелтор»');
   else check(!hasCommission(raw), hasCommission(raw) ? 'Без комиссии — нет, указана комиссия' : 'Без комиссии');
   check(ageMs <= API_MAX_AGE_MINUTES * 60_000, `Новое: создано ${formatAge(ageMs)} назад (бот берёт до ${API_MAX_AGE_MINUTES / 60} ч)`);
-  const publishedAgeMs = Date.now() - apiPublishedAt(raw);
-  if (!underReview) check(publishedAgeMs <= LIST_PUBLISHED_MAX_AGE_MINUTES * 60_000, `Свежее: на OLX с «Опубликовано» прошло ${formatAge(publishedAgeMs)} (бот отправляет до ${PUBLISHED_MAX_AGE_MINUTES} мин, найденное списком — до ${LIST_PUBLISHED_MAX_AGE_MINUTES})`);
+  const liveForMs = publishedAgeMs(apiPublishedAt(raw));
+  if (!underReview) check(liveForMs <= PUBLISHED_MAX_AGE_SEC * 1000, `Свежее: на OLX с «Опубликовано» прошло ${formatAge(liveForMs)} (бот отправляет только первые ${freshLimitText()})`);
   // Same order as when sending: the corrected section (if the bot changed it) decides.
   const decidedCategory = adDecisions.get(Number(id))?.category || category;
   const scam = isSuspiciouslyCheap(decidedCategory, ad.priceAmount);
