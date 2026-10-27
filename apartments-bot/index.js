@@ -2847,7 +2847,7 @@ async function handleTestCommand(chatId, text, lang) {
         const latest = recentAds.find((item) => validImages(item.images).length > 1) || recentAds[0];
         if (latest) {
           await sendMsg(TELEGRAM_TOKEN, chatId, '🧪 Так выглядит объявление (последнее, которое нашёл бот):');
-          await sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText({ ...latest, time: foundTimeLabel(latest.foundAt) }), latest, lang);
+          await sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText({ ...latest, time: foundTimeLabel(latest.foundAt) }, { foundAt: latest.foundAt }), latest, lang);
         } else {
           await sendMsg(TELEGRAM_TOKEN, chatId, '🧪 Так выглядит объявление (пример — бот ещё не нашёл ни одной квартиры):');
           await sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText(SAMPLE_AD), SAMPLE_AD, lang);
@@ -3982,7 +3982,7 @@ function extractRooms(ad) {
   return match ? Number(match[1] || match[2]) : null;
 }
 
-function formatAdText(ad, { contactLink = null } = {}) {
+function formatAdText(ad, { contactLink = null, foundAt = null } = {}) {
   const time = String(ad.time || '').split(' - ').pop().trim();
   const title = String(ad.title || '').replace(String(ad.price || ''), '').trim();
   const params = [];
@@ -3999,7 +3999,10 @@ function formatAdText(ad, { contactLink = null } = {}) {
   const header = `🏠 <b>${escapeHtmlToFit(title, 120)}</b>\n\n💰 <b>${escapeHtmlToFit(ad.price, 70)}</b>\n\n📍 ${escapeHtmlToFit(ad.location, 80)}\n\n🕐 <i>${escapeHtmlToFit(time, 40)}</i>${paramBlock}`;
   const linkLine = contactLink?.url ? `\n\n<a href="${escapeHtml(contactLink.url)}">${escapeHtml(contactLink.label)}</a>` : '';
   const foundSeconds = Math.round(Number(ad.foundInMs) / 1000);
-  const speedLine = Number.isFinite(foundSeconds) && foundSeconds >= 0 && foundSeconds <= 60 ? `\n⚡ Найдено за ${Math.max(1, foundSeconds)} сек` : '';
+  const fast = Number.isFinite(foundSeconds) && foundSeconds >= 0 && foundSeconds <= 60;
+  const speedLine = foundAt
+    ? `\n📌 Это пример: бот нашёл объявление ${foundTimeLabel(foundAt).toLowerCase()}${fast ? ` — через ${Math.max(1, foundSeconds)} сек после публикации на OLX` : ''}`
+    : fast ? `\n⚡ Найдено за ${Math.max(1, foundSeconds)} сек` : '';
   const pendingLine = ad.pending ? '\n\n⚡ <b>Ранний доступ</b> — объявление только что появилось, вы видите его первым. Если ссылка на OLX ещё не открывается, откройте её через пару минут.' : '';
   const footer = `${numberLine}\n\n🎭 ${author}${speedLine}${pendingLine}${linkLine}`;
   const hasImages = validImages(ad.images).length > 0;
@@ -4068,9 +4071,13 @@ async function welcomePause(chatId, action) {
 async function sendWelcomeAds(chatId) {
   const ads = pickWelcomeAds();
   if (!ads.length) return false;
+  const lang = getLang(chatId);
+  await sendMsg(TELEGRAM_TOKEN, chatId, lang === 'uz'
+    ? '👀 <b>E’lonlar shunday ko‘rinadi.</b> Mana bot yaqinda topgan kvartiralar — ular misol, topilgan vaqti kartada yozilgan. Obuna bilan yangilari e’lon qilinishi bilanoq keladi.'
+    : '👀 <b>Так выглядят объявления.</b> Вот квартиры, которые бот уже нашёл недавно, — это пример, время находки указано в карточке. С подпиской новые приходят сразу после публикации.');
   for (const ad of [...ads].reverse()) {
     await welcomePause(chatId, validImages(ad.images).length ? 'upload_photo' : 'typing');
-    await sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText({ ...ad, time: foundTimeLabel(ad.foundAt) }), ad, getLang(chatId));
+    await sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText({ ...ad, time: foundTimeLabel(ad.foundAt) }, { foundAt: ad.foundAt }), ad, getLang(chatId));
   }
   await welcomePause(chatId, 'typing');
   return true;
@@ -4238,7 +4245,7 @@ async function offerMatchingApartments(chatId, request, lang) {
     && adMatchesFilters(ad, filters, { price: adPrice(ad), rooms: extractRooms(ad) }));
   if (!matches.length) return 0;
   const texts = SEEKER_MATCH_TEXTS[lang] || SEEKER_MATCH_TEXTS.ru;
-  const card = (ad) => sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText({ ...ad, time: foundTimeLabel(ad.foundAt) }), ad, lang);
+  const card = (ad) => sendAdCard(TELEGRAM_TOKEN, chatId, formatAdText({ ...ad, time: foundTimeLabel(ad.foundAt) }, { foundAt: ad.foundAt }), ad, lang);
   if (isSubscribed(chatId)) {
     await sendMsg(TELEGRAM_TOKEN, chatId, texts.intro(matches.length));
     for (const ad of matches.slice(0, 3)) await card(ad);
