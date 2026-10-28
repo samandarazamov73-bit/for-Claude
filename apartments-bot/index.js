@@ -4984,7 +4984,14 @@ async function authorIsMakler(ad) {
 
 const DESCRIPTION_SHORTEN_THRESHOLD = 0;
 const AI_PAUSE_MS = 30 * 60_000;
+const AI_QUOTA_PAUSE_MS = 5 * 60_000;
 let aiPausedUntil = 0;
+const GEMINI_ENDPOINTS = {
+  vertex: (model) => `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent`,
+  studio: (model) => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
+};
+const GEMINI_API_FIXED = ['vertex', 'studio'].includes(String(process.env.GEMINI_API || '').trim().toLowerCase());
+let geminiApi = String(process.env.GEMINI_API || '').trim().toLowerCase() === 'studio' ? 'studio' : 'vertex';
 
 async function askGemini(ad) {
   if (Date.now() < aiPausedUntil) return null;
@@ -5013,20 +5020,38 @@ async function askGemini(ad) {
     '</ad>'
   ].join('\n');
 
-  try {
-    const response = await fetchWithRetry(`https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: rules }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 0 }, responseMimeType: 'application/json' }
+  });
+  const call = async (api) => {
+    const response = await fetchWithRetry(`${GEMINI_ENDPOINTS[api](GEMINI_MODEL)}?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: rules }] },
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 0 }, responseMimeType: 'application/json' }
-      })
+      body
     }, { label: 'Gemini', attempts: 1, initialDelayMs: 1_000, timeoutMs: AI_TIMEOUT_MS - 500 });
-    const json = await response.json().catch(() => ({}));
+    return { response, json: await response.json().catch(() => ({})) };
+  };
+
+  try {
+    let { response, json } = await call(geminiApi);
+    const serviceOff = (reply) => /has not been used|is disabled|SERVICE_DISABLED|not been enabled/i.test(JSON.stringify(reply.json?.error || ''));
+    if (!GEMINI_API_FIXED && serviceOff({ json })) {
+      const other = geminiApi === 'vertex' ? 'studio' : 'vertex';
+      const retry = await call(other);
+      if (!serviceOff(retry)) {
+        console.log(`[Gemini] Ключ работает через ${other === 'studio' ? 'Gemini API (Google AI Studio)' : 'Vertex AI'} — переключился на него.`);
+        geminiApi = other;
+        ({ response, json } = retry);
+      }
+    }
     if (!response.ok || json.error) {
       const message = json.error?.message || `HTTP ${response.status}`;
-      if (/billing|permission|denied|api key|API_KEY/i.test(message) || [401, 403].includes(response.status)) {
+      if (response.status === 429 || /quota|RESOURCE_EXHAUSTED|rate limit/i.test(message)) {
+        aiPausedUntil = Date.now() + AI_QUOTA_PAUSE_MS;
+        console.error(`[Gemini] Лимит запросов исчерпан: ${truncate(message, 160)} — работаю без ИИ, попробую снова через ${AI_QUOTA_PAUSE_MS / 60_000} мин.`);
+      } else if (/billing|permission|denied|api key|API_KEY/i.test(message) || [401, 403].includes(response.status)) {
         aiPausedUntil = Date.now() + AI_PAUSE_MS;
         console.error(`[Gemini] ИИ недоступен: ${truncate(message, 160)} — работаю без ИИ, попробую снова через ${AI_PAUSE_MS / 60_000} мин.`);
       } else {
