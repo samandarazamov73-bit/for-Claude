@@ -4388,13 +4388,19 @@ async function createBrowser() {
 
 const ALLOWED_UPDATES = encodeURIComponent(JSON.stringify(['message', 'callback_query', 'my_chat_member']));
 
+const POLL_ALERT_AFTER_MS = 2 * 60_000;
+
 async function pollBot(token, handler, label) {
   let offset = 0;
+  let failures = 0;
+  let failingSince = 0;
   while (true) {
     try {
       const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=25&allowed_updates=${ALLOWED_UPDATES}`, { signal: AbortSignal.timeout(35_000) });
       const json = await response.json();
       if (!response.ok || !json.ok) throw new Error(json.description || `HTTP ${response.status}`);
+      if (failures && Date.now() - failingSince >= POLL_ALERT_AFTER_MS) console.log(`[${label}] Связь с Telegram восстановилась (не было ${formatAge(Date.now() - failingSince)}).`);
+      failures = 0;
       for (const update of json.result || []) {
         try {
           await handler(update);
@@ -4405,7 +4411,11 @@ async function pollBot(token, handler, label) {
         }
       }
     } catch (error) {
-      console.error(`[${label}] Ошибка long polling code=${getNetworkErrorCode(error)}: ${error.message}`);
+      if (!failures) failingSince = Date.now();
+      failures += 1;
+      const text = `[${label}] Ошибка long polling code=${getNetworkErrorCode(error)}: ${error.message}`;
+      if (Date.now() - failingSince >= POLL_ALERT_AFTER_MS) console.error(`${text} — связи с Telegram нет уже ${Math.round((Date.now() - failingSince) / 60_000)} мин`);
+      else console.warn(text);
       await sleep(10_000);
     }
   }
@@ -4991,6 +5001,8 @@ const DESCRIPTION_SHORTEN_THRESHOLD = 0;
 const AI_PAUSE_MS = 30 * 60_000;
 const AI_QUOTA_PAUSE_MS = 5 * 60_000;
 let aiPausedUntil = 0;
+const GEMINI_ALERT_AFTER_FAILURES = 5;
+let geminiFailures = 0;
 const GEMINI_ENDPOINTS = {
   vertex: (model) => `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent`,
   studio: (model) => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
@@ -5064,6 +5076,7 @@ async function askGemini(ad) {
       }
       return null;
     }
+    geminiFailures = 0;
     const raw = String(json.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
     let parsed;
     try {
@@ -5081,7 +5094,10 @@ async function askGemini(ad) {
       description: typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim() : null
     };
   } catch (error) {
-    console.error(`[Gemini] Ошибка API code=${getNetworkErrorCode(error)}: ${error.message}`);
+    geminiFailures += 1;
+    const text = `[Gemini] Ошибка API code=${getNetworkErrorCode(error)}: ${error.message}`;
+    if (geminiFailures >= GEMINI_ALERT_AFTER_FAILURES) console.error(`${text} — ИИ не отвечает ${geminiFailures} раз подряд, объявления идут без ИИ`);
+    else console.warn(text);
     return null;
   }
 }
