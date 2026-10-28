@@ -4651,7 +4651,7 @@ const probe = {
   reportCursor: 0
 };
 
-const engineStats = { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, notTaken: new Map(), freshestAgeMs: null };
+const engineStats = { letGo: 0, stale: 0, staleOld: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, notTaken: new Map(), freshestAgeMs: null };
 
 const lanes = Array.from({ length: HOME_LANES }, (_, index) => ({ name: `поток ${index + 1}`, requests: 0, helpTurn: false }));
 const mainLane = lanes[0];
@@ -4925,13 +4925,18 @@ function skipStale(raw, source) {
   processedOlxIds.add(raw.id);
   seenAds.add(cleanUrl(raw.url) || raw.url);
   syncDb('seen');
-  engineStats.stale += 1;
   const ageMs = publishedAgeMs(apiPublishedAt(raw));
   const age = ageMs < 60 * 60_000 ? `${Math.floor(ageMs / 60_000)} мин ${Math.floor((ageMs % 60_000) / 1000)} сек` : formatAge(ageMs);
-  console.log(`⏰ Не отправляю (${source === 'probe' ? 'перебор' : 'список'}): на OLX уже ${age} — старше ${freshLimitText()} · ${truncate(oneLine(raw.title), 50)}`);
+  if (ageMs <= STALE_LATE_MS) {
+    engineStats.stale += 1;
+    console.log(`⏰ Нашёл поздно, не отправляю (${source === 'probe' ? 'перебор' : 'список'}): на OLX уже ${age} — старше ${freshLimitText()} · ${truncate(oneLine(raw.title), 50)}`);
+  } else {
+    engineStats.staleOld += 1;
+  }
   recordDecision(raw, `не отправлено: на OLX уже ${age}, а бот отправляет только первые ${freshLimitText()} после публикации`);
 }
 
+const STALE_LATE_MS = 5 * 60_000;
 const SALE_PRICE_MIN = 150_000_000;
 const SALE_WORDS = /(прода[её]тся|продаю|продам|на продажу|sotiladi|sotaman|sotuvga|сотилади|сотаман|сотувга)/i;
 const RENT_WORDS = /(сда[её]тся|сдаю|сдам|в аренду|аренда|ijaraga|ijara|ижарага|ижара)/i;
@@ -5411,7 +5416,7 @@ function reportEngine() {
   const freshest = engineStats.freshestAgeMs === null ? '—' : formatAge(engineStats.freshestAgeMs);
   console.log(`📊 За 5 мин: проверено номеров ${engineStats.checked}, открытых объявлений ${engineStats.open}, закрытых (на проверке/удалены) ${engineStats.closed}. `
     + `Новых квартир: 🕓 на проверке у OLX ${engineStats.sentPending}, перебором ${engineStats.sentProbe}, списком ${engineStats.sentList}; доставлено клиентам ${engineStats.delivered} раз (активных подписчиков: ${subscribers}). `
-    + `Отсеяно: шутки/спам ${engineStats.junk}, посуточно ${engineStats.daily}, повторы ${engineStats.reposts}, старше ${freshLimitText()} ${engineStats.stale}; исправлен раздел ${engineStats.moved}. `
+    + `Отсеяно: шутки/спам ${engineStats.junk}, посуточно ${engineStats.daily}, повторы ${engineStats.reposts}, найдено позже ${freshLimitText()} (до 5 мин) ${engineStats.stale}, старые (больше 5 мин на OLX) ${engineStats.staleOld}; исправлен раздел ${engineStats.moved}. `
     + `Пропуски перебора: ${[...missStats.values()].reduce((sum, count) => sum + count, 0)}${missStats.size ? ` (${[...missStats].map(([reason, count]) => `${reason}: ${count}`).join('; ')})` : ''}. `
     + `Учёт номеров: ${(() => { const uncovered = uncoveredNumbers(); return uncovered ? `⚠️ ${uncovered} не проверены и не в очереди` : 'каждый номер проверен или в очереди ✅'; })()}`
     + `${engineStats.retryOverflow ? `, ⚠️ очередь переполнена (${engineStats.retryOverflow})` : ''}${engineStats.jumps ? `, ⚠️ разрывов номеров: ${engineStats.jumps}` : ''}. `
@@ -5424,9 +5429,9 @@ function reportEngine() {
     })()}. Ищу: ${wanted}.`);
   const notTaken = [...engineStats.notTaken].sort((a, b) => b[1] - a[1]);
   const notTakenTotal = notTaken.reduce((sum, [, count]) => sum + count, 0);
-  console.log(`🏠 Недвижимость, которую перебор увидел, но не взял: ${notTakenTotal}${notTaken.length ? ` — ${notTaken.map(([reason, count]) => `${reason} ${count}`).join(', ')}` : ''}. Бот берёт только Ташкент, частных лиц без комиссии, из разделов, которые ищут подписчики (сейчас: ${wanted}).`);
+  console.log(`🏠 Недвижимость, которую перебор увидел, но не взял: ${notTakenTotal}${notTaken.length ? ` — ${notTaken.map(([reason, count]) => `${reason} ${count}`).join(', ')}` : ''}. Бот берёт только Ташкент${ALLOW_AGENCIES ? '' : ', частных лиц'}${ALLOW_COMMISSION ? '' : ' без комиссии'}, из разделов, которые ищут подписчики (сейчас: ${wanted}).`);
   console.log(`🌐 Потоков ${lanes.length}: ${lanes.map((lane) => `${lane.name} — ${lane.requests} запр.`).join(', ')} (~${Math.round(lanes.reduce((sum, lane) => sum + lane.requests, 0) / minutes)} в минуту)${engineStats.catchUps ? `, рывков к последнему номеру: ${engineStats.catchUps}` : ''}${engineStats.listPage2 ? `, вторая страница списка: ${engineStats.listPage2} раз` : ''}${cacheBust ? ', обход кэша OLX включён' : ''}.`);
-  Object.assign(engineStats, { letGo: 0, stale: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, notTaken: new Map(), freshestAgeMs: null });
+  Object.assign(engineStats, { letGo: 0, stale: 0, staleOld: 0, checked: 0, open: 0, closed: 0, reopened: 0, reopenedFast: 0, reopenedSlow: 0, retryLagSum: 0, retryDone: 0, sentProbe: 0, sentList: 0, sentPending: 0, delivered: 0, junk: 0, daily: 0, reposts: 0, moved: 0, retryOverflow: 0, jumps: 0, catchUps: 0, listPage2: 0, notTaken: new Map(), freshestAgeMs: null });
   for (const lane of lanes) lane.requests = 0;
   missStats.clear();
 }
