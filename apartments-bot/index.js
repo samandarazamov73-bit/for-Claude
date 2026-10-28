@@ -78,6 +78,92 @@ const CARD_NAME = process.env.CARD_NAME;
 const SUPPORT = process.env.SUPPORT_HANDLE || '@Umstveniy';
 const BOT_ID = Number(TELEGRAM_TOKEN.split(':')[0]);
 
+const ERROR_ALERT_FIRST_DELAY_MS = 5_000;
+const ERROR_ALERT_REPEAT_MS = 30 * 60_000;
+const ERROR_ALERT_TEXT_MAX = 700;
+const ERROR_ALERT_MESSAGES_MAX = 3;
+const ERROR_ALERT_IGNORE = /blocked by the user|user is deactivated/i;
+const errorAlerts = new Map();
+let errorAlertTimer = null;
+let errorAlertSending = false;
+{
+  const { inspect } = require('util');
+  const original = console.error;
+  console.error = (...args) => {
+    original(...args);
+    try {
+      noteErrorForAdmin(args.map((item) => (typeof item === 'string' ? item : inspect(item, { depth: 3 }))).join(' '));
+    } catch {}
+  };
+  setInterval(() => flushErrorAlerts().catch(() => {}), 60_000).unref?.();
+}
+
+function errorSignature(text) {
+  return String(text).split('\n')[0].replace(/\d+/g, '#').slice(0, 200);
+}
+
+function noteErrorForAdmin(rawText) {
+  const text = String(rawText).replace(/\x1b\[[0-9;]*m/g, '');
+  if (!ADMIN_TOKEN || !ADMIN_CHAT_ID || ERROR_ALERT_IGNORE.test(text)) return;
+  const key = errorSignature(text);
+  const entry = errorAlerts.get(key) || { count: 0, total: 0, lastSentAt: 0 };
+  entry.count += 1;
+  entry.total += 1;
+  entry.text = text;
+  entry.at = Date.now();
+  errorAlerts.set(key, entry);
+  if (!entry.lastSentAt && !errorAlertTimer) {
+    errorAlertTimer = setTimeout(() => {
+      errorAlertTimer = null;
+      flushErrorAlerts().catch(() => {});
+    }, ERROR_ALERT_FIRST_DELAY_MS);
+  }
+}
+
+async function flushErrorAlerts() {
+  if (errorAlertSending) return;
+  const now = Date.now();
+  const due = [...errorAlerts.values()].filter((entry) => entry.count > 0 && (!entry.lastSentAt || now - entry.lastSentAt >= ERROR_ALERT_REPEAT_MS));
+  for (const [key, entry] of errorAlerts) {
+    if (!entry.count && now - entry.lastSentAt > ERROR_ALERT_REPEAT_MS) errorAlerts.delete(key);
+  }
+  if (!due.length) return;
+  const time = (ms) => new Date(ms).toLocaleTimeString('ru-RU', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+  const blocks = due.map((entry) => {
+    const head = entry.lastSentAt
+      ? `🔁 <b>Повторилась ${entry.count} ${pluralRu(entry.count, 'раз', 'раза', 'раз')} за ${Math.round((now - entry.lastSentAt) / 60_000)} мин</b> (последний раз в ${time(entry.at)})`
+      : `🚨 <b>Ошибка</b> в ${time(entry.at)}${entry.count > 1 ? ` (${entry.count} ${pluralRu(entry.count, 'раз', 'раза', 'раз')} подряд)` : ''}`;
+    return `${head}\n<pre>${escapeHtml(truncate(entry.text, ERROR_ALERT_TEXT_MAX))}</pre>`;
+  });
+  const parts = [];
+  let skipped = 0;
+  for (const block of blocks) {
+    if (parts.length && parts[parts.length - 1].length + block.length < 3_600) parts[parts.length - 1] += `\n\n${block}`;
+    else if (parts.length < ERROR_ALERT_MESSAGES_MAX) parts.push(block);
+    else skipped += 1;
+  }
+  if (skipped) parts[parts.length - 1] += `\n\n…и ещё ${skipped} ${pluralRu(skipped, 'ошибка', 'ошибки', 'ошибок')} другого вида`;
+  errorAlertSending = true;
+  try {
+    for (const part of parts) {
+      const response = await fetch(`https://api.telegram.org/bot${ADMIN_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text: `${part}\n\n📎 Весь лог: /log`, parse_mode: 'HTML', disable_web_page_preview: true }),
+        signal: AbortSignal.timeout(15_000)
+      });
+      if (!response.ok) return;
+    }
+    for (const entry of due) {
+      entry.count = 0;
+      entry.lastSentAt = now;
+    }
+  } catch {
+  } finally {
+    errorAlertSending = false;
+  }
+}
+
 const PLANS = {
   7: { days: 7, price: 50_000 },
   30: { days: 30, price: 200_000 }
@@ -5884,7 +5970,8 @@ process.on('unhandledRejection', (reason) => {
   console.error(`[Process] Необработанный отказ Promise: ${reason?.stack || reason}`);
 });
 
-main().catch((error) => {
+main().catch(async (error) => {
   console.error(`Критическая ошибка: ${error.stack || error.message}`);
+  await withTimeout(flushErrorAlerts(), 10_000, null);
   process.exit(1);
 });
