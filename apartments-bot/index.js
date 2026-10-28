@@ -82,7 +82,7 @@ const ERROR_ALERT_FIRST_DELAY_MS = 5_000;
 const ERROR_ALERT_REPEAT_MS = 30 * 60_000;
 const ERROR_ALERT_TEXT_MAX = 700;
 const ERROR_ALERT_MESSAGES_MAX = 3;
-const USER_UNREACHABLE = /blocked by the user|user is deactivated|can't initiate conversation/i;
+const USER_UNREACHABLE = /blocked by the user|user is deactivated|can't initiate conversation|chat not found/i;
 const ERROR_ALERT_IGNORE = USER_UNREACHABLE;
 const errorAlerts = new Map();
 let errorAlertTimer = null;
@@ -1547,7 +1547,7 @@ async function sendMediaGroup(token, chatId, text, images, buttons = null, photo
     rememberAlbumFileIds(photoCache, await telegramApi(token, 'sendMediaGroup', { chat_id: chatId, media }, { attempts: 1 }));
     return sendButtonsUnderAlbum(token, chatId, buttons);
   } catch (error) {
-    if (USER_UNREACHABLE.test(error.message)) {
+    if (USER_UNREACHABLE.test(error.message) && !dbChannels[String(chatId)]) {
       if (token === TELEGRAM_TOKEN) markBlocked(chatId);
       return false;
     }
@@ -1619,7 +1619,7 @@ async function sendOnePhoto(token, chatId, text, photo, markup, uploadUrl = phot
   try {
     return await telegramApi(token, 'sendPhoto', { chat_id: chatId, photo, caption: text, parse_mode: 'HTML', ...extra }, { attempts: 1 });
   } catch (error) {
-    if (USER_UNREACHABLE.test(error.message)) {
+    if (USER_UNREACHABLE.test(error.message) && !dbChannels[String(chatId)]) {
       if (token === TELEGRAM_TOKEN) markBlocked(chatId);
       return false;
     }
