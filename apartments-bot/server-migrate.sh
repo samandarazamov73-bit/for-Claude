@@ -3,7 +3,6 @@ set -euo pipefail
 
 OLD=/root/olx-bot-v6
 NEW=/root/apartments-bot
-ARCHIVE=/root/old-bots-archive
 REV=beab31c3aadd1bdd6fdab45df5cd2ce9c0f84b5d
 RAW=https://raw.githubusercontent.com/samandarazamov73-bit/for-Claude/$REV/apartments-bot
 TG=${TG_API:-https://api.telegram.org}
@@ -86,12 +85,21 @@ if [ "${STATUS%% *}" != "online" ] || [ "${STATUS##* }" -gt 2 ]; then
   exit 1
 fi
 
-step "7/8 Убираю старый бот в архив и включаю рассылку о переезде"
+step "7/8 Отключаю старый бот и удаляю его файлы (нужные сохраняю)"
 pm2 delete olx-bot-v6
-mkdir -p "$ARCHIVE"
-OLD_SAVED="$ARCHIVE/olx-bot-v6-$(date +%Y%m%d-%H%M)"
-mv "$OLD" "$OLD_SAVED"
-pm2 start "$NEW/farewell.js" --name old-bot-redirect --cwd "$NEW" -- "$OLD_SAVED" "$NEW_NAME"
+BACKUP="/root/old-bot-backup-$(date +%Y%m%d-%H%M)"
+mkdir -p "$BACKUP"
+for file in .env package.json $DATA_FILES; do
+  if [ -f "$OLD/$file" ]; then cp -p "$OLD/$file" "$BACKUP/"; fi
+done
+find "$OLD" -maxdepth 1 -type f -name '*.js' -exec cp -p {} "$BACKUP/" \;
+echo "Сохранено в $BACKUP: $(ls -A "$BACKUP" | wc -l) файлов, $(du -sh "$BACKUP" | cut -f1) — данные, .env и скрипты старого бота"
+FREED=$(du -sh "$OLD" | cut -f1)
+rm -rf "$OLD"
+rm -f /root/.pm2/logs/olx-bot-v6-*.log
+(cd "$NEW" && npx playwright install chromium >/dev/null 2>&1) || true
+echo "Удалено: папка старого бота ($FREED), его логи и его старый Chromium"
+pm2 start "$NEW/farewell.js" --name old-bot-redirect --cwd "$NEW" -- "$BACKUP" "$NEW_NAME"
 pm2 save
 pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
 
@@ -100,12 +108,16 @@ cat > /root/rollback-old-bot.sh <<EOF
 #!/bin/bash
 set -e
 pm2 stop apartments-bot old-bot-redirect || true
+mkdir -p "$OLD"
+cp -a "$BACKUP/." "$OLD/"
 for file in users.json pending.json channels.json stats.json state.json; do
-  [ -f "$NEW/\$file" ] && cp -p "$NEW/\$file" "$OLD_SAVED/"
+  [ -f "$NEW/\$file" ] && cp -p "$NEW/\$file" "$OLD/"
 done
-mv "$OLD_SAVED" "$OLD"
+cd "$OLD"
+if [ -f package.json ]; then npm install --no-audit --no-fund; else npm install --no-audit --no-fund playwright dotenv; fi
+npx playwright install chromium
 pm2 delete apartments-bot old-bot-redirect || true
-cd "$OLD" && pm2 start index.js --name olx-bot-v6
+pm2 start index.js --name olx-bot-v6
 pm2 save
 echo "✅ Старый бот @$OLD_NAME возвращён и запущен, новый остановлен."
 EOF
@@ -115,5 +127,6 @@ pm2 logs old-bot-redirect --lines 10 --nostream
 echo
 echo "✅ Готово."
 echo "   Новый бот: @$NEW_NAME — работает (pm2 logs apartments-bot)."
-echo "   Старый бот @$OLD_NAME рассылает пользователям ссылку на новый и дальше отвечает ею на любые сообщения."
-echo "   Итог рассылки придёт в админ-бот. Старые файлы: $OLD_SAVED"
+echo "   Старый бот @$OLD_NAME: старый скрипт удалён, вместо него маленький процесс рассылает"
+echo "   пользователям ссылку на новый бот и дальше отвечает ею на любые сообщения."
+echo "   Итог рассылки придёт в админ-бот. Нужные файлы старого бота: $BACKUP"
