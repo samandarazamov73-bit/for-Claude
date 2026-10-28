@@ -82,7 +82,8 @@ const ERROR_ALERT_FIRST_DELAY_MS = 5_000;
 const ERROR_ALERT_REPEAT_MS = 30 * 60_000;
 const ERROR_ALERT_TEXT_MAX = 700;
 const ERROR_ALERT_MESSAGES_MAX = 3;
-const ERROR_ALERT_IGNORE = /blocked by the user|user is deactivated/i;
+const USER_UNREACHABLE = /blocked by the user|user is deactivated|can't initiate conversation/i;
+const ERROR_ALERT_IGNORE = USER_UNREACHABLE;
 const errorAlerts = new Map();
 let errorAlertTimer = null;
 let errorAlertSending = false;
@@ -1091,6 +1092,7 @@ const T = {
     trialAlreadyUsed: 'Бесплатный доступ уже был использован',
     setupSearchButton: '🔍 Настроить поиск',
     greeting: `👋 <b>С возвращением!</b>\n\n• <b>🔍 Мой поиск</b> — какие объявления присылать.\n• <b>📅 Подписка</b> — сколько дней осталось и продление.\n• <b>⚙️ Настройки</b> — язык, помощь, поддержка.\n\nМеню — внизу экрана 👇`,
+    movedGreeting: (until) => `👋 <b>Добро пожаловать в новый бот!</b>\n\nВаши настройки поиска перенесены${until ? `, подписка действует до <b>${until}</b>` : ''}. Новые квартиры теперь приходят сюда.\n\n• <b>🔍 Мой поиск</b> — какие объявления присылать.\n• <b>📅 Подписка</b> — сколько дней осталось и продление.\n• <b>⚙️ Настройки</b> — язык, помощь, поддержка.\n\nМеню — внизу экрана 👇`,
 
     statusActive: (days, until) => `📅 <b>Подписка активна</b>\n\n⏳ Осталось: <b>${daysText(days, 'ru')}</b>\n📆 До: <b>${until}</b>\n\nПродлить можно в любой момент — дни добавятся к текущей подписке.`,
     statusNone: `🔒 <b>Чтобы получать объявления, нужна подписка.</b>\n\nКак оформить:\n1️⃣ Нажмите <b>«Купить подписку»</b> и выберите срок.\n2️⃣ Напишите имя и фамилию владельца карты.\n3️⃣ Переведите деньги на карту и нажмите <b>«Я оплатил»</b>.\n\nАдминистратор проверит оплату, и бот сразу напишет сюда.\n\nВопросы: ${SUPPORT}`,
@@ -1227,6 +1229,7 @@ const T = {
     trialAlreadyUsed: 'Bepul kirish allaqachon ishlatilgan',
     setupSearchButton: '🔍 Qidiruvni sozlash',
     greeting: `👋 <b>Qaytganingizdan xursandmiz!</b>\n\n• <b>🔍 Mening qidiruvim</b> — qanday e'lonlarni yuborish.\n• <b>📅 Obuna</b> — necha kun qolgani va uzaytirish.\n• <b>⚙️ Sozlamalar</b> — til, yordam, qo'llab-quvvatlash.\n\nMenyu ekranning pastida 👇`,
+    movedGreeting: (until) => `👋 <b>Yangi botga xush kelibsiz!</b>\n\nQidiruv sozlamalaringiz ko'chirildi${until ? `, obuna <b>${until}</b> gacha amal qiladi` : ''}. Yangi kvartiralar endi shu yerga keladi.\n\n• <b>🔍 Mening qidiruvim</b> — qanday e'lonlarni yuborish.\n• <b>📅 Obuna</b> — necha kun qolgani va uzaytirish.\n• <b>⚙️ Sozlamalar</b> — til, yordam, qo'llab-quvvatlash.\n\nMenyu ekranning pastida 👇`,
 
     statusActive: (days, until) => `📅 <b>Obuna faol</b>\n\n⏳ Qoldi: <b>${daysText(days, 'uz')}</b>\n📆 Gacha: <b>${until}</b>\n\nIstalgan vaqtda uzaytirish mumkin — kunlar joriy obunaga qo'shiladi.`,
     statusNone: `🔒 <b>E'lonlarni olish uchun obuna kerak.</b>\n\nQanday rasmiylashtirish:\n1️⃣ <b>«Obuna sotib olish»</b> tugmasini bosing va muddatni tanlang.\n2️⃣ Karta egasining ism va familiyasini yozing.\n3️⃣ Kartaga pul o'tkazing va <b>«Men to'ladim»</b> tugmasini bosing.\n\nAdministrator to'lovni tekshiradi va bot darhol shu yerga yozadi.\n\nSavollar: ${SUPPORT}`,
@@ -1445,7 +1448,7 @@ async function sendMsg(token, chatId, text, extra = {}) {
       return null;
     }
     console.error(`[Telegram] Не удалось отправить сообщение ${chatId} code=${getNetworkErrorCode(error)}: ${error.message}`);
-    if (token === TELEGRAM_TOKEN && /blocked by the user|user is deactivated/i.test(error.message)) markBlocked(chatId);
+    if (token === TELEGRAM_TOKEN && USER_UNREACHABLE.test(error.message)) markBlocked(chatId);
     return null;
   }
 }
@@ -1544,7 +1547,7 @@ async function sendMediaGroup(token, chatId, text, images, buttons = null, photo
     rememberAlbumFileIds(photoCache, await telegramApi(token, 'sendMediaGroup', { chat_id: chatId, media }, { attempts: 1 }));
     return sendButtonsUnderAlbum(token, chatId, buttons);
   } catch (error) {
-    if (/blocked by the user|user is deactivated/i.test(error.message)) {
+    if (USER_UNREACHABLE.test(error.message)) {
       if (token === TELEGRAM_TOKEN) markBlocked(chatId);
       return false;
     }
@@ -1616,7 +1619,7 @@ async function sendOnePhoto(token, chatId, text, photo, markup, uploadUrl = phot
   try {
     return await telegramApi(token, 'sendPhoto', { chat_id: chatId, photo, caption: text, parse_mode: 'HTML', ...extra }, { attempts: 1 });
   } catch (error) {
-    if (/blocked by the user|user is deactivated/i.test(error.message)) {
+    if (USER_UNREACHABLE.test(error.message)) {
       if (token === TELEGRAM_TOKEN) markBlocked(chatId);
       return false;
     }
@@ -2730,7 +2733,8 @@ async function handleMessage(message) {
   if (/^\/start(?:\s|@|$)/.test(text)) {
     if (!role) return sendStartWelcome(chatId);
     cancelTextInput(chatId);
-    await sendMsg(TELEGRAM_TOKEN, chatId, t.greeting, { reply_markup: mainMenu(lang, role) });
+    const moved = /^\/start\s+moved\b/.test(text);
+    await sendMsg(TELEGRAM_TOKEN, chatId, moved ? t.movedGreeting(isSubscribed(chatId) ? formatUntil(chatId, lang) : null) : t.greeting, { reply_markup: mainMenu(lang, role) });
     if (!isSubscribed(chatId)) await sendAccessOffer(chatId, lang);
     return;
   }
