@@ -1403,7 +1403,7 @@ async function telegramApi(token, method, payload, { attempts = 3 } = {}) {
       body: JSON.stringify(payload)
     }, { label: `Telegram ${method}`, attempts, initialDelayMs: 750, retriableStatuses: [429], timeoutMs: /^send(MediaGroup|Photo|Document|Video)$/.test(method) ? 60_000 : 30_000 });
   } catch (error) {
-    console.error(`[Telegram API] ${method}: сетевая ошибка code=${getNetworkErrorCode(error)}: ${error.message}`);
+    console.warn(`[Telegram API] ${method}: сетевая ошибка code=${getNetworkErrorCode(error)}: ${error.message}`);
     throw new Error(`network error: ${error.message}`, { cause: error });
   }
 
@@ -1562,7 +1562,7 @@ async function sendMediaGroup(token, chatId, text, images, buttons = null, photo
       await channelAccessLost(String(chatId));
       return false;
     }
-    console.error(`[Telegram] Не удалось отправить фотографии ${chatId} code=${getNetworkErrorCode(error)}: ${error.message}`);
+    console.warn(`[Telegram] Не удалось отправить фотографии ${chatId} code=${getNetworkErrorCode(error)}: ${error.message} — отправляю текстом`);
     return Boolean(await sendMsg(token, chatId, text, withButtons));
   }
 }
@@ -1617,7 +1617,7 @@ async function uploadPhotoFile(token, chatId, url, caption, markup) {
 async function sendOnePhoto(token, chatId, text, photo, markup, uploadUrl = photo) {
   const extra = markup ? { reply_markup: markup } : {};
   try {
-    return await telegramApi(token, 'sendPhoto', { chat_id: chatId, photo, caption: text, parse_mode: 'HTML', ...extra }, { attempts: 1 });
+    return await telegramApi(token, 'sendPhoto', { chat_id: chatId, photo, caption: text, parse_mode: 'HTML', ...extra }, { attempts: 2 });
   } catch (error) {
     if (USER_UNREACHABLE.test(error.message) && !dbChannels[String(chatId)]) {
       if (token === TELEGRAM_TOKEN) markBlocked(chatId);
@@ -1631,7 +1631,7 @@ async function sendOnePhoto(token, chatId, text, photo, markup, uploadUrl = phot
       await channelAccessLost(String(chatId));
       return false;
     }
-    console.error(`[Telegram] Не удалось отправить фото ${chatId} code=${getNetworkErrorCode(error)}: ${error.message}`);
+    console.warn(`[Telegram] Не удалось отправить фото ${chatId} code=${getNetworkErrorCode(error)}: ${error.message} — отправляю текстом`);
     return Boolean(await sendMsg(token, chatId, text, extra));
   }
 }
@@ -5002,7 +5002,19 @@ const AI_PAUSE_MS = 30 * 60_000;
 const AI_QUOTA_PAUSE_MS = 5 * 60_000;
 let aiPausedUntil = 0;
 const GEMINI_ALERT_AFTER_FAILURES = 5;
+const GEMINI_PAUSE_AFTER_FAILURES = 3;
+const GEMINI_BUSY_PAUSE_MS = 2 * 60_000;
 let geminiFailures = 0;
+
+function noteGeminiTrouble(text) {
+  geminiFailures += 1;
+  if (geminiFailures >= GEMINI_ALERT_AFTER_FAILURES) console.error(`${text} — ИИ не отвечает ${geminiFailures} раз подряд, объявления идут без ИИ`);
+  else console.warn(text);
+  if (geminiFailures >= GEMINI_PAUSE_AFTER_FAILURES) {
+    aiPausedUntil = Date.now() + GEMINI_BUSY_PAUSE_MS;
+    console.warn(`[Gemini] ${GEMINI_BUSY_PAUSE_MS / 60_000} мин работаю без ИИ, чтобы не задерживать объявления.`);
+  }
+}
 const GEMINI_ENDPOINTS = {
   vertex: (model) => `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent`,
   studio: (model) => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
@@ -5071,6 +5083,8 @@ async function askGemini(ad) {
       } else if (/billing|permission|denied|api key|API_KEY/i.test(message) || [401, 403].includes(response.status)) {
         aiPausedUntil = Date.now() + AI_PAUSE_MS;
         console.error(`[Gemini] ИИ недоступен: ${truncate(message, 160)} — работаю без ИИ, попробую снова через ${AI_PAUSE_MS / 60_000} мин.`);
+      } else if (response.status >= 500 || /high demand|overloaded|UNAVAILABLE|INTERNAL|try again later/i.test(message)) {
+        noteGeminiTrouble(`[Gemini] Временно не отвечает (HTTP ${response.status}): ${truncate(message, 160)}`);
       } else {
         console.error(`[Gemini] ${message}`);
       }
@@ -5094,10 +5108,7 @@ async function askGemini(ad) {
       description: typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim() : null
     };
   } catch (error) {
-    geminiFailures += 1;
-    const text = `[Gemini] Ошибка API code=${getNetworkErrorCode(error)}: ${error.message}`;
-    if (geminiFailures >= GEMINI_ALERT_AFTER_FAILURES) console.error(`${text} — ИИ не отвечает ${geminiFailures} раз подряд, объявления идут без ИИ`);
-    else console.warn(text);
+    noteGeminiTrouble(`[Gemini] Ошибка API code=${getNetworkErrorCode(error)}: ${error.message}`);
     return null;
   }
 }
