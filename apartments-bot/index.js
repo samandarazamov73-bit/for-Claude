@@ -4371,7 +4371,8 @@ async function sendSeekerRequestToMaklers(chatId, request) {
 async function createBrowser() {
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+    env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: 'disabled:', DBUS_SYSTEM_BUS_ADDRESS: 'disabled:' }
   });
   const sessionPath = path.join(__dirname, 'olx-session.json');
   const hasSession = fs.existsSync(sessionPath);
