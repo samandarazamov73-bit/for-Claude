@@ -60,6 +60,8 @@ if (missingEnv.length) {
 
 const SUBSCRIPTION_REQUIRED = true;
 const FREE_TRIAL_PROMO_ACTIVE = !['0', 'false', 'no'].includes(String(process.env.FREE_TRIAL || '').trim().toLowerCase());
+const FREE_TRIAL_AUTO = !['0', 'false', 'no'].includes(String(process.env.FREE_TRIAL_AUTO || '').trim().toLowerCase());
+const TRIAL_NUDGE_AFTER_MS = 30 * 60_000;
 const FREE_TRIAL_DAYS = 1;
 const FREE_TRIAL_HOURS = Math.max(1, Math.min(24 * 30, Math.round(Number(process.env.FREE_TRIAL_HOURS) || 3)));
 
@@ -1088,6 +1090,9 @@ const T = {
     registered: `✅ <b>Готово!</b>\n\nМеню бота — внизу экрана 👇`,
     freeTrialOffer: (days) => `🎁 <b>Подарок для новых пользователей</b>\n\n${daysText(days, 'ru')} бесплатного доступа ко всем новым объявлениям.\n\nНажмите кнопку ниже, а потом выберите в <b>«🔍 Мой поиск»</b>, какие объявления присылать.`,
     freeTrialButton: '🎁 Получить бесплатный доступ',
+    freeTrialAuto: (hours) => `🎁 <b>Дарим ${hoursText(hours, 'ru')} бесплатного доступа!</b>\n\nОн уже включён — ничего платить и нажимать не нужно. Новые квартиры начнут приходить сюда сами.\n\n👇 Выберите ниже район, цену и комнаты — тогда будут приходить только подходящие.`,
+    trialNudge: (hours) => `🎁 <b>У вас есть ${hoursText(hours, 'ru')} бесплатного доступа</b> — вы их ещё не включили.\n\nНажмите кнопку — и новые квартиры от хозяев начнут приходить сюда сразу после публикации. Платить ничего не нужно.`,
+    trialNudgeButton: (hours) => `🎁 Включить бесплатные ${hoursText(hours, 'ru')}`,
     freeTrialGranted: (hours) => `🎉 <b>Бесплатный доступ включён на ${hoursText(hours, 'ru')}!</b>\n\nОсталось выбрать, какие объявления присылать: район, категорию и цену. Нажмите кнопку ниже 👇`,
     trialAlreadyUsed: 'Бесплатный доступ уже был использован',
     setupSearchButton: '🔍 Настроить поиск',
@@ -1225,6 +1230,9 @@ const T = {
     registered: `✅ <b>Tayyor!</b>\n\nBot menyusi ekranning pastida 👇`,
     freeTrialOffer: (days) => `🎁 <b>Yangi foydalanuvchilar uchun sovg'a</b>\n\nBarcha yangi e'lonlarga ${daysText(days, 'uz')}lik bepul kirish.\n\nPastdagi tugmani bosing, so'ng <b>«🔍 Mening qidiruvim»</b> bo'limida qanday e'lonlar kerakligini tanlang.`,
     freeTrialButton: '🎁 Bepul kirishni olish',
+    freeTrialAuto: (hours) => `🎁 <b>${hoursText(hours, 'uz')} bepul kirish — sovg‘a!</b>\n\nU allaqachon yoqilgan — hech narsa to‘lash yoki bosish shart emas. Yangi kvartiralar shu yerga o‘zi kela boshlaydi.\n\n👇 Pastda tuman, narx va xonalarni tanlang — shunda faqat mos e’lonlar keladi.`,
+    trialNudge: (hours) => `🎁 <b>Sizda ${hoursText(hours, 'uz')} bepul kirish bor</b> — hali yoqmagansiz.\n\nTugmani bosing — egasidan yangi kvartiralar e’lon qilinishi bilanoq shu yerga kela boshlaydi. Hech narsa to‘lash shart emas.`,
+    trialNudgeButton: (hours) => `🎁 ${hoursText(hours, 'uz')} bepul yoqish`,
     freeTrialGranted: (hours) => `🎉 <b>${hoursText(hours, 'uz')}lik bepul kirish yoqildi!</b>\n\nEndi qanday e'lonlar kerakligini tanlang: tuman, kategoriya va narx. Pastdagi tugmani bosing 👇`,
     trialAlreadyUsed: 'Bepul kirish allaqachon ishlatilgan',
     setupSearchButton: '🔍 Qidiruvni sozlash',
@@ -1836,6 +1844,12 @@ function paymentId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function grantTrial(chatId) {
+  addSubscription(chatId, '', FREE_TRIAL_HOURS / 24, 'trial');
+  updateUserProperty(chatId, 'trialUsed', true);
+  bumpStats({ trials: 1 });
+}
+
 function canClaimTrial(chatId) {
   const user = dbUsers[String(chatId)];
   return !user?.until && !user?.trialUsed;
@@ -2026,6 +2040,10 @@ async function finishRegistration(chatId, lang, role) {
   await sendMsg(ADMIN_TOKEN, ADMIN_CHAT_ID, `🆕 <b>Новая регистрация!</b>\n\n🆔 ID: <code>${chatId}</code>\n🗣 Язык: ${lang}\n🎭 Роль: <b>${roleName}</b>`);
   await sendMsg(TELEGRAM_TOKEN, chatId, T[lang].registered, { reply_markup: mainMenu(lang, role) });
 
+  if (isNew && FREE_TRIAL_PROMO_ACTIVE && FREE_TRIAL_AUTO && canClaimTrial(chatId)) {
+    grantTrial(chatId);
+    await sendMsg(TELEGRAM_TOKEN, chatId, T[lang].freeTrialAuto(FREE_TRIAL_HOURS));
+  }
   if (isSubscribed(chatId)) {
     await openSearchCard(chatId, lang);
     return;
@@ -2354,9 +2372,7 @@ async function handleCallback(cb) {
       await removeButtons(cb);
       return answerCb(TELEGRAM_TOKEN, cb.id, t.trialAlreadyUsed);
     }
-    addSubscription(chatId, '', FREE_TRIAL_HOURS / 24, 'trial');
-    updateUserProperty(chatId, 'trialUsed', true);
-    bumpStats({ trials: 1 });
+    grantTrial(chatId);
     await answerCb(TELEGRAM_TOKEN, cb.id, '🎁');
     await removeButtons(cb);
     return sendMsg(TELEGRAM_TOKEN, chatId, t.freeTrialGranted(FREE_TRIAL_HOURS), { reply_markup: openSearchMenu(lang) });
@@ -4521,8 +4537,19 @@ async function sendReminders() {
   if (isQuietHour()) return 0;
   const now = Date.now();
   let sent = 0;
+  let nudged = 0;
 
   for (const [chatId, user] of Object.entries(dbUsers)) {
+    if (isPlainObject(user) && !user.until && FREE_TRIAL_PROMO_ACTIVE && user.role && !user.trialUsed && !user.trialNudgedAt && !user.blockedAt
+      && Number(user.firstSeenAt) && now - Number(user.firstSeenAt) >= TRIAL_NUDGE_AFTER_MS && !dbPending[chatId]) {
+      const lang = getLang(chatId);
+      user.trialNudgedAt = now;
+      nudged += 1;
+      if (await sendMsg(TELEGRAM_TOKEN, chatId, T[lang].trialNudge(FREE_TRIAL_HOURS), {
+        reply_markup: { inline_keyboard: [[{ text: T[lang].trialNudgeButton(FREE_TRIAL_HOURS), callback_data: 'claim_trial' }]] }
+      })) sent += 1;
+      continue;
+    }
     if (!isPlainObject(user) || !user.until || user.blockedAt || dbPending[chatId]) continue;
     if (Number(user.lastReminderAt) && (now - Number(user.lastReminderAt)) / 3_600_000 < REMINDER_DAILY_INTERVAL_HOURS) continue;
     const expiry = Date.parse(user.until);
@@ -4575,7 +4602,7 @@ async function sendReminders() {
     }
   }
 
-  if (sent) {
+  if (sent || nudged) {
     syncDb('users');
     console.log(`🔔 Напоминаний отправлено: ${sent}`);
   }
