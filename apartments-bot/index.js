@@ -59,9 +59,9 @@ if (missingEnv.length) {
 }
 
 const SUBSCRIPTION_REQUIRED = true;
-const FREE_TRIAL_PROMO_ACTIVE = true;
+const FREE_TRIAL_PROMO_ACTIVE = !['0', 'false', 'no'].includes(String(process.env.FREE_TRIAL || '').trim().toLowerCase());
 const FREE_TRIAL_DAYS = 1;
-const FREE_TRIAL_HOURS = 3;
+const FREE_TRIAL_HOURS = Math.max(1, Math.min(24 * 30, Math.round(Number(process.env.FREE_TRIAL_HOURS) || 3)));
 
 const REMINDER_CHECK_INTERVAL_MS = 10 * 60 * 1_000;
 const REMINDER_SOON_HOURS = 6;
@@ -2345,6 +2345,10 @@ async function handleCallback(cb) {
   }
 
   if (data === 'claim_trial') {
+    if (!FREE_TRIAL_PROMO_ACTIVE) {
+      await removeButtons(cb);
+      return answerCb(TELEGRAM_TOKEN, cb.id, t.oldButton);
+    }
     if (isSubscribed(chatId)) return answerCb(TELEGRAM_TOKEN, cb.id, t.alreadySubscribed);
     if (!canClaimTrial(chatId)) {
       await removeButtons(cb);
@@ -3145,8 +3149,8 @@ function formatSnapshotBlock(snap) {
     `⌛ Заканчиваются за 3 дня: <b>${snap.expiring.length}</b>`,
     `📢 Активных каналов: <b>${snap.channelsOwned + snap.channelsAdmin}</b> (клиентских ${snap.channelsOwned}, своих ${snap.channelsAdmin})`,
     `⏳ Ждут проверки оплаты: <b>${snap.pending}</b>`,
-    `🚫 Заблокировали бота: <b>${snap.blocked}</b>`,
-    `🎯 Из бесплатного дня в оплату: <b>${conversion}</b>`
+    `🚫 Заблокировали бота или ещё не открыли его: <b>${snap.blocked}</b>`,
+    `🎯 Из пробного доступа в оплату: <b>${conversion}</b>`
   ].join('\n');
 }
 
@@ -3316,16 +3320,18 @@ function adminUserCard(userId) {
     : '⚠️ Не закончил регистрацию (не выбрал язык или роль)');
   lines.push('');
 
-  const sourceLabel = { trial: '🎁 бесплатный день', paid: '💳 оплачена', admin: '👑 выдана вручную' }[subSource(user)];
+  const sourceLabel = { trial: '🎁 пробный доступ', paid: '💳 оплачена', admin: '👑 выдана вручную' }[subSource(user)];
   if (isSubscribed(userId)) {
+    const msLeft = Date.parse(user.until) - Date.now();
+    const left = msLeft < 86_400_000 ? hoursText(Math.max(1, Math.ceil(msLeft / 3_600_000)), 'ru') : daysText(getDaysLeft(userId), 'ru');
     lines.push(`✅ <b>Подписка активна</b> до ${formatDate(user.until, true)}`);
-    lines.push(`⏳ Осталось: ${daysText(getDaysLeft(userId), 'ru')} · ${sourceLabel}`);
+    lines.push(`⏳ Осталось: ${left} · ${sourceLabel}`);
   } else if (user.until) {
     lines.push(`❌ <b>Подписки нет</b> — закончилась ${formatDate(user.until, true)}`);
   } else {
     lines.push('❌ <b>Подписки нет</b> — никогда не было');
   }
-  lines.push(`🎁 Бесплатный день: ${user.trialUsed ? 'использован' : 'не брал'}`);
+  lines.push(`🎁 Пробный доступ (${hoursText(FREE_TRIAL_HOURS, 'ru')}): ${user.trialUsed ? 'использован' : user.until ? 'не положен — подписка уже была' : FREE_TRIAL_PROMO_ACTIVE ? 'не брал' : 'не брал, сейчас выключен'}`);
   lines.push(`💳 Оплат через бота: ${Number(user.payments) || 0}${user.paidTotal ? ` на ${formatSum(user.paidTotal, 'ru')}` : ''}`);
 
   const own = getOwnChannel(userId);
