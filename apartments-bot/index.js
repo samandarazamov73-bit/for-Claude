@@ -3294,7 +3294,8 @@ const ADMIN_HELP = `🛠 <b>Админ-панель</b>\n\n`
   + `⏳ <b>Заявки</b> — оплаты, которые ждут проверки.\n\n`
   + `Каждый день в ${DAILY_REPORT_HOUR}:00 бот присылает отчёт за вчера${DAILY_BACKUP ? ' и резервную копию базы клиентов' : ''}.\n\n`
   + `🔎 <b>/why 66437492</b> — почему бот отправил или не отправил объявление. Номер — внизу страницы объявления на OLX («ID: …»).\n\n`
-  + `Команды: /stats, /report (отчёт за вчера сейчас), /user 123 или /user @name, /u123, /why номер.`;
+  + `🔎 <b>/check 123</b> — что приходит клиенту: подходит ли ему каждое из последних объявлений, а если нет — какой фильтр мешает.\n\n`
+  + `Команды: /stats, /report (отчёт за вчера сейчас), /user 123 или /user @name, /u123, /why номер, /check 123.`;
 
 function adminRequestText(userId, request) {
   const who = `👤 ${userDisplayName(userId)}\n🆔 <code>${userId}</code> · /u${userId}`;
@@ -3364,8 +3365,9 @@ function adminUserCard(userId) {
   if (user.role) {
     const filters = readFilters(userId, 'me');
     lines.push(`🔍 Поиск: ${districtLabel(filters.district, 'ru')} · ${categoryLabel(filters.category, 'ru')} · ${priceRangeLabel(filters.minPrice, filters.maxPrice, 'ru')}`);
+    lines.push(`🔎 Что ему приходит и почему: /check${userId}`);
   }
-  if (user.blockedAt) lines.push(`🚫 Заблокировал бота ${formatDate(user.blockedAt, true)}`);
+  if (user.blockedAt) lines.push(`🚫 Заблокировал бота или ещё не открыл новый — с ${formatDate(user.blockedAt, true)}`);
   if (user.lastSeenAt) lines.push(`🕐 Последний раз в боте: ${formatDate(user.lastSeenAt, true)}`);
   return lines.join('\n');
 }
@@ -3471,6 +3473,17 @@ async function handleAdminPanelMessage(message) {
   if (text === ADMIN_BUTTONS.pending || /^\/pending(?:\s|@|$)/.test(text)) {
     clearState(key);
     await sendPendingRequests();
+    return true;
+  }
+  const check = text.match(/^\/check(?:@\S+)?\s*(\S+)?$/);
+  if (check) {
+    clearState(key);
+    const userId = findUserId(check[1] || ADMIN_CHAT_ID);
+    if (!userId) {
+      await send('🔎 Клиент не найден. Пришлите его ID или @username, например: <code>/check 7286667309</code>');
+      return true;
+    }
+    await send(checkUserDelivery(userId));
     return true;
   }
   const why = text.match(/^\/why(?:@\S+)?(?:\s+(\S+))?/);
@@ -4222,22 +4235,59 @@ function wantedCategories() {
   return wanted;
 }
 
-function adMatchesFilters(ad, filters, { price, rooms }) {
+function filterMismatch(ad, filters, { price, rooms }) {
   const category = effectiveCategory(filters);
-  if (category !== 'all' && category !== ad.category) return false;
-  if (!adMatchesDistrict(ad.location, filters?.district, ad)) return false;
-  if (filters?.minPrice && price < Number(filters.minPrice)) return false;
-  if (filters?.maxPrice && price > Number(filters.maxPrice)) return false;
-  if (filters?.author === 'owner' && ad.classification !== 'owner') return false;
-  if (filters?.author === 'makler' && ad.classification !== 'makler') return false;
+  if (category !== 'all' && category !== ad.category) return `категория «${categoryLabel(ad.category, 'ru')}», а в поиске «${categoryLabel(category, 'ru')}»`;
+  if (!adMatchesDistrict(ad.location, filters?.district, ad)) return `район: ${ad.location || 'не указан'}, а в поиске ${filters.district}`;
+  if (filters?.minPrice && price < Number(filters.minPrice)) return `цена ${price ? formatSum(price, 'ru') : 'не указана'} — ниже ${formatSum(Number(filters.minPrice), 'ru')}`;
+  if (filters?.maxPrice && price > Number(filters.maxPrice)) return `цена ${formatSum(price, 'ru')} — выше ${formatSum(Number(filters.maxPrice), 'ru')}`;
+  if (filters?.author === 'owner' && ad.classification !== 'owner') return `автор — ${ad.classification === 'makler' ? 'риелтор' : 'не определён'}, а в поиске только собственники`;
+  if (filters?.author === 'makler' && ad.classification !== 'makler') return 'автор — не риелтор, а в поиске только риелторы';
   if (filters?.rooms && filters.rooms !== 'any') {
     if (filters.rooms === '4plus') {
-      if (rooms === null || rooms < 4) return false;
+      if (rooms === null || rooms < 4) return `комнат ${rooms ?? 'не указано'}, а в поиске 4+`;
     } else if (rooms !== null && rooms !== Number(filters.rooms)) {
-      return false;
+      return `комнат ${rooms}, а в поиске ${filters.rooms}`;
     }
   }
-  return true;
+  return null;
+}
+
+function adMatchesFilters(ad, filters, context) {
+  return !filterMismatch(ad, filters, context);
+}
+
+const DELIVERY_CHECK_ADS = 30;
+
+function checkUserDelivery(userId) {
+  const user = dbUsers[userId];
+  const filters = userFilters(userId);
+  const shown = readFilters(userId, 'me');
+  const rooms = shown.rooms === 'any' ? 'любые' : shown.rooms === '4plus' ? '4+' : shown.rooms;
+  const lines = [
+    `🔎 <b>Что получает клиент</b> ${userDisplayName(userId)} · <code>${userId}</code>`,
+    `Поиск: ${districtLabel(shown.district, 'ru')} · ${categoryLabel(shown.category, 'ru')} · ${priceRangeLabel(shown.minPrice, shown.maxPrice, 'ru')} · комнаты ${rooms} · автор: ${authorLabel(shown.author, 'ru').toLowerCase()}`
+  ];
+  const blockers = [];
+  if (!isSubscribed(userId)) blockers.push(user.until ? `подписка закончилась ${formatDate(user.until, true)}` : 'подписки нет');
+  if (user.blockedAt) blockers.push('помечен «заблокировал бота или ещё не открыл его» — пометка снимется, когда он напишет боту');
+  lines.push(blockers.length ? `⛔️ <b>Сейчас ему ничего не придёт:</b> ${blockers.join('; ')}.` : '✅ Подписка активна — бот присылает ему всё, что подходит под поиск.');
+  const ads = recentAds.slice(0, DELIVERY_CHECK_ADS);
+  if (!ads.length) {
+    lines.push('', 'Бот ещё не нашёл ни одного объявления после запуска — проверьте позже.');
+    return lines.join('\n');
+  }
+  const rows = ads.map((ad) => ({ ad, reason: filterMismatch(ad, filters, { price: adPrice(ad), rooms: extractRooms(ad) }) }));
+  lines.push('', `Из последних ${ads.length} найденных объявлений под его поиск подходят <b>${rows.filter((row) => !row.reason).length}</b>:`);
+  for (const { ad, reason } of rows.slice(0, 20)) {
+    lines.push(`${reason ? '❌' : '✅'} ${tashkentClock(ad.foundAt)} ${escapeHtml(truncate(oneLine(ad.title), 32))} — ${reason ? escapeHtml(reason) : 'подходит'}`);
+  }
+  const counts = new Map();
+  for (const { reason } of rows) {
+    if (reason) counts.set(reason.split(/[ :,—]/)[0], (counts.get(reason.split(/[ :,—]/)[0]) || 0) + 1);
+  }
+  if (counts.size) lines.push('', `Чаще всего не подходит: ${[...counts].sort((a, b) => b[1] - a[1]).map(([what, count]) => `${what} — ${count}`).join(', ')}.`);
+  return lines.join('\n');
 }
 
 async function sendToSubscribers(ad) {
