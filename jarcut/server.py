@@ -9,13 +9,21 @@
   4. ffmpeg            -> сборка: дубляж + фон оригинала (+ смех и реакции
                           оригинала в паузах между репликами)
 
-Запуск: python server.py
+Запуск: python server.py   (нужен Python 3.10+ и ffmpeg/ffprobe в PATH)
 Открыть: http://localhost:8000
 Ссылку из Colab (строка JARCUT_GPU_URL=...) вставить в .env.
-.env перечитывается на лету для ссылки Colab и для настроек Gemini (режим,
-ключ, модель, GEMINI_RPM) — после их замены перезапускать server.py не нужно.
-Остальное (ключ ElevenLabs, настройки OmniVoice) читается один раз при запуске.
+.env перечитывается на лету для ссылки Colab, настроек Gemini (режим, ключ,
+модель, GEMINI_RPM) и настроек озвучки OmniVoice (OMNIVOICE_*) — после их
+замены перезапускать server.py не нужно.
+Один раз при запуске читаются только ключ ElevenLabs и адрес/порт сервера
+(JARCUT_HOST, по умолчанию 127.0.0.1 — сервер виден только с этого компьютера;
+JARCUT_HOST=0.0.0.0 откроет его всей локальной сети, без пароля).
 """
+
+import sys
+
+if sys.version_info < (3, 10):
+    raise SystemExit("JarCut нужен Python 3.10 или новее (сейчас " + sys.version.split()[0] + ")")
 
 import asyncio
 import base64
@@ -24,10 +32,12 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -78,6 +88,35 @@ def mask_key(key: str) -> str:
     return f"{key[:4]}…, {len(key)} символов" if key else "пусто"
 
 
+def parse_bool(value: Any, default: bool = False) -> bool:
+    """bool() из JSON/формы: bool("0") и bool("false") в Python — True,
+    поэтому строки разбираются явно."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on", "да"):
+        return True
+    if text in ("0", "false", "no", "off", "нет", ""):
+        return False
+    return default
+
+
+def env_float(name: str, default: float, low: float | None = None, high: float | None = None) -> float:
+    try:
+        value = float(env_now(name, str(default)))
+    except ValueError:
+        value = default
+    if low is not None:
+        value = max(low, value)
+    if high is not None:
+        value = min(high, value)
+    return value
+
+
 def gemini_config() -> dict[str, str]:
     """Режим, ключ и модель Gemini. Читаются из .env на КАЖДОМ запросе:
     замена ключа, модели или режима работает без перезапуска server.py.
@@ -125,13 +164,45 @@ ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1"
 # запросе (см. gpu_endpoint), поэтому перезапускать server.py не нужно.
 GPU_URL_ENV_NAME = "JARCUT_GPU_URL"
 
-# Настройки OmniVoice — отправляются на Colab с каждой репликой.
-# Официальные значения по умолчанию у модели: 32 шага и guidance 2.0.
-OMNIVOICE_NUM_STEP = int(os.getenv("OMNIVOICE_NUM_STEP", "64"))
-OMNIVOICE_GUIDANCE_SCALE = float(os.getenv("OMNIVOICE_GUIDANCE_SCALE", "4.0"))
-OMNIVOICE_SPEED = float(os.getenv("OMNIVOICE_SPEED", "1.0"))
-OMNIVOICE_DENOISE = os.getenv("OMNIVOICE_DENOISE", "1").strip().lower() not in ("0", "false", "no")
+# Настройки OmniVoice — отправляются на Colab с каждой репликой и читаются из
+# .env на КАЖДОМ запросе (можно менять и сравнивать на слух без перезапуска).
+#
+# По умолчанию — официальные значения модели (k2-fsa/OmniVoice 0.2.1):
+# 32 шага и guidance 2.0. Раньше здесь стояли 64 и 4.0 — это самые крайние
+# значения ползунков в их собственном демо. guidance — это сила CFG:
+# log p = cond + g * (cond - uncond). При g=4 распределение становится слишком
+# «острым»: голос звучит жёстче, металличнее, с преувеличенной интонацией,
+# а 64 шага вдвое медленнее 32 почти без выигрыша.
+def omnivoice_settings() -> dict[str, Any]:
+    ref_source = env_now("OMNIVOICE_REF_SOURCE", "clean").lower()
+    ref_mode = env_now("OMNIVOICE_REF_MODE", "auto").lower()
+    return {
+        "num_step": int(env_float("OMNIVOICE_NUM_STEP", 32, 4, 128)),
+        "guidance_scale": env_float("OMNIVOICE_GUIDANCE_SCALE", 2.0, 0.0, 10.0),
+        "speed": env_float("OMNIVOICE_SPEED", 1.0, 0.5, 2.0),
+        "denoise": parse_bool(env_now("OMNIVOICE_DENOISE", "1"), True),
+        # clean = голос после очистки (без эха и шума); raw = голос сразу после
+        # отделения от музыки, без удаления эха/шума. OmniVoice обучали на
+        # референсах с добавленным шумом и эхом (токен <|denoise|>), поэтому
+        # raw часто клонирует тембр точнее: в нём нет артефактов шумодава.
+        "ref_source": ref_source if ref_source in ("clean", "raw") else "clean",
+        # auto = референс из самой реплики и соседних реплик того же спикера;
+        # speaker = один лучший референс на спикера для всех реплик (голос
+        # одинаковый по всему видео, но эмоция конкретной реплики не передаётся).
+        "ref_mode": ref_mode if ref_mode in ("auto", "speaker") else "auto",
+        # Сколько секунд голоса собирать в референс (OmniVoice советует 3–10 с).
+        "ref_target": env_float("OMNIVOICE_REF_TARGET", 6.0, 3.0, 10.0),
+        # Подгонка под длину: если озвученная реплика не влезает до начала
+        # следующей, OmniVoice генерирует её заново сразу нужной длины
+        # (параметр duration). Это звучит естественнее, чем ускорение atempo.
+        "fit_duration": parse_bool(env_now("OMNIVOICE_FIT_DURATION", "1"), True),
+        "fit_max_speedup": env_float("OMNIVOICE_FIT_MAX_SPEEDUP", 1.35, 1.0, 2.0),
+    }
+
+
 # OmniVoice понимает свои названия языков; почти все совпадают с LANGS, эти — нет.
+# (Проверено по omnivoice/utils/lang_map.py: "kirghiz" -> ky, "standard arabic" -> arb;
+# просто "Arabic" OmniVoice НЕ знает и молча генерирует без языка.)
 OMNIVOICE_LANG_OVERRIDES = {"Kyrgyz": "Kirghiz", "Arabic": "Standard Arabic"}
 
 # Референс для клонирования. Документация OmniVoice советует 3–10 секунд:
@@ -139,10 +210,14 @@ OMNIVOICE_LANG_OVERRIDES = {"Kyrgyz": "Kirghiz", "Arabic": "Standard Arabic"}
 REF_LINE_MIN_SECONDS = 3.0
 REF_LINE_MAX_SECONDS = 10.0
 REF_MAX_TOTAL_SECONDS = 10.0
+# Соседние реплики для референса берутся только из этого окна вокруг реплики:
+# голос в другом конце видео может звучать иначе (другая сцена, микрофон).
+REF_NEIGHBOR_WINDOW_SECONDS = 120.0
 # Запас по краям вырезаемого куска: Scribe ставит границы слов впритык,
 # без запаса срезается первый/последний звук, и текст перестаёт совпадать
-# со звуком. Запас никогда не залезает на соседнюю реплику.
-REF_PAD_SECONDS = 0.08
+# со звуком. Запас никогда не залезает на соседнюю реплику. Лишняя тишина
+# не мешает: OmniVoice сам обрезает края референса до 0.1–0.2 с.
+REF_PAD_SECONDS = 0.15
 
 # Экспорт: под репликой дубляжа фон приглушается до этой доли (0.35 ≈ −9 дБ).
 DUCK_GAIN = float(os.getenv("DUCK_GAIN", "0.35"))
@@ -229,23 +304,36 @@ async def root() -> FileResponse:
 
 @app.get("/api/diagnostics")
 async def diagnostics() -> dict[str, Any]:
+    gemini = gemini_config()
+    gpu_set = gpu_endpoint() is not None
     return {
-        "ok": bool(gemini_config()["key"]) and bool(ELEVENLABS_API_KEY) and gpu_endpoint() is not None,
-        "geminiKeySet": bool(gemini_config()["key"]),
-        "geminiBackend": gemini_config()["backend"],
+        "ok": bool(gemini["key"]) and bool(ELEVENLABS_API_KEY) and gpu_set,
+        "geminiKeySet": bool(gemini["key"]),
+        "geminiBackend": gemini["backend"],
         "elevenlabsKeySet": bool(ELEVENLABS_API_KEY),
-        "gpuUrlSet": gpu_endpoint() is not None,
-        "translateModel": gemini_config()["model"],
+        "gpuUrlSet": gpu_set,
+        "translateModel": gemini["model"],
         "scribeModel": SCRIBE_MODEL,
+        "omnivoice": omnivoice_settings(),
     }
+
+
+_SAFE_SUFFIX = re.compile(r"^\.[a-z0-9]{1,8}$")
+
+
+def _save_upload(source: Any, target: Path) -> None:
+    with open(target, "wb") as handle:
+        shutil.copyfileobj(source, handle, length=4 * 1024 * 1024)
 
 
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
     suffix = Path(file.filename or "video.mp4").suffix.lower() or ".mp4"
+    if not _SAFE_SUFFIX.match(suffix):
+        suffix = ".mp4"
     name = f"{uuid.uuid4().hex[:12]}{suffix}"
-    content = await file.read()
-    (UPLOADS / name).write_bytes(content)
+    # Потоком на диск: раньше file.read() держал всё видео в памяти целиком.
+    await asyncio.to_thread(_save_upload, file.file, UPLOADS / name)
     return {"ok": True, "filename": name, "url": f"/uploads/{name}"}
 
 
@@ -363,11 +451,41 @@ async def transcribe_with_scribe(audio_path: Path) -> dict[str, Any]:
 
 # Characters that can trail a sentence-ending mark without changing it
 # (a closing quote or bracket right after the period: `said "no."`).
-_SENTENCE_TRAILERS = "\"'”’»)]}"
+_SENTENCE_TRAILERS = "\"'”’»)]}」』）】"
 # Tokens made only of these are punctuation, not words.
-_PUNCTUATION_ONLY = set(".,;:!?…-–—\"'“”‘’«»()[]{}")
+_PUNCTUATION_ONLY = set(".,;:!?…-–—\"'“”‘’«»()[]{}。、，！？；：「」『』（）【】؟،؛¿¡")
+# Sentence-ending marks: Latin/Cyrillic, full-width CJK, Arabic question mark.
+_SENTENCE_END_MARKS = ".!?。！？؟"
 # Abbreviations whose trailing period does NOT end a sentence ("Dr. Smith").
 _NON_FINAL_ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "st", "vs", "jr", "sr", "prof", "inc", "ltd"}
+
+
+def _no_space_script(char: str) -> bool:
+    """Scripts written WITHOUT spaces between words: Chinese, Japanese, Thai,
+    Lao, Khmer, Myanmar. (Korean uses spaces, so Hangul is not here.)"""
+    code = ord(char)
+    return (
+        0x3040 <= code <= 0x30FF      # Hiragana, Katakana
+        or 0x3400 <= code <= 0x9FFF   # CJK ideographs (+ Ext A)
+        or 0xF900 <= code <= 0xFAFF   # CJK compatibility ideographs
+        or 0x3000 <= code <= 0x303F   # CJK punctuation (。、「」)
+        or 0xFF00 <= code <= 0xFF65   # full-width forms (！？，)
+        or 0x0E00 <= code <= 0x0EFF   # Thai, Lao
+        or 0x1000 <= code <= 0x109F   # Myanmar
+        or 0x1780 <= code <= 0x17FF   # Khmer
+        or code >= 0x20000            # CJK extension planes
+    )
+
+
+def join_words(words: list[str]) -> str:
+    """Join word tokens back into text. Spaces go between words, except where
+    both sides are in a no-space script ("今日" + "は" -> "今日は", not "今日 は")."""
+    text = ""
+    for word in words:
+        if text and not (_no_space_script(text[-1]) and _no_space_script(word[0])):
+            text += " "
+        text += word
+    return text
 
 
 def ends_sentence(token_text: str) -> bool:
@@ -382,7 +500,7 @@ def ends_sentence(token_text: str) -> bool:
     harmless; a false boundary breaks a sentence, which is not.
     """
     core = token_text.rstrip(_SENTENCE_TRAILERS)
-    if not core or core[-1] not in ".!?":
+    if not core or core[-1] not in _SENTENCE_END_MARKS:
         return False
     if core.endswith("...") or core.endswith("…"):
         return False
@@ -482,7 +600,7 @@ def group_words_into_segments(scribe_result: dict[str, Any], verbose: bool = Tru
         segments.append(current)
 
     for segment in segments:
-        segment["original"] = " ".join(segment.pop("words"))
+        segment["original"] = join_words(segment.pop("words"))
         segment.pop("closed", None)
 
     if segments and verbose:
@@ -515,6 +633,71 @@ async def list_voices() -> dict[str, Any]:
 def letter_count(text: str) -> int:
     """Count Unicode letters only, ignoring spaces, punctuation, and digits."""
     return sum(character.isalpha() for character in text)
+
+
+# Сколько «стоит» символ в произношении, относительно одной латинской буквы.
+# Это ровно та же таблица, по которой OmniVoice (utils/duration.py,
+# RuleDurationEstimator) сам решает, сколько секунд будет длиться реплика:
+# длительность = вес(текст) / (вес(текст референса) / длительность референса).
+# Поэтому сравнение «вес перевода / вес оригинала» прямо предсказывает, во
+# сколько раз дубляж будет длиннее оригинала, — для любой пары письменностей.
+# Счёт по буквам так не умел: кандзи/хангыль — это слог (2–3 латинские буквы),
+# и японский/корейский перевод казался «вдвое короче» оригинала.
+_SCRIPT_WEIGHT_RANGES = (
+    (0x02AF, 1.0), (0x03FF, 1.0), (0x052F, 1.0), (0x058F, 1.0),   # latin, greek, cyrillic, armenian
+    (0x05FF, 1.5), (0x08FF, 1.5),                                  # hebrew, arabic
+    (0x0DFF, 1.8),                                                 # indic
+    (0x0EFF, 1.5),                                                 # thai, lao
+    (0x0FFF, 1.8), (0x109F, 1.8),                                  # tibetan, myanmar
+    (0x10FF, 1.0),                                                 # georgian
+    (0x11FF, 2.5),                                                 # hangul jamo
+    (0x139F, 3.0),                                                 # ethiopic
+    (0x17FF, 1.8),                                                 # khmer
+    (0x1EFF, 1.0),                                                 # latin extended (vietnamese)
+    (0x30FF, 2.2),                                                 # hiragana, katakana
+    (0x312F, 3.0), (0x318F, 2.5),                                  # bopomofo, hangul compat jamo
+    (0x9FFF, 3.0),                                                 # CJK ideographs
+    (0xA4CF, 3.0),                                                 # yi
+    (0xD7AF, 2.5),                                                 # hangul syllables
+    (0xFAFF, 3.0),                                                 # CJK compatibility
+    (0xFDFF, 1.5), (0xFEFF, 1.5),                                  # arabic presentation forms
+)
+
+
+def _char_weight(char: str) -> float:
+    import unicodedata
+
+    if char == " ":
+        return 0.2
+    category = unicodedata.category(char)
+    if category.startswith("M") or char == "ـ":
+        return 0.0          # diacritics, tatweel
+    if category[0] in "PS":
+        return 0.5          # punctuation: a short pause
+    if category.startswith("Z"):
+        return 0.2
+    if category.startswith("N"):
+        return 3.5          # a digit is read as a whole word
+    code = ord(char)
+    for end, weight in _SCRIPT_WEIGHT_RANGES:
+        if code <= end:
+            return weight
+    return 3.0 if code > 0x20000 else 1.0
+
+
+def speech_weight(text: str) -> float:
+    """Примерная «длина произношения» текста в латинских буквах."""
+    return sum(_char_weight(char) for char in re.sub(r"\s+", " ", text.strip()))
+
+
+def letters_for_weight(text: str, target_weight: float) -> int:
+    """Сколько букв этого же текста (в его письменности) соответствует
+    target_weight — так Gemini получает понятный ему лимит в буквах."""
+    letters = letter_count(text)
+    weight = speech_weight(text)
+    if letters == 0 or weight <= 0:
+        return max(1, int(round(target_weight)))
+    return max(1, int(letters * target_weight / weight))
 
 
 # HTTP statuses that mean "Google had a problem, try again", not "your request
@@ -684,7 +867,7 @@ async def call_gemini_json(
                 f"длина ответа {len(text)} символов, конец: ...{text[-80:]!r})"
             ) from exc
     except Exception as exc:
-        print(f"[gemini] BAD RESPONSE: {exc}", flush=True)
+        print(f"{tag} BAD RESPONSE: {exc}", flush=True)
         raise HTTPException(500, {"code": "BAD_GEMINI_JSON", "message": f"Не удалось разобрать ответ Gemini: {exc}"}) from exc
 
 
@@ -845,15 +1028,11 @@ async def translate_segments_pass(
     for explicit self-verification before answering — the same class of
     fix that stopped the "loses meaning" complaints in practice.
 
-    When source_video is given, the video itself is sent alongside the
-    text — per Google Cloud's own multimodal-transcription engineering
-    blog ("if you have additional video metadata, this can be a goldmine
-    ... enrich the video context for better results"), a translator that
-    can see faces, the scene, and physical action understands what a line
-    actually MEANS in context (sarcasm vs sincerity, who's threatening
-    whom, what a vague pronoun refers to on screen) — not just the bare
-    words, which is what was producing overly literal, context-blind
-    translations before.
+    When source_video is given, its AUDIO track (not the video frames —
+    see extract_audio_for_gemini, done for cost) is sent alongside the
+    text, so the translator hears tone, sarcasm, hesitation and each
+    speaker's voice (used for grammatical gender, rule 9) instead of
+    translating bare words.
 
     Long audio tracks can still exceed Gemini's inline-data ceiling for
     very long videos, so the audio is extracted ONCE up front (see
@@ -868,11 +1047,13 @@ async def translate_segments_pass(
     if not segments:
         return
 
+    video_duration = await asyncio.to_thread(probe_duration, source_video) if source_video is not None else 0.0
     with tempfile.TemporaryDirectory(prefix="jarcut2_chunks_") as chunk_dir:
         audio_for_gemini: Path | None = None
         if source_video is not None and source_video.exists():
             candidate = Path(chunk_dir) / "audio_source.aac"
-            if extract_audio_for_gemini(source_video, candidate):
+            # ffmpeg — в отдельном потоке, чтобы сервер не замирал на время извлечения.
+            if await asyncio.to_thread(extract_audio_for_gemini, source_video, candidate):
                 original_mb = source_video.stat().st_size / 1024 / 1024
                 audio_mb = candidate.stat().st_size / 1024 / 1024
                 print(f"[translate] Extracted audio for Gemini (video dropped for cost): {original_mb:.1f}MB video -> {audio_mb:.1f}MB audio", flush=True)
@@ -882,7 +1063,7 @@ async def translate_segments_pass(
 
         chunks: list[tuple[int, int, float, float]] = [(0, len(segments), 0.0, 0.0)]
         if audio_for_gemini is not None:
-            chunks = plan_translation_chunks(audio_for_gemini, segments)
+            chunks = await asyncio.to_thread(plan_translation_chunks, audio_for_gemini, segments)
             if len(chunks) > 1:
                 print(f"[translate] Still too long after extraction — splitting into {len(chunks)} chunks", flush=True)
 
@@ -897,7 +1078,7 @@ async def translate_segments_pass(
                     chunk_audio = audio_for_gemini
                 else:
                     candidate = Path(chunk_dir) / f"chunk_{chunk_number}.aac"
-                    if cut_audio_chunk(audio_for_gemini, chunk_start, chunk_end, candidate):
+                    if await asyncio.to_thread(cut_audio_chunk, audio_for_gemini, chunk_start, chunk_end, candidate):
                         chunk_audio = candidate
                     else:
                         print(f"[translate] Failed to cut chunk {chunk_number}, translating it text-only", flush=True)
@@ -912,10 +1093,13 @@ async def translate_segments_pass(
             if chunk_number > 1:
                 await asyncio.sleep(15)
 
+            # Таймаут считается от длины ЭТОГО куска (раньше — от всего видео,
+            # и каждый кусок длинного видео получал максимальные 30 минут).
+            chunk_length = chunk_end - chunk_start if len(chunks) > 1 and chunk_end > chunk_start else video_duration
             await _translate_one_chunk(
                 chunk_segments, target_language, language_code, chunk_audio,
                 chunk_label=f"{chunk_number}/{len(chunks)}" if len(chunks) > 1 else "",
-                video_duration_hint=probe_duration(source_video) if source_video is not None else 0.0,
+                video_duration_hint=chunk_length,
             )
 
 
@@ -1035,8 +1219,9 @@ async def _translate_one_chunk_attempt(
                 "literal word-for-word rendering. For example: sarcasm delivered in a flat monotone vs. genuine "
                 "sincerity, a raised or trembling voice signaling anger or fear that a neutral literal "
                 "translation would flatten, or a hesitant pause suggesting doubt. The translation must still "
-                "match rules 1-7 below exactly — audio context should sharpen accuracy, never license inventing "
-                "meaning that isn't actually there in the words or the delivery."
+                "match rules 1-9 below exactly — audio context should sharpen accuracy, never license inventing "
+                "meaning that isn't actually there in the words or the delivery. Also use the voices to tell "
+                "whether each speaker is male or female (see rule 9)."
             )
         else:
             print(f"[translate] Audio too large or unreadable for context ({len(audio_bytes) / 1024 / 1024:.0f}MB), falling back to text-only translation", flush=True)
@@ -1051,6 +1236,8 @@ STRICT RULES (violating any of these is a failure):
 5. Do not add meaning that was not in the original (no invented details, no softened or intensified emotion beyond what the words say).
 6. Do not remove idiomatic force — if the original is blunt, sarcastic, or emotionally loaded, the translation must carry the same force in natural {target_language}, not a flattened literal version.
 7. Translate naturally for spoken dubbing (not robotic word-for-word), but "natural" never overrides rules 1-6 — natural phrasing must still carry 100% of the original meaning.
+8. The text goes straight to a speech synthesizer: write every number, year, date, time, amount, percentage and unit out in WORDS exactly as a {target_language} speaker would say it aloud (e.g. "25%" -> the {target_language} words for "twenty-five percent"). The value itself must stay exactly the same (rule 4).
+9. If {target_language} grammar marks gender (verb endings, adjectives, forms of address), work out each speaker's gender — from their voice if you can hear the audio, otherwise from context — and keep it consistent for that speaker in every line, both when they talk about themselves and when others address them.
 
 Before answering, silently re-check every line against its original: did you drop or change anything the speaker actually said? If yes, fix it before responding.
 
@@ -1077,7 +1264,10 @@ Return JSON only, in this exact shape:
               f"{' with audio context' if media_parts else ' (text only)'}"
               f", timeout {timeout_seconds}s", flush=True)
 
-    parsed = await call_gemini_json(prompt, timeout=timeout_seconds, media_parts=media_parts or None)
+    parsed = await call_gemini_json(
+        prompt, timeout=timeout_seconds, media_parts=media_parts or None,
+        label=f"translate {chunk_label}" if chunk_label else "translate",
+    )
     try:
         translations = {int(item["index"]): str(item["text"]) for item in parsed["translations"]}
     except Exception as exc:
@@ -1118,34 +1308,60 @@ def _refine_batches(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [items[i:i + REFINE_BATCH_SIZE] for i in range(0, len(items), REFINE_BATCH_SIZE)]
 
 
+def _length_ceiling(segment: dict[str, Any], max_extra: float) -> float:
+    """Самая большая допустимая «длина произношения» перевода: как у оригинала
+    плюс max_extra (в латинских буквах). Одна мерка на все три шага."""
+    return speech_weight(segment["original"]) + max_extra
+
+
+def _uzbek_note(target_language: str) -> str:
+    if not target_language.lower().startswith("uzbek"):
+        return ""
+    return ("In Uzbek, the apostrophe (') is a real letter (as in o', g', bo'lish, ko'proq) — always use correct "
+            "standard Uzbek spelling, including the apostrophe wherever it belongs.")
+
+
 async def fit_translation_length_pass(
-    segments: list[dict[str, Any]], target_language: str, max_extra_letters: int = 5, max_attempts: int = 3
+    segments: list[dict[str, Any]],
+    target_language: str,
+    max_extra_letters: int = 5,
+    max_attempts: int = 3,
+    only_indices: set[int] | None = None,
 ) -> None:
     """Pass 2: shorten only the translations that are too long, in a
     dedicated request focused purely on length — separated from the
     translation pass so it doesn't compromise meaning.
 
-    Punctuation (.,;:—–-) is KEPT, not stripped. This was originally
-    stripped because commas/periods caused unwanted pauses in the old
-    Gemini TTS engine — OmniVoice (the current voice engine) is a different
-    model and relies on punctuation for natural pacing, intonation rises on
-    questions, and sentence-final closure; stripping it measurably hurt
-    cloning quality/naturalness rather than helping.
+    "Too long" is measured with speech_weight (the same per-script weights
+    OmniVoice uses to time its speech), not raw letters: a Japanese or
+    Korean line is not "short" just because each character is a syllable.
+    Gemini still gets a plain letter limit, converted into the target
+    script by letters_for_weight.
+
+    Punctuation (.,;:—–-) is KEPT, not stripped. OmniVoice relies on it
+    for natural pacing, intonation rises on questions, and sentence-final
+    closure.
+
+    only_indices: limit the pass to these lines (used after the review
+    pass, so lines that were already handled are not sent again).
     """
     for segment in segments:
         segment["translated"] = re.sub(r"\s+", " ", segment["translated"]).strip()
 
     for _ in range(max_attempts):
-        overlong = [
-            {
+        overlong = []
+        for index, segment in enumerate(segments):
+            if only_indices is not None and index not in only_indices:
+                continue
+            ceiling = _length_ceiling(segment, max_extra_letters)
+            if speech_weight(segment["translated"]) <= ceiling:
+                continue
+            overlong.append({
                 "index": index,
                 "original": segment["original"],
                 "current_translation": segment["translated"],
-                "max_letters": letter_count(segment["original"]) + max_extra_letters,
-            }
-            for index, segment in enumerate(segments)
-            if letter_count(segment["translated"]) > letter_count(segment["original"]) + max_extra_letters
-        ]
+                "max_letters": letters_for_weight(segment["translated"], ceiling),
+            })
         if not overlong:
             return
 
@@ -1155,7 +1371,8 @@ async def fit_translation_length_pass(
 Rewrite each "current_translation" into a SHORTER natural {target_language} phrase that preserves the complete meaning.
 Each rewritten text must have no more than "max_letters" Unicode letters (spaces/punctuation/digits do not count).
 Use natural punctuation (periods, commas, question marks, exclamation marks) as appropriate for meaning and pacing — the voice engine relies on it for natural intonation.
-{"In Uzbek, the apostrophe (') is a real letter (as in o', g', bo'lish, ko'proq) — always use correct standard Uzbek spelling, including the apostrophe wherever it belongs." if target_language.lower().startswith("uzbek") else ""}
+Keep numbers written out as words, exactly as in the current translation.
+{_uzbek_note(target_language)}
 Count letters yourself before answering. Never omit an item or change its index.
 
 INPUT:
@@ -1177,7 +1394,7 @@ Return JSON only, in this exact shape:
                 if not 0 <= index < len(segments):
                     continue  # Gemini returned an index we never sent
                 clean = re.sub(r"\s+", " ", text).strip()
-                if clean and letter_count(clean) < letter_count(segments[index]["translated"]):
+                if clean and speech_weight(clean) < speech_weight(segments[index]["translated"]):
                     segments[index]["translated"] = clean
 
 
@@ -1194,41 +1411,35 @@ async def expand_short_translations_pass(
     than the original, so the dubbed line doesn't finish while the speaker
     on screen is still talking.
 
-    The mirror image of fit_translation_length_pass, and deliberately
-    built on the SAME measure (letter count vs. the original) and the SAME
-    upper bound (original letters + max_extra_letters). If the two passes
-    used different yardsticks they could fight each other — one padding a
-    line, the other trimming it straight back. Here an expansion is only
-    accepted if it stays at or under the shortening pass's ceiling, so a
-    line can never be pushed back into "too long" territory.
+    The mirror image of fit_translation_length_pass, built on the SAME
+    measure (speech_weight vs. the original) and the SAME ceiling, so the
+    two passes can't fight each other: an expansion is only accepted if it
+    stays at or under the shortening pass's ceiling.
 
-    Very short originals (under min_original_letters — interjections like
-    "Hm", "Yes!", "E!") are skipped: the length ratio is meaningless noise
-    at that size, and inflating a one-word reply into a sentence would be
-    wrong, not natural.
+    Very short originals (speech weight under min_original_letters —
+    interjections like "Hm", "Yes!", "E!") are skipped: the ratio is noise
+    at that size, and inflating a one-word reply would be wrong.
 
     Lengthening must never add meaning — the prompt restricts Gemini to
-    fuller natural phrasing of the SAME content (complete forms instead of
-    clipped ones, natural connecting words), never new facts, names,
-    numbers, or events. The reflect pass that runs afterwards is a second
-    safety net: if an expansion did drift in meaning, it gets corrected
-    there.
+    fuller natural phrasing of the SAME content; the review pass that runs
+    afterwards is a second safety net.
     """
     for _ in range(max_attempts):
         short = []
         for index, segment in enumerate(segments):
-            original_letters = letter_count(segment["original"])
-            translated_letters = letter_count(segment["translated"])
-            if original_letters < min_original_letters:
+            original_weight = speech_weight(segment["original"])
+            translated_weight = speech_weight(segment["translated"])
+            if original_weight < min_original_letters:
                 continue
-            if translated_letters >= original_letters * min_ratio:
+            if translated_weight >= original_weight * min_ratio:
                 continue
+            ceiling = _length_ceiling(segment, max_extra_letters)
             short.append({
                 "index": index,
                 "original": segment["original"],
                 "current_translation": segment["translated"],
-                "min_letters": math.ceil(original_letters * target_ratio),
-                "max_letters": original_letters + max_extra_letters,
+                "min_letters": max(1, math.ceil(letters_for_weight(segment["translated"], original_weight * target_ratio))),
+                "max_letters": letters_for_weight(segment["translated"], ceiling),
             })
         if not short:
             return
@@ -1254,7 +1465,8 @@ STRICTLY FORBIDDEN:
 If a line cannot be lengthened without adding meaning, return it unchanged.
 
 Use natural punctuation (periods, commas, question marks, exclamation marks) — the voice engine relies on it for natural intonation.
-{"In Uzbek, the apostrophe (') is a real letter (as in o', g', bo'lish, ko'proq) — always use correct standard Uzbek spelling, including the apostrophe wherever it belongs." if target_language.lower().startswith("uzbek") else ""}
+Keep numbers written out as words.
+{_uzbek_note(target_language)}
 Count letters yourself before answering. Never omit an item or change its index.
 
 INPUT:
@@ -1278,13 +1490,12 @@ Return JSON only, in this exact shape:
                 clean = re.sub(r"\s+", " ", text).strip()
                 if not clean:
                     continue
-                current_letters = letter_count(segments[index]["translated"])
-                upper_bound = letter_count(segments[index]["original"]) + max_extra_letters
-                new_letters = letter_count(clean)
+                current_weight = speech_weight(segments[index]["translated"])
+                new_weight = speech_weight(clean)
                 # Accept only a genuine lengthening that stays within the
                 # shortening pass's ceiling — never let an expansion undo what
                 # fit_translation_length_pass guarantees.
-                if current_letters < new_letters <= upper_bound:
+                if current_weight < new_weight <= _length_ceiling(segments[index], max_extra_letters):
                     segments[index]["translated"] = clean
                     applied += 1
         if applied == 0:
@@ -1292,29 +1503,33 @@ Return JSON only, in this exact shape:
 
 
 async def reflect_and_fix_translation_pass(
-    segments: list[dict[str, Any]], target_language: str, max_attempts: int = 1
-) -> None:
+    segments: list[dict[str, Any]], target_language: str, max_attempts: int = 1, max_extra_letters: int = 5
+) -> set[int]:
     """Pass 3 ("Reflect"): a dedicated self-review of the finished
     translation, looking for actual errors rather than producing a fresh
-    translation from scratch.
-
-    This is the "Translate-Reflect-Adaptation" technique used by
-    VideoLingo (18k+ GitHub stars, actively maintained) for context-aware
-    dubbing translation — our pipeline already does step 1 (translate) and
-    a version of step 3 (the length-fitting pass), but was missing step 2
-    entirely: nothing ever checked the FINISHED translation against the
-    original for meaning drift, tone loss, wrong tense, or grammar errors
-    introduced by the length-shortening pass.
+    translation from scratch (VideoLingo's Translate-Reflect-Adaptation).
 
     Deliberately conservative: Gemini is told to flag ONLY lines with a
-    real problem and leave everything else untouched, rather than
-    rewriting for style — re-translating from scratch every time would
-    just reintroduce the same class of error the reflect pass exists to
-    catch, and risks undoing correct shortening from fit_translation_length_pass.
+    real problem and leave everything else untouched.
+
+    Each line now carries its "max_letters" budget too, so a fix keeps to
+    the dubbing length where it can. A fix that restores real meaning is
+    still accepted even if it runs long — losing a negation is worse than a
+    long line; translate_segments then shortens just those lines once more.
+    Returns the indices of corrected lines.
     """
+    corrected: set[int] = set()
     for _ in range(max_attempts):
         items = [
-            {"index": index, "original": segment["original"], "translation": segment["translated"]}
+            {
+                "index": index,
+                "original": segment["original"],
+                "translation": segment["translated"],
+                "max_letters": max(
+                    letter_count(segment["translated"]),
+                    letters_for_weight(segment["translated"], _length_ceiling(segment, max_extra_letters)),
+                ),
+            }
             for index, segment in enumerate(segments)
         ]
 
@@ -1328,9 +1543,10 @@ For each line, check:
 - Is the tense/aspect correct (past/present/future, completed/ongoing)?
 - Is the tone right (if the original is blunt/sarcastic/emotional, does the translation carry that, or did it get flattened)?
 - Is the grammar in {target_language} actually correct (this matters especially for any line that was shortened for timing — shortening sometimes breaks grammar)?
-- Are names, numbers, and specific facts preserved exactly?
+- Are names, numbers, and specific facts preserved exactly? (Numbers are intentionally written out as words for the voice engine — that is correct, not an error.)
 
 Only include a line in your response if you are fixing a genuine error. Do NOT rewrite lines that are already correct just to change their style or wording — leave those out entirely. Do NOT second-guess a correct translation because a different phrasing is also possible; only flag actual mistakes.
+A corrected line should stay within its "max_letters" (Unicode letters only) — it is dubbed into a fixed time slot.
 
 CONVERSATION (original + current translation):
 {json.dumps(batch, ensure_ascii=False)}
@@ -1351,12 +1567,14 @@ If no lines need correction, return {{"fixes": []}}."""
             for index, text in fixes.items():
                 if 0 <= index < len(segments):
                     clean = re.sub(r"\s+", " ", text).strip()
-                    if clean:
+                    if clean and clean != segments[index]["translated"]:
                         print(f"[translate-reflect] seg_{index} corrected: {segments[index]['translated']!r} -> {clean!r}", flush=True)
                         segments[index]["translated"] = clean
+                        corrected.add(index)
                         applied += 1
         if applied == 0:
-            return  # Nothing to fix — stop early instead of spending another attempt.
+            break  # Nothing to fix — stop early instead of spending another attempt.
+    return corrected
 
 
 async def translate_segments(
@@ -1368,18 +1586,13 @@ async def translate_segments(
     VideoLingo's "Translate-Reflect-Adaptation" technique:
     1. An accurate, audio-aware translation via Gemini with full dialogue
        context.
-    2. Length fitting in both directions, on one shared yardstick:
+    2. Length fitting in both directions, on one shared yardstick
+       (speech_weight):
        2a. shorten lines that run too long for their slot;
-       2b. lengthen lines that came out noticeably too short (otherwise
-           the dub finishes while the speaker is still talking on screen).
-    3. A "reflect" pass that reviews the FINISHED translation (after all
-       length fitting) against the originals and fixes only genuine
-       errors — meaning drift, wrong tense, lost tone, or grammar broken
-       by step 2. Running it last means it also catches any meaning an
-       expansion in 2b might have added.
-    Splitting these into separate, narrowly-scoped requests avoids the
-    logical translation errors that came from mixing "translate
-    accurately" with "count letters" in one instruction.
+       2b. lengthen lines that came out noticeably too short.
+    3. A "reflect" pass that reviews the FINISHED translation against the
+       originals and fixes only genuine errors. If a fix made a line too
+       long again, that line alone gets one more shortening attempt.
     """
     if not segments:
         return
@@ -1391,17 +1604,26 @@ async def translate_segments(
     # Steps 2-3 only IMPROVE a translation that already exists. If one of
     # them fails, keep what we have instead of failing the whole request —
     # otherwise a timeout in an optional review step throws away minutes of
-    # finished (and paid-for) translation, which is exactly what happened.
-    # Lines improved by earlier batches stay improved.
+    # finished (and paid-for) translation. Lines improved by earlier batches
+    # stay improved.
     #
     # After a failure that points at the service itself (can't reach it,
     # rejected, rate-limited), the remaining steps are skipped: they'd hit
-    # the same wall and each would burn its own full timeout. A bad/unparsable
-    # reply says nothing about the next step, so those carry on.
+    # the same wall and each would burn its own full timeout.
+    corrected: set[int] = set()
+
+    async def review_step(items: list[dict[str, Any]], language: str) -> None:
+        corrected.update(await reflect_and_fix_translation_pass(items, language))
+
+    async def reshorten_step(items: list[dict[str, Any]], language: str) -> None:
+        if corrected:
+            await fit_translation_length_pass(items, language, max_attempts=1, only_indices=corrected)
+
     refinement_steps = (
         ("shorten", fit_translation_length_pass),
         ("lengthen", expand_short_translations_pass),
-        ("review", reflect_and_fix_translation_pass),
+        ("review", review_step),
+        ("re-shorten reviewed lines", reshorten_step),
     )
     for name, run_step in refinement_steps:
         try:
@@ -1448,7 +1670,7 @@ async def translate(request: Request) -> dict[str, Any]:
     #
     # force_retranscribe lets the person explicitly bypass this (e.g.
     # Scribe itself mis-heard something).
-    force_retranscribe = bool(body.get("forceRetranscribe", False))
+    force_retranscribe = parse_bool(body.get("forceRetranscribe"), False)
     cache_path = UPLOADS / f"{source.stem}_transcript_cache.json"
     scribe_result = None
     genders: dict[str, str] = {}
@@ -1457,7 +1679,7 @@ async def translate(request: Request) -> dict[str, Any]:
             cached = json.loads(cache_path.read_text())
             if "scribe_result" in cached:
                 scribe_result = cached["scribe_result"]
-                genders = cached["genders"]
+                genders = cached.get("genders") or {}
                 print(f"[translate] Reusing cached Scribe transcription for '{source.name}' — no ElevenLabs call made", flush=True)
             else:
                 # Old cache format (grouped segments only, no raw words):
@@ -1475,7 +1697,7 @@ async def translate(request: Request) -> dict[str, Any]:
             stems = load_stems(source)
             if stems:
                 print("[translate] Распознаю очищенный голос (после шага очистки)", flush=True)
-            if not extract_audio(stems["vocals_clean"] if stems else source, audio_path):
+            if not await asyncio.to_thread(extract_audio, stems["vocals_clean"] if stems else source, audio_path):
                 raise HTTPException(500, {"code": "AUDIO_EXTRACT_FAILED", "message": "Не удалось извлечь аудио (проверьте ffmpeg)"})
 
             scribe_result = await transcribe_with_scribe(audio_path)
@@ -1638,6 +1860,19 @@ def find_voice_span(samples: "np.ndarray", sample_rate: int = _ANALYSIS_SAMPLE_R
     return first * frame / sample_rate, (last + 1) * frame / sample_rate
 
 
+def analyze_clip(path: Path) -> tuple[float, float, float]:
+    """(длина, тишина в начале, тишина в конце) за ОДНО декодирование.
+    Раньше на каждый клип запускались ffprobe и ffmpeg по очереди."""
+    samples = decode_mono_16k(path)
+    if samples is None:
+        return probe_duration(path), 0.0, 0.0
+    total = samples.size / _ANALYSIS_SAMPLE_RATE
+    span = find_voice_span(samples)
+    if span is None:
+        return total, 0.0, 0.0
+    return total, span[0], max(0.0, total - span[1])
+
+
 def measure_edge_silence(path: Path) -> tuple[float, float]:
     """(leading_silence, trailing_silence) in seconds. (0, 0) if it can't be
     measured — callers then behave as if the whole file were voice."""
@@ -1713,17 +1948,12 @@ class GpuError(Exception):
 def gpu_endpoint() -> tuple[str, str] | None:
     """(адрес, ключ) из JARCUT_GPU_URL, или None, если ссылка не задана.
 
-    .env читается заново при каждом вызове: ссылка Colab меняется при каждом
-    перезапуске ноутбука, и так её можно заменить без перезапуска server.py.
+    Читается через env_now: .env перечитывается, когда файл меняется, и
+    строка, УДАЛЁННАЯ из .env, перестаёт действовать. Раньше в этом случае
+    молча бралось старое значение, которое load_dotenv положил в окружение
+    при запуске server.py.
     """
-    raw = ""
-    env_file = BASE / ".env"
-    if env_file.exists():
-        try:
-            raw = dotenv_values(env_file).get(GPU_URL_ENV_NAME) or ""
-        except Exception:
-            raw = ""
-    raw = (raw or os.getenv(GPU_URL_ENV_NAME, "")).strip().strip('"').strip("'")
+    raw = env_now(GPU_URL_ENV_NAME)
     if not raw:
         return None
     if "://" not in raw:
@@ -1772,6 +2002,46 @@ async def gpu_request(method: str, path: str, *, timeout: float = 60, **kwargs: 
     return response
 
 
+# Сколько всего ждать, пока на Colab грузится OmniVoice или видеокарта занята
+# очисткой звука, прежде чем сдаться (очистка длинного видео идёт минутами).
+GPU_WAIT_BUDGET_SECONDS = 20 * 60
+
+
+async def gpu_post_with_retries(path: str, what: str, *, timeout: float, **kwargs: Any) -> httpx.Response:
+    """POST на Colab с повторами:
+      - туннель моргнул (GPU_UNREACHABLE) — до 3 попыток подряд;
+      - OmniVoice ещё грузится (TTS_NOT_READY) или видеокарта занята очисткой
+        (GPU_BUSY) — ждём по 10 с, всего не дольше GPU_WAIT_BUDGET_SECONDS.
+    Любой другой ответ (в том числе ошибка) возвращается вызывающему.
+    kwargs не должны содержать открытых файлов — только байты/JSON, чтобы
+    запрос можно было повторить."""
+    unreachable = 0
+    started = time.monotonic()
+    announced = ""
+    while True:
+        try:
+            response = await gpu_request("POST", path, timeout=timeout, **kwargs)
+        except GpuError as exc:
+            if exc.code != "GPU_UNREACHABLE":
+                raise
+            unreachable += 1
+            if unreachable >= 3:
+                raise
+            await asyncio.sleep(2.0 * unreachable)
+            continue
+        unreachable = 0
+        if response.status_code != 200:
+            message, code = _gpu_error_message(response)
+            if code in ("TTS_NOT_READY", "GPU_BUSY") and time.monotonic() - started < GPU_WAIT_BUDGET_SECONDS:
+                if announced != code:
+                    reason = "видеокарта занята очисткой звука" if code == "GPU_BUSY" else "OmniVoice ещё загружается"
+                    print(f"[voice] {what}: {reason} — жду (до {GPU_WAIT_BUDGET_SECONDS // 60} мин)", flush=True)
+                    announced = code
+                await asyncio.sleep(10)
+                continue
+        return response
+
+
 async def gpu_download(path: str, target: Path, timeout: float = 900) -> None:
     """Скачивает файл с Colab потоком (дорожки длинного видео весят сотни МБ)."""
     endpoint = gpu_endpoint()
@@ -1794,6 +2064,24 @@ async def gpu_download(path: str, target: Path, timeout: float = 900) -> None:
         raise GpuError(f"С Colab пришёл пустой файл: {path}")
 
 
+_gpu_version_cache: dict[str, Any] = {"base": None, "version": 1, "checked": 0.0}
+
+
+async def gpu_version() -> int:
+    """Версия ноутбука (поле version в /health). 1 = старый ноутбук."""
+    endpoint = gpu_endpoint()
+    base = endpoint[0] if endpoint else ""
+    if _gpu_version_cache["base"] == base and time.monotonic() - _gpu_version_cache["checked"] < 60:
+        return int(_gpu_version_cache["version"])
+    response = await gpu_request("GET", "/health", timeout=20)
+    try:
+        version = int(str(response.json().get("version") or "1"))
+    except Exception:
+        version = 1
+    _gpu_version_cache.update(base=base, version=version, checked=time.monotonic())
+    return version
+
+
 @app.get("/api/gpu/status")
 async def gpu_status() -> dict[str, Any]:
     try:
@@ -1804,13 +2092,20 @@ async def gpu_status() -> dict[str, Any]:
         message, code = _gpu_error_message(response)
         return {"ok": False, "error": message, "code": code}
     data = response.json()
-    return {"ok": True, "tts": data.get("tts"), "ttsError": data.get("ttsError"), "gpu": data.get("gpu")}
+    return {
+        "ok": True, "tts": data.get("tts"), "ttsError": data.get("ttsError"), "gpu": data.get("gpu"),
+        "version": data.get("version"), "busy": data.get("busy", ""),
+    }
 
 
 # ---- Шаг 0: очистка звука на Colab ----------------------------------------------
 
 STEM_NAMES = ("vocals_raw", "vocals_clean", "background")
 SEPARATION_MODEL_CHOICES = ("kim", "viperx")
+# Бесплатный туннель Cloudflare не пропускает запрос больше 100 МБ. Файл
+# больше этого порога уходит на Colab частями по UPLOAD_CHUNK_BYTES.
+SINGLE_UPLOAD_LIMIT = 90 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 40 * 1024 * 1024
 
 
 def stems_meta_path(video: Path) -> Path:
@@ -1839,37 +2134,85 @@ def separation_options(body: dict[str, Any]) -> dict[str, Any]:
     model = str(body.get("model") or "kim").strip().lower()
     return {
         "model": model if model in SEPARATION_MODEL_CHOICES else "kim",
-        "dereverb": bool(body.get("dereverb", True)),
-        "denoise": bool(body.get("denoise", True)),
-        "aggressive": bool(body.get("aggressive", False)),
+        "dereverb": parse_bool(body.get("dereverb"), True),
+        "denoise": parse_bool(body.get("denoise"), True),
+        "aggressive": parse_bool(body.get("aggressive"), False),
     }
 
 
 def extract_audio_for_separation(source: Path, work_dir: Path) -> Path | None:
     """Звук видео для отправки на Colab: FLAC 44.1 кГц стерео — без потерь,
     модели разделения лучше работают с несжатым звуком. Если FLAC выходит
-    больше ~90 МБ (длинное видео), берётся MP3 320k: бесплатный туннель
-    Cloudflare не пропускает загрузки больше 100 МБ."""
+    больше ~90 МБ (длинное видео), берётся MP3 320k, чтобы не грузить сотни
+    мегабайт. Файл больше 90 МБ уходит на Colab частями (см. upload_in_parts),
+    поэтому длина видео больше не ограничена ~40 минутами."""
     flac = work_dir / "source.flac"
     command = ["ffmpeg", "-y", "-i", str(source), "-vn", "-ac", "2", "-ar", "44100", "-c:a", "flac", str(flac)]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=900)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
-    if result.returncode == 0 and flac.exists() and 0 < flac.stat().st_size <= 90 * 1024 * 1024:
+    if result.returncode == 0 and flac.exists() and 0 < flac.stat().st_size <= SINGLE_UPLOAD_LIMIT:
         return flac
 
     mp3 = work_dir / "source.mp3"
     command = ["ffmpeg", "-y", "-i", str(source), "-vn", "-ac", "2", "-ar", "44100",
                "-c:a", "libmp3lame", "-b:a", "320k", str(mp3)]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=900)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
+    flac.unlink(missing_ok=True)
     if result.returncode == 0 and mp3.exists() and mp3.stat().st_size > 0:
         print(f"[clean] Видео длинное — отправляю MP3 320k вместо FLAC ({mp3.stat().st_size / 1024 / 1024:.0f} МБ)", flush=True)
         return mp3
     return None
+
+
+def _read_chunk(path: Path, offset: int, size: int) -> bytes:
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        return handle.read(size)
+
+
+async def upload_in_parts(audio: Path) -> str:
+    """Загружает большой файл на Colab кусками по 40 МБ (каждый запрос меньше
+    лимита туннеля в 100 МБ). Возвращает upload_id для /separate.
+    Кусок, на котором туннель моргнул, отправляется заново с того же места."""
+    if await gpu_version() < 2:
+        raise GpuError(
+            "Звук этого видео больше 90 МБ, а Colab-ноутбук старой версии и не умеет принимать файл частями. "
+            "Открой новый JarCut_GPU.ipynb, «Выполнить всё» и вставь новую строку JARCUT_GPU_URL в .env.",
+            "GPU_TOO_OLD",
+        )
+    response = await gpu_request("POST", "/uploads", timeout=60)
+    if response.status_code != 200:
+        message, code = _gpu_error_message(response)
+        raise GpuError(f"Colab не начал приём файла: {message}", code, response.status_code)
+    upload_id = str(response.json()["upload_id"])
+
+    total = audio.stat().st_size
+    offset = 0
+    while offset < total:
+        chunk = await asyncio.to_thread(_read_chunk, audio, offset, UPLOAD_CHUNK_BYTES)
+        for attempt in range(1, 5):
+            try:
+                response = await gpu_request(
+                    "PUT", f"/uploads/{upload_id}?offset={offset}", timeout=900,
+                    content=chunk, headers={"Content-Type": "application/octet-stream"},
+                )
+            except GpuError as exc:
+                if exc.code != "GPU_UNREACHABLE" or attempt == 4:
+                    raise
+                await asyncio.sleep(3.0 * attempt)
+                continue
+            if response.status_code != 200:
+                message, code = _gpu_error_message(response)
+                raise GpuError(f"Colab не принял часть файла: {message}", code, response.status_code)
+            break
+        offset += len(chunk)
+        print(f"[clean] Загружено на Colab {offset / 1024 / 1024:.0f} из {total / 1024 / 1024:.0f} МБ", flush=True)
+    return upload_id
 
 
 async def run_gpu_separation(audio: Path, options: dict[str, Any], stem: str) -> dict[str, Path]:
@@ -1880,8 +2223,12 @@ async def run_gpu_separation(audio: Path, options: dict[str, Any], stem: str) ->
     Поэтому тут: отправить -> опрашивать статус каждые 3 с -> скачать."""
     mime = "audio/flac" if audio.suffix == ".flac" else "audio/mpeg"
     form = {key: ("1" if value is True else "0" if value is False else str(value)) for key, value in options.items()}
-    with open(audio, "rb") as handle:
-        response = await gpu_request("POST", "/separate", timeout=1800, files={"file": (audio.name, handle, mime)}, data=form)
+    if audio.stat().st_size > SINGLE_UPLOAD_LIMIT:
+        upload_id = await upload_in_parts(audio)
+        response = await gpu_request("POST", "/separate", timeout=600, data={**form, "upload_id": upload_id, "filename": audio.name})
+    else:
+        with open(audio, "rb") as handle:
+            response = await gpu_request("POST", "/separate", timeout=1800, files={"file": (audio.name, handle, mime)}, data=form)
     if response.status_code != 200:
         message, code = _gpu_error_message(response)
         raise GpuError(f"Colab не принял звук: {message}", code, response.status_code)
@@ -1938,7 +2285,7 @@ async def prepare(request: Request) -> dict[str, Any]:
     if not source.exists() or not source.is_file():
         raise HTTPException(404, "Файл не найден")
     options = separation_options(body)
-    force = bool(body.get("force", False))
+    force = parse_bool(body.get("force"), False)
 
     meta_path = stems_meta_path(source)
     existing = load_stems(source)
@@ -1949,7 +2296,7 @@ async def prepare(request: Request) -> dict[str, Any]:
         except Exception:
             pass
 
-    if not has_audio_stream(source):
+    if not await asyncio.to_thread(has_audio_stream, source):
         return {"ok": False, "error": "В видео нет звуковой дорожки"}
 
     started = time.monotonic()
@@ -1974,11 +2321,14 @@ async def prepare(request: Request) -> dict[str, Any]:
 # ---- Референсы для клонирования --------------------------------------------------
 
 
-def reference_audio_source(video: Path) -> Path:
-    """Откуда резать референсы: чистый голос после очистки (без музыки, эха и
-    шума — клон их не копирует), иначе звук самого видео."""
+def reference_audio_source(video: Path, ref_source: str = "clean") -> Path:
+    """Откуда резать референсы. clean — голос после очистки (без музыки, эха и
+    шума); raw — голос сразу после отделения от музыки, без шумодава и
+    удаления эха (см. OMNIVOICE_REF_SOURCE). Без очистки — звук самого видео."""
     stems = load_stems(video)
-    return stems["vocals_clean"] if stems else video
+    if not stems:
+        return video
+    return stems["vocals_raw"] if ref_source == "raw" else stems["vocals_clean"]
 
 
 def _seg_speaker(segment: dict[str, Any]) -> str:
@@ -2006,15 +2356,23 @@ def padded_bounds(context: list[dict[str, Any]], index: int, pad: float = REF_PA
     return low, max(low + 0.05, high)
 
 
-def choose_reference_indices(context: list[dict[str, Any]], index: int) -> tuple[list[int], str]:
+def choose_reference_indices(
+    context: list[dict[str, Any]], index: int, mode: str = "auto", target: float = 6.0
+) -> tuple[list[int], str]:
     """Какие реплики того же спикера пойдут в референс для реплики index.
 
-      line      — реплика 3–10 с: клон из неё самой (точнее всего передаёт
-                  интонацию именно этого момента);
-      neighbors — короткая реплика: она сама + ближайшие реплики того же
-                  спикера до ~4 с (соседние по времени звучат похоже);
-      speaker   — длинная реплика или соседей мало: лучшие куски этого
-                  спикера по всему видео, 5–10 с.
+      line      — реплика длиной от target до 10 с: клон из неё самой
+                  (точнее всего передаёт интонацию именно этого момента);
+      neighbors — реплика короче target: она сама + ближайшие ПО ВРЕМЕНИ
+                  реплики того же спикера (не дальше REF_NEIGHBOR_WINDOW_SECONDS),
+                  пока не наберётся target секунд. Сама реплика ставится
+                  последней: OmniVoice продолжает речь сразу после референса,
+                  поэтому ближе всего к дубляжу звучит её собственная интонация;
+      speaker   — реплика длиннее 10 с, соседей мало или mode="speaker":
+                  лучшие (самые длинные) куски этого спикера по всему видео.
+    Раньше «соседи» искались по номеру реплики без ограничения по времени
+    и могли прийти из другого конца видео, а референс в 3 с считался
+    достаточным — короткий референс даёт заметно менее похожий тембр.
     """
     speaker = _seg_speaker(context[index])
 
@@ -2022,28 +2380,36 @@ def choose_reference_indices(context: list[dict[str, Any]], index: int) -> tuple
         start, end = _seg_bounds(context[i])
         return end - start
 
-    own = duration(index)
-    if REF_LINE_MIN_SECONDS <= own <= REF_LINE_MAX_SECONDS:
-        return [index], "line"
+    def start_of(i: int) -> float:
+        return _seg_bounds(context[i])[0]
 
-    if own < REF_LINE_MIN_SECONDS:
-        picked = [index] if own >= 0.3 else []
-        total = own if picked else 0.0
-        offset = 1
-        while total < 4.0 and (index - offset >= 0 or index + offset < len(context)):
-            for i in (index - offset, index + offset):
-                if not 0 <= i < len(context) or _seg_speaker(context[i]) != speaker:
-                    continue
-                piece = duration(i)
-                if piece < 0.3 or total + piece > REF_MAX_TOTAL_SECONDS:
+    own = duration(index)
+    if mode != "speaker":
+        if target <= own <= REF_LINE_MAX_SECONDS:
+            return [index], "line"
+        if own < target:
+            include_self = own >= 0.3
+            total = own if include_self else 0.0
+            here = start_of(index)
+            nearby = [
+                i for i in range(len(context))
+                if i != index
+                and _seg_speaker(context[i]) == speaker
+                and 0.3 <= duration(i) <= REF_LINE_MAX_SECONDS
+                and abs(start_of(i) - here) <= REF_NEIGHBOR_WINDOW_SECONDS
+            ]
+            nearby.sort(key=lambda i: abs(start_of(i) - here))
+            picked: list[int] = []
+            for i in nearby:
+                if total >= target:
+                    break
+                if total + duration(i) > REF_MAX_TOTAL_SECONDS:
                     continue
                 picked.append(i)
-                total += piece
-                if total >= 4.0:
-                    break
-            offset += 1
-        if total >= 2.0:
-            return sorted(picked), "neighbors"
+                total += duration(i)
+            if total >= REF_LINE_MIN_SECONDS:
+                order = sorted(picked) + ([index] if include_self else [])
+                return order, ("neighbors" if picked else "line")
 
     candidates = [
         i for i in range(len(context))
@@ -2056,7 +2422,7 @@ def choose_reference_indices(context: list[dict[str, Any]], index: int) -> tuple
             continue
         picked.append(i)
         total += duration(i)
-        if total >= 5.0:
+        if total >= target:
             break
     if picked:
         return sorted(picked), "speaker"
@@ -2075,7 +2441,8 @@ def choose_reference_indices(context: list[dict[str, Any]], index: int) -> tuple
 def build_reference(
     source: Path, context: list[dict[str, Any]], indices: list[int], refs_dir: Path
 ) -> tuple[Path, str] | None:
-    """Вырезает куски, склеивает их и возвращает (файл, точный текст референса).
+    """Вырезает куски (в порядке indices), склеивает их и возвращает
+    (файл, точный текст референса).
 
     Текст берётся из распознавания Scribe (поле original): с ним OmniVoice не
     распознаёт референс сам своим Whisper — быстрее и без его ошибок.
@@ -2111,6 +2478,20 @@ def build_reference(
     return combined, ref_text
 
 
+def available_slot(context: list[dict[str, Any]], index: int) -> float | None:
+    """Сколько секунд есть у дубляжа реплики: до начала следующей реплики
+    (любого спикера), но не меньше её собственной длины. None — реплика
+    последняя, ей ничто не мешает. Та же логика, что в plan_dub_placement."""
+    start, end = _seg_bounds(context[index])
+    later = [
+        _seg_bounds(other)[0] for i, other in enumerate(context)
+        if i != index and _seg_bounds(other)[0] > start + 0.01
+    ]
+    if not later:
+        return None
+    return max(0.2, end - start, min(later) - start)
+
+
 # ---- Озвучка ---------------------------------------------------------------------
 
 # Голоса, уже отправленные на Colab: (адрес Colab, ключ). После перезапуска
@@ -2122,14 +2503,14 @@ async def gpu_register_voice(ref_path: Path, ref_text: str, force: bool = False)
     """Отправляет референс на Colab один раз; Colab кодирует голос и помнит его
     под ключом (хэш звука + текста). Все следующие реплики с тем же
     референсом идут без повторной загрузки и кодирования."""
-    data = ref_path.read_bytes()
+    data = await asyncio.to_thread(ref_path.read_bytes)
     key = hashlib.sha1(data + b"\x00" + ref_text.encode("utf-8")).hexdigest()[:24]
     endpoint = gpu_endpoint()
     base = endpoint[0] if endpoint else ""
     if not force and (base, key) in _registered_voices:
         return key
-    response = await gpu_request(
-        "POST", "/voices", timeout=180,
+    response = await gpu_post_with_retries(
+        "/voices", "голос", timeout=180,
         files={"file": (ref_path.name, data, "audio/wav")}, data={"key": key, "ref_text": ref_text},
     )
     if response.status_code != 200:
@@ -2139,66 +2520,100 @@ async def gpu_register_voice(ref_path: Path, ref_text: str, force: bool = False)
     return key
 
 
-async def gpu_tts(text: str, language_name: str, ref_path: Path, ref_text: str) -> bytes:
-    payload = {
+async def gpu_tts(
+    text: str, language_name: str, ref_path: Path, ref_text: str,
+    settings: dict[str, Any], duration: float | None = None,
+) -> bytes:
+    payload: dict[str, Any] = {
         "text": text,
         "language": language_name or None,
         "voice_key": await gpu_register_voice(ref_path, ref_text),
-        "num_step": OMNIVOICE_NUM_STEP,
-        "guidance_scale": OMNIVOICE_GUIDANCE_SCALE,
-        "speed": OMNIVOICE_SPEED,
-        "denoise": OMNIVOICE_DENOISE,
+        "num_step": settings["num_step"],
+        "guidance_scale": settings["guidance_scale"],
+        "speed": settings["speed"],
+        "denoise": settings["denoise"],
     }
+    if duration and duration > 0:
+        payload["duration"] = round(duration, 3)
     last_error: GpuError | None = None
-    for attempt in range(1, 4):
-        try:
-            response = await gpu_request("POST", "/tts", timeout=300, json=payload)
-        except GpuError as exc:
-            if exc.code != "GPU_UNREACHABLE" or attempt == 3:
-                raise
-            last_error = exc
-            await asyncio.sleep(2.0 * attempt)
-            continue
+    for reregistered in (False, True):
+        response = await gpu_post_with_retries("/tts", "озвучка", timeout=300, json=payload)
         if response.status_code == 200 and response.content:
             return response.content
         message, code = _gpu_error_message(response)
         last_error = GpuError(f"OmniVoice на Colab: {message}", code, response.status_code)
-        if code == "VOICE_NOT_FOUND":
-            # Colab перезапускали — голоса там стёрлись. Отправляем заново.
+        if code == "VOICE_NOT_FOUND" and not reregistered:
+            # Colab перезапускали (или он вытеснил старый голос) — отправляем
+            # голос заново и ПОВТОРЯЕМ озвучку с новым ключом. Раньше при
+            # такой ошибке на последней попытке реплика падала, хотя голос
+            # уже был перерегистрирован.
             payload["voice_key"] = await gpu_register_voice(ref_path, ref_text, force=True)
-            continue
-        if code == "TTS_NOT_READY" and attempt < 3:
-            await asyncio.sleep(10)  # модель ещё грузится после старта ноутбука
             continue
         raise last_error
     raise last_error or GpuError("OmniVoice на Colab не ответил")
 
 
-async def synthesize_line(
-    text: str, ref_path: Path, ref_text: str, target_duration: float, language_name: str
-) -> dict[str, Any]:
-    audio_bytes = await gpu_tts(text, language_name, ref_path, ref_text)
-    filename = f"voice_{uuid.uuid4().hex[:10]}.wav"
-    out_path = UPLOADS / filename
+def store_voice_clip(audio_bytes: bytes) -> Path:
+    """Сохраняет ответ OmniVoice и срезает длинную тишину по краям до
+    EDGE_SILENCE_KEEP_SECONDS. Если анализ не удался — файл как есть."""
+    out_path = UPLOADS / f"voice_{uuid.uuid4().hex[:10]}.wav"
     out_path.write_bytes(audio_bytes)
-
-    # Длинная тишина по краям обрезается до EDGE_SILENCE_KEEP_SECONDS.
-    # Если анализ не удался — оставляем файл как есть, а не теряем реплику.
     trimmed_path = UPLOADS / f"voice_{uuid.uuid4().hex[:10]}.wav"
     if trim_edge_silence(out_path, trimmed_path):
         out_path.unlink(missing_ok=True)
-        out_path = trimmed_path
-        filename = trimmed_path.name
-    else:
-        trimmed_path.unlink(missing_ok=True)
+        return trimmed_path
+    trimmed_path.unlink(missing_ok=True)
+    return out_path
+
+
+def measure_voice_length(path: Path) -> float:
+    """Длина звучащей части клипа (без тишины по краям), как в plan_dub_placement."""
+    total, lead, tail = analyze_clip(path)
+    voice = total - lead - tail
+    return voice if voice > 0.05 else total
+
+
+async def synthesize_line(
+    text: str, ref_path: Path, ref_text: str, target_duration: float, language_name: str,
+    settings: dict[str, Any], slot: float | None = None,
+) -> dict[str, Any]:
+    audio_bytes = await gpu_tts(text, language_name, ref_path, ref_text, settings)
+    out_path = await asyncio.to_thread(store_voice_clip, audio_bytes)
+
+    # Подгонка под длину. Если голос не влезает до начала следующей реплики,
+    # раньше экспорт ускорял его через atempo (до 1.3x) — atempo заметно
+    # портит голос («фазовый», металлический звук). Теперь OmniVoice сразу
+    # генерирует реплику нужной длины (параметр duration): модель сама
+    # говорит быстрее, и звук остаётся чистым. Сильнее fit_max_speedup не
+    # сжимаем — дальше речь становится неразборчивой; остаток экспорт
+    # покажет как наложение.
+    natural_voice: float | None = None
+    fitted = False
+    if settings["fit_duration"] and slot:
+        voice_length = await asyncio.to_thread(measure_voice_length, out_path)
+        if voice_length > slot * 1.05:
+            natural_voice = round(voice_length, 3)
+            wanted = max(slot, voice_length / settings["fit_max_speedup"])
+            try:
+                fitted_bytes = await gpu_tts(text, language_name, ref_path, ref_text, settings, duration=wanted)
+                fitted_path = await asyncio.to_thread(store_voice_clip, fitted_bytes)
+                out_path.unlink(missing_ok=True)
+                out_path = fitted_path
+                fitted = True
+                print(f"[voice] реплика {voice_length:.2f} с не влезала в {slot:.2f} с — сгенерирована сразу на {wanted:.2f} с", flush=True)
+            except GpuError as exc:
+                print(f"[voice] подгонка длины не удалась ({exc}) — оставляю обычную версию", flush=True)
 
     return {
         "ok": True,
-        "filename": filename,
-        "url": f"/uploads/{filename}",
-        "audioDuration": round(probe_duration(out_path), 3),
+        "filename": out_path.name,
+        "url": f"/uploads/{out_path.name}",
+        "audioDuration": round(await asyncio.to_thread(probe_duration, out_path), 3),
         "targetDuration": round(target_duration, 3),
         "method": "omnivoice-colab",
+        "fitted": fitted,
+        "naturalVoiceSeconds": natural_voice,
+        "slotSeconds": round(slot, 3) if slot else None,
     }
 
 
@@ -2207,15 +2622,15 @@ async def voice(request: Request) -> dict[str, Any]:
     """Озвучивает присланные реплики (segments) клоном голоса их спикера.
 
     context — ВСЕ реплики видео (id, speaker_id, start, end, original).
-    Без него короткой реплике не из чего собрать референс: раньше фронтенд
-    слал по одной реплике без контекста, и каждая короткая реплика
-    клонировалась из самой себя (0.5–2 с звука)."""
+    Без него короткой реплике не из чего собрать референс, и не видно, где
+    начинается следующая реплика (нужно для подгонки длины)."""
     body = await request.json()
     language_code = str(body.get("languageCode") or "uz").strip().lower()
     if language_code not in LANGS:
         language_code = "uz"
     target_language = LANGS[language_code]
     omnivoice_language = OMNIVOICE_LANG_OVERRIDES.get(target_language, target_language)
+    settings = omnivoice_settings()
 
     segments = [item for item in (body.get("segments") or []) if isinstance(item, dict)]
     context = [dict(item) for item in (body.get("context") or segments) if isinstance(item, dict)]
@@ -2225,7 +2640,7 @@ async def voice(request: Request) -> dict[str, Any]:
     if not video.exists() or not video.is_file():
         error = "Видео не найдено на сервере — загрузите его заново"
         return {"ok": True, "results": [{"id": item.get("id"), "ok": False, "error": error} for item in segments]}
-    ref_source = reference_audio_source(video)
+    ref_source = await asyncio.to_thread(reference_audio_source, video, settings["ref_source"])
     refs_dir = UPLOADS / f"{video.stem}_refs"
     refs_dir.mkdir(exist_ok=True)
 
@@ -2249,22 +2664,28 @@ async def voice(request: Request) -> dict[str, Any]:
                     context[index][key] = segment[key]
 
         start, end = _seg_bounds(context[index])
-        target_duration = float(segment.get("duration") or max(0.3, end - start))
-        indices, ref_kind = choose_reference_indices(context, index)
-        reference = build_reference(ref_source, context, indices, refs_dir)
+        try:
+            target_duration = float(segment.get("duration") or max(0.3, end - start))
+        except (TypeError, ValueError):
+            target_duration = max(0.3, end - start)
+        indices, ref_kind = choose_reference_indices(context, index, settings["ref_mode"], settings["ref_target"])
+        reference = await asyncio.to_thread(build_reference, ref_source, context, indices, refs_dir)
         if reference is None:
             output.append({"id": segment_id, "ok": False, "error": "Не удалось вырезать референс голоса из видео"})
             continue
         ref_path, ref_text = reference
 
         try:
-            result = await synthesize_line(text, ref_path, ref_text, target_duration, omnivoice_language)
+            result = await synthesize_line(
+                text, ref_path, ref_text, target_duration, omnivoice_language, settings,
+                slot=available_slot(context, index),
+            )
         except GpuError as exc:
             print(f"[voice] {segment_id}: {exc}", flush=True)
             result = {"ok": False, "error": str(exc)}
         result["id"] = segment_id
         result["refKind"] = ref_kind
-        result["refSeconds"] = round(probe_duration(ref_path), 2)
+        result["refSeconds"] = round(await asyncio.to_thread(probe_duration, ref_path), 2)
         output.append(result)
 
     return {"ok": True, "results": output}
@@ -2290,6 +2711,22 @@ def has_audio_stream(path: Path) -> bool:
         )
         return result.returncode == 0 and bool(result.stdout.strip())
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def has_video_stream(path: Path) -> bool:
+    """Есть ли настоящая видеодорожка (обложка MP3 не считается)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
+             "stream=index:stream_disposition=attached_pic", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            return False
+        streams = json.loads(result.stdout or "{}").get("streams") or []
+        return any(not (stream.get("disposition") or {}).get("attached_pic") for stream in streams)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
         return False
 
 
@@ -2376,7 +2813,9 @@ def plan_dub_placement(valid_segments: list[tuple[dict[str, Any], Path]]) -> tup
     - Сдвиг offsetMs применяется до сортировки и расчёта свободного места.
     - Реплика ускоряется (до 1.3x), только если её голос не влезает до начала
       следующей. Тишина в начале и в конце клипа в длину голоса не считается.
-    - Тишина в начале клипа больше не задерживает голос: клип ставится раньше
+      (Обычно этого уже не нужно: /api/voice сам генерирует не влезающую
+      реплику нужной длины — см. synthesize_line.)
+    - Тишина в начале клипа не задерживает голос: клип ставится раньше
       ровно на неё, поэтому голос начинается вовремя.
     - Если голос не влезает даже на 1.3x, реплика попадает в warnings: она
       наложится на следующую, и её стоит сократить."""
@@ -2386,19 +2825,25 @@ def plan_dub_placement(valid_segments: list[tuple[dict[str, Any], Path]]) -> tup
         return max(0.0, base + float(segment.get("offsetMs", 0) or 0) / 1000.0)
 
     ordered = sorted(range(len(valid_segments)), key=lambda i: shifted_start(valid_segments[i][0]))
+    # Все клипы анализируются параллельно и по одному разу.
+    unique_clips = sorted({audio for _segment, audio in valid_segments})
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        clip_info = dict(zip(unique_clips, pool.map(analyze_clip, unique_clips)))
     specs: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     for position, segment_index in enumerate(ordered):
         segment, audio = valid_segments[segment_index]
         start = shifted_start(segment)
         offset = float(segment.get("offsetMs", 0) or 0) / 1000.0
-        shifted_end = max(start, float(segment.get("end", start + 2) or 0) + offset)
+        base_start = max(0.0, float(segment.get("start", 0) or 0))
+        raw_end = segment.get("end")
+        base_end = float(raw_end) if raw_end not in (None, "") else base_start + 2.0
+        shifted_end = max(start, base_end + offset)
         own_slot = max(0.2, shifted_end - start)
         next_start = shifted_start(valid_segments[ordered[position + 1]][0]) if position + 1 < len(ordered) else None
         available = max(own_slot, next_start - start) if next_start is not None else own_slot
 
-        clip_duration = probe_duration(audio)
-        lead, tail = measure_edge_silence(audio)
+        clip_duration, lead, tail = clip_info[audio]
         voice_length = clip_duration - lead - tail
         if voice_length <= 0.05:
             voice_length, lead, tail = clip_duration, 0.0, 0.0
@@ -2412,8 +2857,8 @@ def plan_dub_placement(valid_segments: list[tuple[dict[str, Any], Path]]) -> tup
         if next_start is not None and voice_end > next_start + 0.05:
             warnings.append({"id": segment.get("id"), "overlapSeconds": round(voice_end - next_start, 2)})
 
-        original_start = max(0.0, float(segment.get("start", 0) or 0))
-        original_end = max(original_start, float(segment.get("end", original_start) or 0))
+        original_start = base_start
+        original_end = max(original_start, base_end)
         specs.append({
             "segment_index": segment_index,
             "placed": placed,
@@ -2427,6 +2872,76 @@ def plan_dub_placement(valid_segments: list[tuple[dict[str, Any], Path]]) -> tup
     return specs, warnings
 
 
+def decode_clip(path: Path, speed: float, sample_rate: int) -> "np.ndarray | None":
+    """Клип дубляжа -> моно float32 с нужной частотой (и ускорением atempo)."""
+    command = ["ffmpeg", "-v", "error", "-i", str(path)]
+    if speed > 1.0005:
+        command += ["-af", atempo_chain(speed)]
+    command += ["-f", "f32le", "-ac", "1", "-ar", str(sample_rate), "-"]
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    usable = (len(result.stdout) // 4) * 4
+    if result.returncode != 0 or usable == 0:
+        return None
+    return np.frombuffer(result.stdout[:usable], dtype=np.float32)
+
+
+def render_dub_track(
+    specs: list[dict[str, Any]],
+    valid_segments: list[tuple[dict[str, Any], Path]],
+    total_duration: float,
+    target: Path,
+    sample_rate: int = 44100,
+) -> tuple[bool, list[Any]]:
+    """Собирает ВСЕ реплики дубляжа в одну моно-дорожку (FLAC).
+
+    Раньше каждая реплика шла в ffmpeg отдельным входом (-i) со своим
+    фильтром. На 350 репликах команда занимала ~51 000 символов — больше
+    лимита Windows (32 767), и экспорт падал; на Linux тот же предел
+    наступал около 1000 реплик (лимит открытых файлов). Теперь реплики
+    раскладываются по местам здесь, в numpy, а ffmpeg получает 2–4 входа
+    при любом числе реплик. Дорожка лежит на диске (memmap), а не в памяти.
+    Возвращает (успех, id реплик, которые не удалось прочитать)."""
+    frames = int(math.ceil(total_duration * sample_rate)) + sample_rate
+    raw_path = target.with_suffix(".f32")
+    track = np.memmap(raw_path, dtype=np.float32, mode="w+", shape=(frames,))
+    skipped: list[Any] = []
+    jobs = [(spec, valid_segments[spec["segment_index"]]) for spec in specs]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for batch_start in range(0, len(jobs), 16):
+            batch = jobs[batch_start:batch_start + 16]
+            decoded = list(pool.map(lambda job: decode_clip(job[1][1], job[0]["speed"], sample_rate), batch))
+            for (spec, (segment, audio)), samples in zip(batch, decoded):
+                if samples is None or samples.size == 0:
+                    print(f"[export] Не удалось прочитать {audio.name} — реплика пропущена", flush=True)
+                    skipped.append(segment.get("id"))
+                    continue
+                begin = int(round(spec["placed"] * sample_rate))
+                if begin >= frames:
+                    continue
+                stop = min(frames, begin + samples.size)
+                track[begin:stop] += samples[: stop - begin]
+    track.flush()
+    del track
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ac", "1", "-ar", str(sample_rate),
+             "-i", str(raw_path), "-c:a", "flac", str(target)],
+            capture_output=True, text=True, timeout=1800,
+        )
+        ok = result.returncode == 0 and target.exists() and target.stat().st_size > 0
+        if not ok:
+            print(f"[export] Не удалось записать дорожку дубляжа: {result.stderr[-300:]}", flush=True)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"[export] Не удалось записать дорожку дубляжа: {exc}", flush=True)
+        ok = False
+    finally:
+        raw_path.unlink(missing_ok=True)
+    return ok, skipped
+
+
 @app.post("/api/export")
 async def export(request: Request) -> dict[str, Any]:
     """Сборка видео: дубляж + звук оригинала.
@@ -2438,31 +2953,38 @@ async def export(request: Request) -> dict[str, Any]:
         репликами (смех, крики, реакции) и выключается там, где звучит дубляж
         или где говорил переведённый спикер.
     Без очистки — как раньше: звук оригинала целиком (голоса тоже), тоже с
-    приглушением под репликами."""
+    приглушением под репликами.
+    Если загружен аудиофайл без видео — результат будет .m4a."""
     body = await request.json()
     video = UPLOADS / Path(str(body.get("video") or "")).name
-    segments = body.get("segments", [])
-    volume = float(body.get("backgroundVolume", body.get("originalVolume", 0.85)) or 0)
+    segments = body.get("segments") or []
+    try:
+        volume = float(body.get("backgroundVolume", body.get("originalVolume", 0.85)) or 0)
+    except (TypeError, ValueError):
+        volume = 0.85
     volume = max(0.0, min(volume, 1.5))
-    keep_reactions = bool(body.get("keepReactions", True))
-    use_stems = bool(body.get("useStems", True))
-    if not video.exists():
+    keep_reactions = parse_bool(body.get("keepReactions"), True)
+    use_stems = parse_bool(body.get("useStems"), True)
+    if not video.exists() or not video.is_file():
         raise HTTPException(404, "Видео не найдено")
 
     valid_segments: list[tuple[dict[str, Any], Path]] = []
     for segment in segments:
+        if not isinstance(segment, dict):
+            continue
         audio = UPLOADS / Path(str(segment.get("audio") or "")).name
         if audio.exists() and audio.is_file():
             valid_segments.append((segment, audio))
     if not valid_segments:
         raise HTTPException(400, "Нет готовых реплик для экспорта")
 
-    video_duration = probe_duration(video)
+    video_duration = await asyncio.to_thread(probe_duration, video)
     if video_duration <= 0:
         return {"ok": False, "error": "ffprobe не смог определить длительность видео"}
 
-    stems = load_stems(video) if use_stems else None
-    video_has_audio = has_audio_stream(video)
+    stems = await asyncio.to_thread(load_stems, video) if use_stems else None
+    video_has_audio = await asyncio.to_thread(has_audio_stream, video)
+    video_has_picture = await asyncio.to_thread(has_video_stream, video)
     specs, warnings = await asyncio.to_thread(plan_dub_placement, valid_segments)
     output_duration = max([video_duration] + [spec["clip_end"] for spec in specs])
 
@@ -2474,6 +2996,8 @@ async def export(request: Request) -> dict[str, Any]:
         for spec in specs
     ]
 
+    # Все входы приводятся к 44.1 кГц стерео явно, а не как решит amix.
+    stereo = "aformat=sample_rates=44100:channel_layouts=stereo"
     with tempfile.TemporaryDirectory(prefix="jarcut2_export_") as temp_dir:
         work = Path(temp_dir)
         inputs = ["-i", str(video)]
@@ -2491,52 +3015,54 @@ async def export(request: Request) -> dict[str, Any]:
                 print("[export] Приглушение фона не удалось — фон без приглушения", flush=True)
                 background_input = background_source
             inputs += ["-i", str(background_input)]
-            filters.append(f"[{next_input}:a]volume={volume:.3f},apad,atrim=duration={duration_str}[bg]")
+            filters.append(f"[{next_input}:a]{stereo},volume={volume:.3f},apad,atrim=duration={duration_str}[bg]")
             mix_labels.append("[bg]")
             next_input += 1
         else:
-            filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration_str}[bg]")
+            filters.append(f"anullsrc=r=44100:cl=stereo,atrim=duration={duration_str}[bg]")
             mix_labels.append("[bg]")
 
         if stems is not None and keep_reactions:
             reactions = work / "reactions.flac"
             if await asyncio.to_thread(apply_gain_regions, stems["vocals_raw"], reactions, mute_regions, 0.0):
                 inputs += ["-i", str(reactions)]
-                filters.append(f"[{next_input}:a]volume={volume:.3f},apad,atrim=duration={duration_str}[rx]")
+                filters.append(f"[{next_input}:a]{stereo},volume={volume:.3f},apad,atrim=duration={duration_str}[rx]")
                 mix_labels.append("[rx]")
                 next_input += 1
             else:
                 print("[export] Не удалось подготовить реакции оригинала — экспорт без них", flush=True)
 
-        first_dub_input = next_input
-        for _segment, audio in valid_segments:
-            inputs += ["-i", str(audio)]
-        for spec in specs:
-            input_index = first_dub_input + spec["segment_index"]
-            label = f"dub{spec['segment_index']}"
-            delay_ms = int(round(spec["placed"] * 1000))
-            filters.append(
-                f"[{input_index}:a]aresample=44100,{atempo_chain(spec['speed'])},adelay=delays={delay_ms}:all=1[{label}]"
-            )
-            mix_labels.append(f"[{label}]")
+        dub_track = work / "dub.flac"
+        rendered, skipped = await asyncio.to_thread(render_dub_track, specs, valid_segments, output_duration, dub_track)
+        if not rendered:
+            return {"ok": False, "error": "Не удалось собрать дорожку дубляжа (ffmpeg) — подробности в терминале"}
+        inputs += ["-i", str(dub_track)]
+        filters.append(f"[{next_input}:a]{stereo},apad,atrim=duration={duration_str}[dub]")
+        mix_labels.append("[dub]")
+        next_input += 1
 
         filters.append(
             f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=longest:normalize=0:dropout_transition=0,"
             f"atrim=duration={duration_str}[final]"
         )
 
-        tail_extension = max(0.0, output_duration - video_duration)
-        video_options = ["-c:v", "copy"]
-        if tail_extension > 0.01:
-            video_options = [
-                "-vf", f"tpad=stop_mode=clone:stop_duration={tail_extension:.3f}",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-            ]
+        if video_has_picture:
+            tail_extension = max(0.0, output_duration - video_duration)
+            video_options = ["-map", "0:v:0", "-c:v", "copy"]
+            if tail_extension > 0.01:
+                video_options = [
+                    "-map", "0:v:0",
+                    "-vf", f"tpad=stop_mode=clone:stop_duration={tail_extension:.3f}",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                ]
+            output = EXPORTS / f"dub_{uuid.uuid4().hex[:8]}.mp4"
+        else:
+            video_options = []  # загружен звук без видео — отдаём звук
+            output = EXPORTS / f"dub_{uuid.uuid4().hex[:8]}.m4a"
 
-        output = EXPORTS / f"dub_{uuid.uuid4().hex[:8]}.mp4"
         command = [
             "ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters),
-            "-map", "0:v:0", "-map", "[final]", *video_options, "-c:a", "aac",
+            *video_options, "-map", "[final]", "-c:a", "aac",
             "-b:a", "192k", "-movflags", "+faststart", "-t", duration_str, str(output),
         ]
         try:
@@ -2545,17 +3071,21 @@ async def export(request: Request) -> dict[str, Any]:
             return {"ok": False, "error": "ffmpeg/ffprobe не установлен"}
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "Экспорт занял больше 30 минут"}
+        except OSError as exc:
+            return {"ok": False, "error": f"Не удалось запустить ffmpeg: {exc}"}
         if result.returncode != 0:
             return {"ok": False, "error": result.stderr[-800:]}
 
     mode = "фон после очистки" + (" + реакции" if stems is not None and keep_reactions else "") if stems else "звук оригинала целиком"
-    print(f"[export] {len(specs)} реплик, {mode}, наложений: {len(warnings)} -> {output.name}", flush=True)
+    print(f"[export] {len(specs)} реплик, {mode}, наложений: {len(warnings)}"
+          f"{f', пропущено: {len(skipped)}' if skipped else ''} -> {output.name}", flush=True)
     return {
         "ok": True,
         "url": f"/exports/{output.name}",
         "filename": output.name,
         "usedStems": stems is not None,
         "warnings": warnings,
+        "skipped": skipped,
     }
 
 
@@ -2565,14 +3095,20 @@ app.mount("/exports", StaticFiles(directory=str(EXPORTS)), name="exports")
 if __name__ == "__main__":
     import uvicorn
 
+    host = os.getenv("JARCUT_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = int(os.getenv("JARCUT_PORT", "8000"))
     endpoint = gpu_endpoint()
-    print("\nJarCut 2.0 -> http://localhost:8000")
+    voice_settings = omnivoice_settings()
+    print(f"\nJarCut 2.0 -> http://localhost:{port}"
+          + ("" if host in ("127.0.0.1", "localhost") else f"  (открыт для сети: {host} — без пароля!)"))
     gemini = gemini_config()
     print(f"Перевод: {gemini['model']} (через {'AI Studio' if gemini['backend'] == 'aistudio' else 'Vertex AI'})")
     print(f"Тайминги: ElevenLabs Scribe ({SCRIBE_MODEL})")
     print(f"Очистка + озвучка (Colab): {endpoint[0] if endpoint else 'JARCUT_GPU_URL НЕ ЗАДАН в .env'}")
-    print(f"OmniVoice: шагов {OMNIVOICE_NUM_STEP}, guidance {OMNIVOICE_GUIDANCE_SCALE}")
+    print(f"OmniVoice: шагов {voice_settings['num_step']}, guidance {voice_settings['guidance_scale']}, "
+          f"референс {voice_settings['ref_source']}/{voice_settings['ref_mode']} ~{voice_settings['ref_target']:.0f} с, "
+          f"подгонка длины {'вкл' if voice_settings['fit_duration'] else 'выкл'} — меняется в .env на лету")
     print(f"Ключ Gemini: {'из ' + gemini['source'] + ' (' + mask_key(gemini['key']) + ')' if gemini['key'] else 'НЕ ЗАДАН'}"
           " — .env для Gemini перечитывается на лету")
     print(f"Ключ ElevenLabs: {'OK' if ELEVENLABS_API_KEY else 'НЕ ЗАДАН'}\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=host, port=port)
