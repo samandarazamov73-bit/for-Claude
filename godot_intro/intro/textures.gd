@@ -1,18 +1,94 @@
 extends RefCounted
-## Процедурные текстуры (пока нет настоящих). Заменить: положи картинку в intro/assets/textures/
-## с именем road.png, sidewalk.png, grass.png, facade.png, hospital.png — они подхватятся сами.
+## Текстуры. Пока нет настоящих — рисуются кодом. Настоящие фото-текстуры (PBR) кладутся в
+## intro/assets/textures/<имя>/ — папкой, как скачал с ambientcg.com или polyhaven.com, БЕЗ переименования.
+## Имена папок: road, sidewalk, curb, grass, facade, hospital.
+## Код сам находит в папке цвет (Color / diff), рельеф (NormalGL / nor_gl), шероховатость (Roughness / rough)
+## и затенение (AmbientOcclusion / ao). Можно и отдельными файлами: road.jpg, road_normal.jpg, road_rough.jpg, road_ao.jpg.
 
 const TEX_DIR: String = "res://intro/assets/textures/"
+const IMAGE_EXT: Array = ["png", "jpg", "jpeg", "webp"]
+
+static var _pbr_cache: Dictionary = {}
 
 
-## Своя картинка из папки assets, если она там есть.
+## Фото-текстура: {"albedo", "normal", "rough", "ao"} — только то, что нашлось (может быть пусто).
+static func pbr(name: String) -> Dictionary:
+	if _pbr_cache.has(name):
+		return _pbr_cache[name]
+	var out: Dictionary = {}
+	var normal_is_gl: bool = false
+	for path in _list_images(TEX_DIR + name + "/"):
+		var low: String = path.get_file().to_lower()
+		var kind: String = _kind_of(low)
+		if kind == "":
+			continue
+		var gl: bool = kind == "normal" and (low.contains("gl") or not low.contains("dx"))
+		if out.has(kind) and not (kind == "normal" and gl and not normal_is_gl):
+			continue
+		var t: Texture2D = _load_tex(path)
+		if t != null:
+			out[kind] = t
+			if kind == "normal":
+				normal_is_gl = gl
+	if not out.has("albedo") and out.has("plain"):
+		out["albedo"] = out["plain"]
+	out.erase("plain")
+	# Отдельные файлы рядом: road.jpg, road_normal.jpg, road_rough.jpg, road_ao.jpg
+	var single: Dictionary = {"albedo": "", "normal": "_normal", "rough": "_rough", "ao": "_ao"}
+	for kind in single:
+		if out.has(kind):
+			continue
+		for ext in IMAGE_EXT:
+			var t2: Texture2D = _load_tex(TEX_DIR + name + str(single[kind]) + "." + ext)
+			if t2 != null:
+				out[kind] = t2
+				break
+	_pbr_cache[name] = out
+	return out
+
+
+## Только цветная картинка (или null).
 static func custom(name: String) -> Texture2D:
-	for ext in ["png", "jpg", "webp"]:
-		var path: String = TEX_DIR + name + "." + ext
-		if ResourceLoader.exists(path):
-			var t: Resource = load(path)
-			if t is Texture2D:
-				return t
+	return pbr(name).get("albedo") as Texture2D
+
+
+static func _kind_of(low: String) -> String:
+	for skip in ["disp", "height", "bump", "metal", "opacity", "preview", "spec", "_arm", "mask"]:
+		if low.contains(skip):
+			return ""
+	if low.contains("normal") or low.contains("_nor"):
+		return "normal"
+	if low.contains("rough"):
+		return "rough"
+	if low.contains("ambientocclusion") or low.contains("_ao") or low.begins_with("ao"):
+		return "ao"
+	for key in ["color", "col_", "diff", "albedo", "base"]:
+		if low.contains(key):
+			return "albedo"
+	return "plain"             # картинка без подписи (у ambientcg это превью-шарик) — только если цвета нет
+
+
+static func _list_images(dir_path: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var d: DirAccess = DirAccess.open(dir_path)
+	if d == null:
+		return out
+	var files: PackedStringArray = d.get_files()
+	files.sort()
+	for f in files:
+		# В собранной игре рядом лежат только «*.jpg.import» — имя без суффикса всё равно грузится.
+		var n: String = f.trim_suffix(".import").trim_suffix(".remap")
+		if IMAGE_EXT.has(n.get_extension().to_lower()) and not out.has(dir_path + n):
+			out.append(dir_path + n)
+	return out
+
+
+static func _load_tex(path: String) -> Texture2D:
+	if not ResourceLoader.exists(path):
+		return null
+	var r: Resource = load(path)
+	if r is Texture2D:
+		return r
 	return null
 
 

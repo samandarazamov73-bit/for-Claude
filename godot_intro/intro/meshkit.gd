@@ -106,7 +106,8 @@ func add_torus(center: Vector3, inner: float, outer: float, color: Color, rot: V
 	add_prim(m, Transform3D(Basis.from_euler(rot), center), color)
 
 
-func build_mesh() -> ArrayMesh:
+## tangents=true — для материалов с картой рельефа (normal map): без касательных рельеф ложится криво.
+func build_mesh(tangents: bool = false) -> ArrayMesh:
 	var mesh: ArrayMesh = ArrayMesh.new()
 	if verts.size() == 0:
 		return mesh
@@ -118,12 +119,17 @@ func build_mesh() -> ArrayMesh:
 	arrays[Mesh.ARRAY_COLOR] = cols
 	arrays[Mesh.ARRAY_INDEX] = idx
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	if tangents:
+		var st: SurfaceTool = SurfaceTool.new()
+		st.create_from(mesh, 0)
+		st.generate_tangents()
+		return st.commit()
 	return mesh
 
 
-func build(material: Material, cast_shadow: bool = true) -> MeshInstance3D:
+func build(material: Material, cast_shadow: bool = true, tangents: bool = false) -> MeshInstance3D:
 	var mi: MeshInstance3D = MeshInstance3D.new()
-	mi.mesh = build_mesh()
+	mi.mesh = build_mesh(tangents)
 	mi.material_override = material
 	if not cast_shadow:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

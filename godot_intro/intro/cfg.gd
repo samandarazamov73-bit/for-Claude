@@ -32,6 +32,10 @@ const CURB: float = 0.15
 const SIDE_OUT: float = 11.2        # край тротуара = ROAD_HALF + SIDEWALK
 
 # --- Герой ---
+# --- Фото-текстуры ---
+# Сколько метров покрывает одна картинка. Плитка или трещины выглядят слишком крупными — уменьши число.
+const TEX_METERS: Dictionary = {"road": 3.0, "sidewalk": 2.0, "curb": 1.0, "grass": 3.0, "facade": 3.0, "hospital": 3.0}
+
 const EYE_HEIGHT: float = 1.2       # высота глаз над полом автобуса (сидя в коляске)
 const MOUSE_SENS: float = 0.0022
 

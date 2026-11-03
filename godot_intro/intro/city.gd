@@ -18,7 +18,7 @@ var shelters: Dictionary = {}
 var _m_vc: StandardMaterial3D
 var _m_asphalt: StandardMaterial3D
 var _m_paving: StandardMaterial3D
-var _m_grass: StandardMaterial3D
+var _m_curb: StandardMaterial3D
 var _m_glass: StandardMaterial3D
 var _m_facade: Array = []
 var _m_hospital: StandardMaterial3D
@@ -49,7 +49,10 @@ func build(parent: Node3D, rt) -> void:
 
 # --- Материалы ----------------------------------------------------------------
 
-func _std(tex: Texture2D, vcol: bool, rough: float) -> StandardMaterial3D:
+## tex — цветная текстура (своя или нарисованная). photo — имя фото-текстуры из assets (road, sidewalk…):
+## если она есть, добавляются рельеф, шероховатость, затенение и правильный масштаб. mesh_tile — сколько
+## метров меша приходится на одну единицу UV.
+func _std(tex: Texture2D, vcol: bool, rough: float, photo: String = "", mesh_tile: float = 0.0) -> StandardMaterial3D:
 	var m: StandardMaterial3D = StandardMaterial3D.new()
 	if tex != null:
 		m.albedo_texture = tex
@@ -57,16 +60,35 @@ func _std(tex: Texture2D, vcol: bool, rough: float) -> StandardMaterial3D:
 	m.vertex_color_use_as_albedo = vcol
 	m.vertex_color_is_srgb = vcol
 	m.roughness = rough
+	if photo == "":
+		return m
+	var maps: Dictionary = Tex.pbr(photo)
+	if maps.has("albedo") and mesh_tile > 0.0:
+		var k: float = mesh_tile / float(C.TEX_METERS.get(photo, mesh_tile))
+		m.uv1_scale = Vector3(k, k, 1.0)
+	if maps.has("normal"):
+		m.normal_enabled = true
+		m.normal_texture = maps["normal"]
+	if maps.has("rough"):
+		m.roughness = 1.0
+		m.roughness_texture = maps["rough"]
+	if maps.has("ao"):
+		m.ao_enabled = true
+		m.ao_texture = maps["ao"]
 	return m
+
+
+func _uses_normal_map(mat: Material) -> bool:
+	return mat is BaseMaterial3D and (mat as BaseMaterial3D).normal_enabled
 
 
 func _make_materials() -> void:
 	_m_vc = _std(null, true, 0.85)
-	_m_asphalt = _std(Tex.asphalt(), true, 0.95)
-	_m_paving = _std(Tex.paving(), true, 0.9)
-	_m_grass = _std(Tex.grass(), true, 1.0)
-	_m_facade = [_std(Tex.facade(0), true, 0.85), _std(Tex.facade(1), true, 0.85)]
-	_m_hospital = _std(Tex.facade(9), true, 0.75)
+	_m_asphalt = _std(Tex.asphalt(), true, 0.95, "road", 6.0)
+	_m_paving = _std(Tex.paving(), true, 0.9, "sidewalk", 1.2)
+	_m_curb = _std(Tex.custom("curb"), true, 0.9, "curb", 1.0) if Tex.custom("curb") != null else _m_vc
+	_m_facade = [_std(Tex.facade(0), true, 0.85, "facade", 3.0), _std(Tex.facade(1), true, 0.85, "facade", 3.0)]
+	_m_hospital = _std(Tex.facade(9), true, 0.75, "hospital", 3.0)
 	_m_glass = StandardMaterial3D.new()
 	_m_glass.albedo_color = Color(0.62, 0.77, 0.85, 0.35)
 	_m_glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -86,7 +108,7 @@ func _label(text: String, size: int, pix: float, color: Color) -> Label3D:
 
 
 func _mesh_node(kit: Object, mat: Material, cast: bool = true, far: float = 0.0) -> MeshInstance3D:
-	var mi: MeshInstance3D = kit.build(mat, cast)
+	var mi: MeshInstance3D = kit.build(mat, cast, _uses_normal_map(mat))
 	if far > 0.0:
 		mi.visibility_range_end = far
 	return mi
@@ -147,8 +169,9 @@ func _build_ground() -> void:
 	pm.size = Vector2(9000, 9000)
 	var mi: MeshInstance3D = MeshInstance3D.new()
 	mi.mesh = pm
-	var gm: StandardMaterial3D = _std(Tex.grass(), false, 1.0)
-	gm.uv1_scale = Vector3(1800, 1800, 1)
+	var gm: StandardMaterial3D = _std(Tex.grass(), false, 1.0, "grass", 0.0)
+	var tile: float = float(C.TEX_METERS["grass"]) if Tex.custom("grass") != null else 5.0
+	gm.uv1_scale = Vector3(9000.0 / tile, 9000.0 / tile, 1)
 	mi.material_override = gm
 	mi.position = Vector3(0, -0.05, 0)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -200,7 +223,7 @@ func _build_road() -> void:
 		lat2 += 1.2
 	root.add_child(_mesh_node(rd, _m_asphalt, false))
 	root.add_child(_mesh_node(pv, _m_paving, false))
-	root.add_child(_mesh_node(cb, _m_vc, false))
+	root.add_child(_mesh_node(cb, _m_curb, false))
 	root.add_child(_mesh_node(mk, _m_vc, false))
 
 
@@ -228,7 +251,7 @@ func _build_cross_street() -> void:
 		_flat(mk, origin, dir, fwd, 1.0, length, -0.08, 0.08, 0.02, Color(0.95, 0.95, 0.93))
 	root.add_child(_mesh_node(rd, _m_asphalt, false))
 	root.add_child(_mesh_node(pv, _m_paving, false))
-	root.add_child(_mesh_node(cb, _m_vc, false))
+	root.add_child(_mesh_node(cb, _m_curb, false))
 	root.add_child(_mesh_node(mk, _m_vc, false))
 
 
