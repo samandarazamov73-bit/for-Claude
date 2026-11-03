@@ -2,8 +2,7 @@
 // Координаты автобуса: начало — на земле в центре, «перед» — −Z, правый борт (двери) — +X.
 // Если в assets есть bus.glb, он заменяет кузов и салон (см. assets.js / ASSETS.md).
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { STORY } from './story.js';
+import { CONFIG, STORY } from './data.js';
 import { Batcher, boxUV, matrix } from './geom.js';
 import * as TX from './textures.js';
 import { Human } from './characters.js';
@@ -51,6 +50,7 @@ export class Bus {
       blue: new THREE.MeshStandardMaterial({ color: 0x1d5fa8, roughness: 0.6 }),
       ramp: new THREE.MeshStandardMaterial({ color: 0x55595d, roughness: 0.9 }),
       indicatorOff: new THREE.MeshStandardMaterial({ color: 0x6b4a10, emissive: 0xffa000, emissiveIntensity: 0 }),
+      vc: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }),
     };
 
     this.placeholder = new THREE.Group();
@@ -235,15 +235,12 @@ export class Bus {
         const glass = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.16, 1.7), M.glass);
         glass.position.set(0.03, 0.15, 0);
         glass.rotation.y = Math.PI / 2;
-        const top = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, w - 0.02), M.dark);
-        top.position.y = 1.1;
-        const low = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, w - 0.02), M.paint);
-        low.position.y = -0.85;
-        const edge1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.3, 0.05), M.dark);
-        edge1.position.z = (w - 0.02) / 2;
-        const edge2 = edge1.clone();
-        edge2.position.z = -(w - 0.02) / 2;
-        leaf.add(glass, top, low, edge1, edge2);
+        // Рамка створки — один меш (цвета в вершинах), стекло — отдельно.
+        const frame = new Batcher();
+        frame.add(new THREE.BoxGeometry(0.05, 0.1, w - 0.02), matrix(0, 1.1, 0), M.vc, '#2b2f33');
+        frame.add(new THREE.BoxGeometry(0.05, 0.55, w - 0.02), matrix(0, -0.85, 0), M.vc, '#f4f5f3');
+        for (const z of [-1, 1]) frame.add(new THREE.BoxGeometry(0.05, 2.3, 0.05), matrix(0, 0, z * (w - 0.02) / 2), M.vc, '#2b2f33');
+        leaf.add(glass, frame.build().children[0]);
         this.placeholder.add(leaf);
         this.doorLeaves[name].push(leaf);
       }
@@ -305,29 +302,28 @@ export class Bus {
   }
 
   buildWheels() {
+    this.archBatch = new Batcher();
     for (const z of [-3.3, 3.2]) {
       for (const side of [-1, 1]) {
         const w = new THREE.Group();
         w.position.set(side * (HW - 0.22), 0.5, z);
-        const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.32, 24).rotateZ(Math.PI / 2), this.m.tire);
-        const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.34, 12).rotateZ(Math.PI / 2), this.m.rim);
-        tire.castShadow = true;
-        w.add(tire, rim);
+        const wheel = new Batcher();
+        wheel.add(new THREE.CylinderGeometry(0.5, 0.5, 0.32, 20).rotateZ(Math.PI / 2), null, this.m.vc, '#141414');
+        wheel.add(new THREE.CylinderGeometry(0.3, 0.3, 0.34, 12).rotateZ(Math.PI / 2), null, this.m.vc, '#a7adb3');
+        w.add(wheel.build().children[0]);
         this.root.add(w);
         this.wheels.push(w);
       }
-      // Арки колёс снаружи.
-      for (const side of [-1, 1]) {
-        const arch = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.4, 1.3), this.m.dark);
-        arch.position.set(side * (HW + 0.01), 1.0, z);
-        this.placeholder.add(arch);
-      }
+      // Арки колёс снаружи (сливаются в один меш ниже).
+      for (const side of [-1, 1]) this.archBatch.add(new THREE.BoxGeometry(0.06, 0.4, 1.3), matrix(side * (HW + 0.01), 1.0, z), this.m.dark);
     }
+    this.placeholder.add(this.archBatch.build({ name: 'bus-arches' }));
   }
 
   buildPeople() {
     const r = this.r;
-    this.driver = new Human({ name: 'driver', shirt: '#7da6d1', pants: '#2c2c34', hair: '#3b2a20', sitHeight: 0.5 });
+    // Люди под крышей автобуса тени не отбрасывают (их всё равно не видно) — экономия отрисовки.
+    this.driver = new Human({ name: 'driver', shirt: '#7da6d1', pants: '#2c2c34', hair: '#3b2a20', sitHeight: 0.5, shadows: false });
     this.driver.root.position.set(-0.72, FY, -4.85);
     this.driver.setMode('sit', true);
     this.driver.armL.sh.rotation.x = 0.9;
@@ -339,7 +335,7 @@ export class Bus {
     for (const i of picks) {
       const seat = free[i % free.length];
       if (seat.taken) continue;
-      const p = new Human({ name: 'passenger', shirt: r.pick(shirts), pants: r.pick(['#2d2d36', '#3b4a63', '#4a3b2f']), hair: r.pick(['#1e140d', '#4a3020', '#888', '#b8913f']), height: r.range(1.6, 1.82), hairStyle: r() < 0.4 ? 'long' : 'short', sitHeight: 0.5 });
+      const p = new Human({ name: 'passenger', shirt: r.pick(shirts), pants: r.pick(['#2d2d36', '#3b4a63', '#4a3b2f']), hair: r.pick(['#1e140d', '#4a3020', '#888', '#b8913f']), height: r.range(1.6, 1.82), hairStyle: r() < 0.4 ? 'long' : 'short', sitHeight: 0.5, shadows: false });
       p.root.position.copy(seat.pos);
       p.root.rotation.y = seat.yaw;
       p.setMode('sit', true);

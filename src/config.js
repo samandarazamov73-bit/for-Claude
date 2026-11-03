@@ -1,5 +1,6 @@
 // Все настройки игры в одном месте. Меняй числа здесь — код трогать не нужно.
-export const CONFIG = {
+// Это обычный скрипт (не модуль): его можно править без пересборки игры.
+window.GAME_CONFIG = {
   rideMinutes: 4,          // длина поездки по умолчанию (в меню: 3 / 4 / 5)
 
   bus: {
@@ -28,6 +29,14 @@ export const CONFIG = {
   },
 
   camera: { fov: 70, sensitivity: 0.0022 },
-  graphics: { shadows: true, pixelRatioMax: 1.5, shadowMapSize: 2048 },
+  graphics: {
+    shadows: true,
+    quality: 'auto',       // auto — разрешение само подстраивается под 60 FPS; high; battery
+    maxFps: 60,            // выше 60 нет смысла: на экранах 120 Гц это вдвое больше нагрева
+    batteryFps: 30,
+    pixelRatioMax: 1.5,    // Retina даёт 2.0 — это в 1.8 раза больше пикселей ради мелочей
+    pixelRatioMin: 0.75,
+    shadowMapSize: 2048,
+  },
   fastForward: 8,          // множитель времени при зажатой F
 };

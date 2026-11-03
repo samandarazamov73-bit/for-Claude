@@ -2,8 +2,7 @@
 // каждую часть можно заменить моделью из assets/.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { CONFIG } from './config.js';
-import { STORY } from './story.js';
+import { CONFIG, STORY } from './data.js';
 import { Batcher, boxUV, buildingParts, dashes, matrix, ribbon } from './geom.js';
 import * as TX from './textures.js';
 import { rng } from './utils.js';
@@ -18,27 +17,42 @@ export function createMaterials(textures = {}) {
     if (repeat !== 1) t.repeat.set(repeat, repeat);
     return t;
   };
+  // Матовые поверхности города — Ламберт: на матовом выглядит так же, как PBR,
+  // но заметно дешевле для видеокарты (асфальт, фасады и трава занимают почти весь экран).
+  // Металл, стекло и вода остаются PBR — там нужен блеск.
+  const L = (opts) => new THREE.MeshLambertMaterial(opts);
   return {
-    asphalt: new THREE.MeshStandardMaterial({ map: tex('road', TX.asphalt), roughness: 0.95 }),
-    paving: new THREE.MeshStandardMaterial({ map: tex('sidewalk', TX.paving), roughness: 0.9 }),
-    curb: new THREE.MeshStandardMaterial({ map: tex('concrete', TX.concrete), roughness: 0.9 }),
-    grass: new THREE.MeshStandardMaterial({ map: tex('grass', TX.grass), roughness: 1 }),
-    facades: [0, 1, 2].map((v) => new THREE.MeshStandardMaterial({
-      map: textures[`facade${v}`] || TX.facade(v), vertexColors: true, roughness: 0.85,
-    })),
-    roof: new THREE.MeshStandardMaterial({ color: 0x6b6e72, roughness: 0.95 }),
-    white: new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }),
-    yellow: new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.6 }),
+    asphalt: L({ map: tex('road', TX.asphalt) }),
+    paving: L({ map: tex('sidewalk', TX.paving) }),
+    curb: L({ map: tex('concrete', TX.concrete) }),
+    grass: L({ map: tex('grass', TX.grass) }),
+    facades: [0, 1, 2].map((v) => L({ map: textures[`facade${v}`] || TX.facade(v), vertexColors: true })),
+    roof: L({ color: 0x6b6e72 }),
+    white: L({ color: 0xf2f2f2 }),
+    yellow: L({ color: 0xf2c230 }),
     metal: new THREE.MeshStandardMaterial({ color: 0x7c848c, roughness: 0.45, metalness: 0.6 }),
     darkMetal: new THREE.MeshStandardMaterial({ color: 0x33383d, roughness: 0.5, metalness: 0.4 }),
     glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.35, depthWrite: false }),
-    wood: new THREE.MeshStandardMaterial({ color: 0x8a5a35, roughness: 0.8 }),
-    trunk: new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 }),
-    leaves: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, vertexColors: false }),
-    color: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, vertexColors: true }),
+    wood: L({ color: 0x8a5a35 }),
+    trunk: L({ color: 0x6b4a2f }),
+    leaves: L({ color: 0xffffff }),
+    color: L({ color: 0xffffff, vertexColors: true }),
     water: new THREE.MeshStandardMaterial({ color: 0x4f86a8, roughness: 0.1, metalness: 0.2 }),
-    hospitalWall: new THREE.MeshStandardMaterial({ map: textures.hospitalFacade || TX.facade(1), vertexColors: true, roughness: 0.7 }),
+    hospitalWall: L({ map: textures.hospitalFacade || TX.facade(1), vertexColors: true }),
   };
+}
+
+// Делит точки на ячейки сетки: каждая ячейка — свой InstancedMesh, и камера
+// отсекает целые ячейки за спиной/в тумане (один большой InstancedMesh рисовался бы весь).
+function byCell(items, getPos, size = 200) {
+  const cells = new Map();
+  for (const it of items) {
+    const p = getPos(it);
+    const key = `${Math.floor(p.x / size)},${Math.floor(p.z / size)}`;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(it);
+  }
+  return [...cells.values()];
 }
 
 export class World {
@@ -166,7 +180,7 @@ export class World {
   buildBuildings() {
     const rt = this.route, r = this.r, m = this.m;
     const palette = ['#e8d8b8', '#e9c9bb', '#efe2a6', '#d9dcde', '#bfd5e2', '#c9876a', '#f4f1ea', '#d6c6e0', '#c8dcc0'];
-    const chunk = 260;
+    const chunk = 130; // меньше кусок — точнее отсечение камерой и тенями
     let batch = new Batcher();
     let chunkEnd = chunk;
     const flush = () => { this.group.add(batch.build({ name: 'buildings' })); batch = new Batcher(); };
@@ -230,9 +244,20 @@ export class World {
   // Деревья — инстансами: тысячи штук почти бесплатно.
   addTrees(points, parent = this.group) {
     if (!points.length) return;
+    if (points.length > 24) {
+      for (const cell of byCell(points, (p) => p)) this.addTreeCell(cell, parent);
+      return;
+    }
+    this.addTreeCell(points, parent);
+  }
+
+  addTreeCell(points, parent) {
     const r = this.r;
-    const trunkGeo = new THREE.CylinderGeometry(0.14, 0.2, 3, 7).translate(0, 1.5, 0);
-    const crownGeo = new THREE.IcosahedronGeometry(1.9, 1).translate(0, 4.1, 0);
+    this.treeGeo ||= {
+      trunk: new THREE.CylinderGeometry(0.14, 0.2, 3, 7).translate(0, 1.5, 0),
+      crown: new THREE.IcosahedronGeometry(1.9, 1).translate(0, 4.1, 0),
+    };
+    const { trunk: trunkGeo, crown: crownGeo } = this.treeGeo;
     const trunks = new THREE.InstancedMesh(trunkGeo, this.m.trunk, points.length);
     const crowns = new THREE.InstancedMesh(crownGeo, this.m.leaves, points.length);
     const greens = ['#4f7f35', '#5b8f3c', '#3f6e2c', '#6a9a45', '#557d2f'];
@@ -248,10 +273,20 @@ export class World {
 
   addLamps(list, parent = this.group) {
     if (!list.length) return;
-    const pole = new THREE.CylinderGeometry(0.07, 0.1, 7, 8).translate(0, 3.5, 0);
-    const arm = new THREE.BoxGeometry(0.08, 0.08, 1.6).translate(0, 6.9, -0.75);
-    const head = new THREE.BoxGeometry(0.35, 0.14, 0.6).translate(0, 6.85, -1.5);
-    const geo = mergeGeometries([pole.toNonIndexed(), arm.toNonIndexed(), head.toNonIndexed()], false);
+    if (list.length > 12) {
+      for (const cell of byCell(list, (l) => l.pos)) this.addLampCell(cell, parent);
+      return;
+    }
+    this.addLampCell(list, parent);
+  }
+
+  addLampCell(list, parent) {
+    this.lampGeo ||= mergeGeometries([
+      new THREE.CylinderGeometry(0.07, 0.1, 7, 8).translate(0, 3.5, 0).toNonIndexed(),
+      new THREE.BoxGeometry(0.08, 0.08, 1.6).translate(0, 6.9, -0.75).toNonIndexed(),
+      new THREE.BoxGeometry(0.35, 0.14, 0.6).translate(0, 6.85, -1.5).toNonIndexed(),
+    ], false);
+    const geo = this.lampGeo;
     const im = new THREE.InstancedMesh(geo, this.m.darkMetal, list.length);
     list.forEach((l, i) => im.setMatrixAt(i, matrix(l.pos.x, 0.15, l.pos.z, 0, l.yaw, 0)));
     im.castShadow = true;

@@ -1,7 +1,6 @@
 // Главный файл: сцена, фазы игры (меню → поездка → прибытие → улица → конец), управление.
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { STORY } from './story.js';
+import { CONFIG, STORY } from './data.js';
 import { BusDriver, makeSpeedPlan, routeForDuration } from './route.js';
 import { World, createMaterials } from './world.js';
 import { Bus } from './bus.js';
@@ -32,7 +31,8 @@ const scene = new THREE.Scene();
 const HORIZON = new THREE.Color('#cfe0ee');
 scene.background = HORIZON;
 scene.fog = new THREE.Fog(HORIZON, 90, 620);
-const camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, 0.05, 2500);
+// Дальняя плоскость чуть дальше тумана: всё, что за туманом, не рисуется вовсе.
+const camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, 0.05, 700);
 scene.add(camera);
 
 const sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 32, 16), skyMaterial());
@@ -50,6 +50,7 @@ sun.shadow.normalBias = 0.03;
 scene.add(sun, sun.target);
 
 window.addEventListener('resize', () => {
+  if (typeof perf !== 'undefined') perf.renderedPaused = false;
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -282,7 +283,7 @@ async function exchangePassengers(ev) {
   if (!seat) return;
   seat.taken = true;
   const r = Math.random;
-  const p = new Human({ name: 'passenger', shirt: ['#7a4b8c', '#3c7a6a', '#b5622c', '#4a5d8a'][Math.floor(r() * 4)], pants: '#2e2e38', hair: r() < 0.5 ? '#2a1d14' : '#7d7d7d', hairStyle: r() < 0.5 ? 'long' : 'short', height: 1.6 + r() * 0.2, sitHeight: 0.5 });
+  const p = new Human({ name: 'passenger', shirt: ['#7a4b8c', '#3c7a6a', '#b5622c', '#4a5d8a'][Math.floor(r() * 4)], pants: '#2e2e38', hair: r() < 0.5 ? '#2a1d14' : '#7d7d7d', hairStyle: r() < 0.5 ? 'long' : 'short', height: 1.6 + r() * 0.2, sitHeight: 0.5, shadows: false });
   p.root.position.set(HW + 2.4, 0.15, -6.5);
   bus.body.add(p.root);
   await walkPath(p, [V(HW + 0.9, 0.15, -5.0), V(HW - 0.3, FY, -5.0), V(0.1, FY, -4.0), V(0.1, FY, seat.pos.z), V(seat.pos.x, FY, seat.pos.z)], 1.0);
@@ -406,6 +407,10 @@ function updateMomInBus(dt) {
 
 function updateInteraction() {
   if (G.cameraMode !== 'fp' || G.phase !== 'ride') { ui.prompt(null); G.target = null; return; }
+  // Взгляд проверяем 10 раз в секунду, а не каждый кадр — глазу незаметно.
+  G.rayTimer = (G.rayTimer || 0) - 1;
+  if (G.rayTimer > 0) return;
+  G.rayTimer = Math.max(1, Math.round(G.fps / 10));
   // Автобус за кадр сдвигается на полметра: обновляем координаты салона и камеры,
   // иначе луч летит из нового места в кнопку, оставшуюся в прошлом кадре.
   G.bus.root.updateMatrixWorld(true);
@@ -428,6 +433,8 @@ function updateInteraction() {
 
 function interact() {
   if (G.phase !== 'ride') return;
+  G.rayTimer = 0;
+  updateInteraction(); // свежая проверка, куда смотрим, в момент нажатия
   if (G.target === 'mom') talkToMom();
   else if (G.target === 'button') pressStopButton(false);
 }
@@ -791,12 +798,34 @@ for (const id of ['opt-volume', 'pause-volume']) {
   });
 }
 document.getElementById('opt-sens').addEventListener('input', (e) => { G.sens = Number(e.target.value); });
+document.getElementById('opt-quality').addEventListener('change', (e) => applyQuality(e.target.value));
+
+// Настройки меню запоминаются между запусками (если браузер разрешает хранилище).
+const SETTINGS = ['opt-duration', 'opt-quality', 'opt-volume', 'opt-sens', 'opt-shadows'];
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('doroga-settings') || '{}');
+    for (const id of SETTINGS) {
+      const el = document.getElementById(id);
+      if (!(id in saved)) continue;
+      if (el.type === 'checkbox') el.checked = saved[id]; else el.value = saved[id];
+      el.dispatchEvent(new Event(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input'));
+    }
+  } catch { /* хранилище недоступно — настройки по умолчанию */ }
+}
+function saveSettings() {
+  try {
+    const out = {};
+    for (const id of SETTINGS) { const el = document.getElementById(id); out[id] = el.type === 'checkbox' ? el.checked : el.value; }
+    localStorage.setItem('doroga-settings', JSON.stringify(out));
+  } catch { /* не страшно */ }
+}
+for (const id of SETTINGS) document.getElementById(id).addEventListener('change', saveSettings);
 document.getElementById('opt-shadows').addEventListener('change', (e) => {
   renderer.shadowMap.enabled = e.target.checked;
   scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); });
 });
 const durationSelect = document.getElementById('opt-duration');
-if (params.get('minutes')) durationSelect.value = params.get('minutes');
 
 document.getElementById('btn-start').addEventListener('click', async () => {
   audio.init(Promise.resolve(assets.sounds));
@@ -891,14 +920,92 @@ function step(dt) {
   if (blinkOn !== G.lastBlink) { G.lastBlink = blinkOn; if (G.bus?.indicator && G.phase === 'ride') audio.tick(); }
 }
 
+// ---------------------------------------------------------------------------
+// Экономия: ограничение FPS, подстройка разрешения, режим «Экономия батареи».
+// ---------------------------------------------------------------------------
+const perf = {
+  quality: CONFIG.graphics.quality,
+  ratio: Math.min(window.devicePixelRatio || 1, CONFIG.graphics.pixelRatioMax),
+  avg: 1000 / 60,       // сглаженный интервал между кадрами, мс
+  slow: 0, fast: 0,     // сколько секунд подряд не успеваем / есть запас
+  renderedPaused: false,
+};
+
+function maxRatio() {
+  const dpr = window.devicePixelRatio || 1;
+  return perf.quality === 'battery' ? Math.min(dpr, 1) : Math.min(dpr, CONFIG.graphics.pixelRatioMax);
+}
+
+function setRatio(r) {
+  perf.ratio = clamp(r, CONFIG.graphics.pixelRatioMin, maxRatio());
+  renderer.setPixelRatio(perf.ratio);
+}
+
+function applyQuality(q) {
+  perf.quality = q;
+  const battery = q === 'battery';
+  const size = battery ? 1024 : CONFIG.graphics.shadowMapSize;
+  if (sun.shadow.mapSize.x !== size) {
+    sun.shadow.mapSize.set(size, size);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+  const type = battery ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  if (renderer.shadowMap.type !== type) {
+    renderer.shadowMap.type = type;
+    scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); });
+  }
+  setRatio(maxRatio());
+  perf.slow = perf.fast = 0;
+}
+
+function fpsLimit() {
+  if (perf.quality === 'battery') return CONFIG.graphics.batteryFps;
+  if (G.phase === 'menu' || G.phase === 'end' || G.paused) return 30;
+  return CONFIG.graphics.maxFps;
+}
+
+// Авто-качество: если кадры не успевают (меньше ~50 FPS) 1.5 с подряд — чуть снижаем
+// разрешение; если 5 с подряд с запасом — возвращаем. Картинка остаётся чёткой, пока
+// видеокарта справляется, и не греет ноутбук, когда не справляется.
+function adaptResolution(interval) {
+  perf.avg = lerp(perf.avg, interval, 0.1);
+  if (perf.quality !== 'auto' || G.phase === 'loading') return;
+  const target = 1000 / fpsLimit();
+  const sec = interval / 1000;
+  if (perf.avg > target * 1.22) { perf.slow += sec; perf.fast = 0; } else if (perf.avg < target * 1.06) { perf.fast += sec; perf.slow = 0; } else { perf.slow = perf.fast = 0; }
+  if (perf.slow > 1.5 && perf.ratio > CONFIG.graphics.pixelRatioMin) { setRatio(perf.ratio - 0.15); perf.slow = 0; }
+  // Разрешение уже минимальное, а кадры не успевают — облегчаем тени (один раз).
+  if (perf.slow > 3 && perf.ratio <= CONFIG.graphics.pixelRatioMin + 1e-6 && sun.shadow.mapSize.x > 1024) {
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+    perf.slow = 0;
+  }
+  if (perf.fast > 5 && perf.ratio < maxRatio()) { setRatio(perf.ratio + 0.1); perf.fast = 0; }
+}
+
+let lastRender = 0;
 function frame(now) {
   requestAnimationFrame(frame);
+  if (G.phase === 'loading' || !G.root) { last = now; return; }
+  // Не чаще лимита: на экране 120 Гц пропускаем каждый второй вызов.
+  const minInterval = 1000 / fpsLimit() - 2;
+  if (now - lastRender < minInterval) return;
+  const interval = now - lastRender;
+  lastRender = now;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   G.fps = lerp(G.fps, 1 / Math.max(dt, 1e-3), 0.05);
-  if (G.phase === 'loading' || !G.root) return;
-  if (!G.paused) step(dt);
+  // На паузе картинка не меняется — один кадр и ждём (видеокарта отдыхает).
+  if (G.paused) {
+    if (!perf.renderedPaused) { render(0); perf.renderedPaused = true; }
+    return;
+  }
+  perf.renderedPaused = false;
+  step(dt);
   render(dt);
+  if (interval < 1000) adaptResolution(interval); // дольше секунды — вкладка была скрыта, не считаем
 }
 
 // Для автотестов (?debug=1): прокрутить игру на seconds секунд без отрисовки каждого кадра.
@@ -912,6 +1019,24 @@ if (debug) {
   window.__jump = (where) => jumpTo(where);
   window.THREE = THREE;
   window.__camera = camera;
+  window.__renderer = renderer;
+  window.__scene = scene;
+  window.__sun = sun;
+  window.__perf = perf;
+  // Замер: среднее время кадра (с ожиданием видеокарты) и нагрузка сцены.
+  window.__bench = (frames = 30) => {
+    const gl = renderer.getContext();
+    const px = new Uint8Array(4);
+    const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); // ждёт конца отрисовки
+    render(0); sync(); render(0); sync();
+    const t0 = performance.now();
+    for (let i = 0; i < frames; i++) { render(0); sync(); }
+    const ms = (performance.now() - t0) / frames;
+    const info = renderer.info.render;
+    const s0 = performance.now();
+    for (let i = 0; i < 40; i++) step(0.05);
+    return { ms: +ms.toFixed(2), stepMs: +((performance.now() - s0) / 40).toFixed(3), calls: info.calls, triangles: info.triangles, pixelRatio: renderer.getPixelRatio(), programs: renderer.info.programs.length, geometries: renderer.info.memory.geometries };
+  };
   // Навести взгляд (вид из коляски) на маму или кнопку.
   window.__aimAt = (what) => {
     const target = what === 'mom' ? headPos(G.mom) : G.bus.stopButton.getWorldPosition(new THREE.Vector3());
@@ -939,10 +1064,19 @@ function render(dt) {
 // Запуск
 // ---------------------------------------------------------------------------
 async function boot() {
-  if (location.protocol === 'file:') return;
-  const total = Object.values(MANIFEST).reduce((n, group) => n + Object.keys(group).length, 0);
-  let done = 0;
-  assets = await loadAssets((label, kind, ok) => ui.loadingItem(label, ok, ++done, total));
+  loadSettings();
+  if (params.get('minutes')) durationSelect.value = params.get('minutes');
+  applyQuality(document.getElementById('opt-quality').value);
+  if (location.protocol === 'file:') {
+    // Открыли двойным щелчком: браузер не даёт читать файлы с диска, поэтому свои
+    // модели/звуки подключаются только при запуске через start.command / start.bat.
+    assets = { models: {}, textures: {}, sounds: {}, report: [] };
+    ui.loadingItem('Заглушки (свои модели — через start.command)', false, 1, 1);
+  } else {
+    const total = Object.values(MANIFEST).reduce((n, group) => n + Object.keys(group).length, 0);
+    let done = 0;
+    assets = await loadAssets((label, kind, ok) => ui.loadingItem(label, ok, ++done, total));
+  }
   G.assetReport = assets.report;
   buildGame(Number(durationSelect.value) || CONFIG.rideMinutes);
   ui.show('loading', false);

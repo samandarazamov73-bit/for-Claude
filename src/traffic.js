@@ -1,62 +1,55 @@
 // Машины и пешеходы. Двигаются вдоль маршрута, держат дистанцию, стоят на красный.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { CONFIG } from './config.js';
-import { matrix } from './geom.js';
+import { CONFIG } from './data.js';
+import { Batcher, matrix } from './geom.js';
 import { clamp, rng } from './utils.js';
 
 const CAR_COLORS = ['#c0392b', '#2c3e50', '#ecf0f1', '#7f8c8d', '#2980b9', '#16a085', '#f39c12', '#1b1b1b', '#8e44ad', '#d35400', '#bdc3c7'];
-const shared = {};
+// Оптимизация: машина — ОДИН меш (кузов, стёкла, колёса, фары слиты, цвет в вершинах),
+// материал общий для всех машин. Было 6 мешей на машину.
+let CAR_MATERIAL = null;
+const carMaterial = () => CAR_MATERIAL || (CAR_MATERIAL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.25 }));
+const carCache = new Map();
 
-function sharedParts() {
-  if (shared.ready) return shared;
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x1d2a33, roughness: 0.1, metalness: 0.3 });
-  const tireMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
-  const lightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2cc, emissiveIntensity: 0.6 });
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0x8a1010, emissive: 0x600000 });
-  const wheels = [];
-  for (const x of [-0.82, 0.82]) for (const z of [-1.35, 1.35]) wheels.push(new THREE.CylinderGeometry(0.33, 0.33, 0.24, 14).rotateZ(Math.PI / 2).translate(x, 0.33, z).toNonIndexed());
-  Object.assign(shared, {
-    ready: true,
-    glassMat, tireMat, lightMat, tailMat,
-    wheels: mergeGeometries(wheels, false),
-    front: new THREE.BoxGeometry(1.5, 0.12, 0.05).translate(0, 0.72, -2.16),
-    tail: new THREE.BoxGeometry(1.5, 0.12, 0.05).translate(0, 0.78, 2.16),
-  });
-  return shared;
+function carGeometry(color, type) {
+  const key = `${color}|${type}`;
+  if (carCache.has(key)) return carCache.get(key);
+  const b = new Batcher();
+  const m = carMaterial();
+  const glass = '#1d2a33', tire = '#151515', light = '#fff6dc', tail = '#a01818';
+  if (type === 'van' || type === 'ambulance') {
+    b.add(new THREE.BoxGeometry(1.95, 1.75, 4.8).translate(0, 1.3, 0), null, m, color);
+    b.add(new THREE.BoxGeometry(1.97, 0.55, 1.1).translate(0, 1.7, -1.75), null, m, glass);
+    if (type === 'ambulance') {
+      b.add(new THREE.BoxGeometry(1.98, 0.22, 4.82).translate(0, 1.05, 0), null, m, '#d32f2f');
+      b.add(new THREE.BoxGeometry(0.9, 0.12, 0.3).translate(0, 2.24, -1.6), null, m, '#2f5bff');
+    }
+  } else {
+    const len = type === 'hatch' ? 3.9 : 4.4, z = type === 'hatch' ? 0.35 : 0.15;
+    b.add(new THREE.BoxGeometry(1.8, 0.7, len).translate(0, 0.62, 0), null, m, color);
+    b.add(new THREE.BoxGeometry(1.62, 0.6, len * 0.5).translate(0, 1.25, z), null, m, glass);
+    b.add(new THREE.BoxGeometry(1.64, 0.06, len * 0.48).translate(0, 1.57, z), null, m, color);
+  }
+  for (const x of [-0.82, 0.82]) for (const zz of [-1.35, 1.35]) b.add(new THREE.CylinderGeometry(0.33, 0.33, 0.24, 12).rotateZ(Math.PI / 2).translate(x, 0.33, zz), null, m, tire);
+  b.add(new THREE.BoxGeometry(1.5, 0.12, 0.05).translate(0, 0.72, -2.16), null, m, light);
+  b.add(new THREE.BoxGeometry(1.5, 0.12, 0.05).translate(0, 0.78, 2.16), null, m, tail);
+  const geo = b.build().children[0].geometry;
+  carCache.set(key, geo);
+  return geo;
 }
 
 // Машина-заглушка. type: sedan | hatch | van | ambulance. Перед — −Z.
 export function makeCar(color, type = 'sedan') {
-  const S = sharedParts();
   const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.35 });
-  const add = (geo, m, castShadow = true) => {
-    const mesh = new THREE.Mesh(geo, m);
-    mesh.castShadow = castShadow;
-    mesh.receiveShadow = true;
-    g.add(mesh);
-    return mesh;
-  };
-  if (type === 'van' || type === 'ambulance') {
-    add(new THREE.BoxGeometry(1.95, 1.75, 4.8).translate(0, 1.3, 0), paint);
-    add(new THREE.BoxGeometry(1.97, 0.55, 1.1).translate(0, 1.7, -1.75), S.glassMat, false);
-    if (type === 'ambulance') {
-      const red = new THREE.MeshStandardMaterial({ color: 0xd32f2f });
-      add(new THREE.BoxGeometry(1.98, 0.22, 4.82).translate(0, 1.05, 0), red, false);
-      add(new THREE.BoxGeometry(0.9, 0.12, 0.3).translate(0, 2.24, -1.6), new THREE.MeshStandardMaterial({ color: 0x1e3cff, emissive: 0x1e3cff, emissiveIntensity: 1.5 }), false);
-    }
-  } else {
-    const len = type === 'hatch' ? 3.9 : 4.4;
-    add(new THREE.BoxGeometry(1.8, 0.7, len).translate(0, 0.62, 0), paint);
-    add(new THREE.BoxGeometry(1.62, 0.6, len * 0.5).translate(0, 1.25, type === 'hatch' ? 0.35 : 0.15), S.glassMat);
-    add(new THREE.BoxGeometry(1.64, 0.06, len * 0.48).translate(0, 1.57, type === 'hatch' ? 0.35 : 0.15), paint, false);
-  }
-  add(S.wheels, S.tireMat);
-  add(S.front, S.lightMat, false);
-  add(S.tail, S.tailMat, false);
+  const mesh = new THREE.Mesh(carGeometry(color, type), carMaterial());
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  g.add(mesh);
   return g;
 }
+
+let PED_MATERIAL = null;
+const pedMaterial = () => PED_MATERIAL || (PED_MATERIAL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
 
 export class Traffic {
   constructor(scene, world, route) {
@@ -96,10 +89,10 @@ export class Traffic {
     const pants = new THREE.MeshStandardMaterial({ color: r.pick(['#2b2b33', '#3a4a66', '#5a4632']), roughness: 0.9 });
     const skin = new THREE.MeshStandardMaterial({ color: r.pick(['#e2b28f', '#c68e64', '#8d5a3b', '#f0c9a8']), roughness: 0.8 });
     const h = r.range(0.92, 1.08);
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.4, 3, 8), shirt);
-    torso.position.y = 1.2 * h;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), skin);
-    head.position.y = 1.62 * h;
+    const upper = new Batcher();
+    upper.add(new THREE.CapsuleGeometry(0.17, 0.4, 3, 8), matrix(0, 1.2 * h, 0), pedMaterial(), shirt.color);
+    upper.add(new THREE.SphereGeometry(0.11, 10, 8), matrix(0, 1.62 * h, 0), pedMaterial(), skin.color);
+    const body = upper.build().children[0];
     const legs = [];
     for (const x of [-0.09, 0.09]) {
       const pivot = new THREE.Group();
@@ -110,7 +103,7 @@ export class Traffic {
       g.add(pivot);
       legs.push(pivot);
     }
-    for (const m of [torso, head]) { m.castShadow = true; g.add(m); }
+    g.add(body);
     this.group.add(g);
     this.peds.push({ g, legs, s, side, lat: side * r.range(8.1, 10.2), dir: r() < 0.5 ? 1 : -1, v: r.range(1.0, 1.5), phase: r() * 6 });
   }

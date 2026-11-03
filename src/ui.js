@@ -1,6 +1,6 @@
 // Интерфейс поверх 3D: субтитры, выбор ответа, подсказки, затемнение, карточки.
 import { tween } from './tween.js';
-import { STORY } from './story.js';
+import { STORY } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 

@@ -6,7 +6,8 @@
 //   { pause: 1.5 }                           — пауза в секундах
 //   { action: 'stopButtonTask' }             — игровое действие (см. main.js)
 
-export const STORY = {
+// Это обычный скрипт (не модуль): его можно править без пересборки игры.
+window.STORY = {
   title: 'Дорога',
   subtitle: 'Пролог',
   routeNumber: '12',

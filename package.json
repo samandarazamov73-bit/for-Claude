@@ -1,0 +1,12 @@
+{
+  "name": "doroga",
+  "private": true,
+  "description": "Дорога — пролог. Сборка game.js из src/: npm install, затем npm run build",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --minify --target=safari14,chrome90,firefox90 --legal-comments=eof --outfile=game.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2",
+    "three": "0.160.0"
+  }
+}

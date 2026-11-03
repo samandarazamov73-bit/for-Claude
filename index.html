@@ -6,31 +6,10 @@
 <title>Дорога — пролог</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d5fa8'/%3E%3Ccircle cx='13' cy='8' r='3' fill='white'/%3E%3Cpath d='M12 12v7h7l3 6' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='14' cy='22' r='6' stroke='white' stroke-width='2.2' fill='none'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
-<script type="importmap">
-{
-  "imports": {
-    "three": "./vendor/three/three.module.min.js",
-    "three/addons/": "./vendor/three/addons/"
-  }
-}
-</script>
 </head>
 <body>
 <canvas id="scene"></canvas>
 
-<!-- Открыли файл двойным щелчком: модули и модели так не грузятся -->
-<div id="file-warning" class="overlay hidden">
-  <div class="panel">
-    <h2>Игру нужно запускать через локальный сервер</h2>
-    <p>Браузер не даёт открытому с диска файлу загружать 3D-модели и модули.</p>
-    <p><b>Windows:</b> дважды щёлкни <code>start.bat</code>.<br>
-       <b>Mac / Linux:</b> запусти <code>./start.sh</code>.<br>
-       Потом открой <code>http://localhost:8080</code>.</p>
-  </div>
-</div>
-<script>
-  if (location.protocol === 'file:') document.getElementById('file-warning').classList.remove('hidden');
-</script>
 
 <div id="loading" class="overlay">
   <div class="panel">
@@ -51,6 +30,13 @@
           <option value="3">3 минуты</option>
           <option value="4" selected>4 минуты</option>
           <option value="5">5 минут</option>
+        </select>
+      </label>
+      <label>Графика
+        <select id="opt-quality">
+          <option value="auto" selected>Авто (рекомендуется)</option>
+          <option value="high">Высокая</option>
+          <option value="battery">Экономия батареи</option>
         </select>
       </label>
       <label>Громкость <input id="opt-volume" type="range" min="0" max="1" step="0.05" value="0.8"></label>
@@ -108,6 +94,10 @@
 
 <div id="debug" class="hidden"></div>
 
-<script type="module" src="./src/main.js"></script>
+<!-- Настройки и сценарий — обычные файлы, их можно править блокнотом. -->
+<script src="src/config.js"></script>
+<script src="src/story.js"></script>
+<!-- Вся игра одним файлом: работает и при открытии двойным щелчком, без сервера. -->
+<script src="game.js"></script>
 </body>
 </html>

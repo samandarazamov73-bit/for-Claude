@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Дорога — разработка</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d5fa8'/%3E%3Ccircle cx='13' cy='8' r='3' fill='white'/%3E%3Cpath d='M12 12v7h7l3 6' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='14' cy='22' r='6' stroke='white' stroke-width='2.2' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+
+<div id="loading" class="overlay">
+  <div class="panel">
+    <h2>Загрузка…</h2>
+    <div id="loading-bar"><div id="loading-fill"></div></div>
+    <ul id="loading-list"></ul>
+  </div>
+</div>
+
+<div id="menu" class="overlay hidden">
+  <div class="panel menu-panel">
+    <h1 id="menu-title">Дорога</h1>
+    <p id="menu-subtitle" class="muted">Пролог</p>
+    <button id="btn-start" class="primary">Начать</button>
+    <div class="settings">
+      <label>Длина поездки
+        <select id="opt-duration">
+          <option value="3">3 минуты</option>
+          <option value="4" selected>4 минуты</option>
+          <option value="5">5 минут</option>
+        </select>
+      </label>
+      <label>Графика
+        <select id="opt-quality">
+          <option value="auto" selected>Авто (рекомендуется)</option>
+          <option value="high">Высокая</option>
+          <option value="battery">Экономия батареи</option>
+        </select>
+      </label>
+      <label>Громкость <input id="opt-volume" type="range" min="0" max="1" step="0.05" value="0.8"></label>
+      <label>Чувствительность мыши <input id="opt-sens" type="range" min="0.4" max="2.5" step="0.1" value="1"></label>
+      <label class="check"><input id="opt-shadows" type="checkbox" checked> Тени</label>
+    </div>
+    <details class="controls">
+      <summary>Управление</summary>
+      <table>
+        <tr><td>Мышь</td><td>осмотреться (щёлкни по экрану, чтобы захватить мышь)</td></tr>
+        <tr><td>E / ЛКМ</td><td>действие: поговорить с мамой, нажать кнопку</td></tr>
+        <tr><td>1 2 3</td><td>выбрать ответ</td></tr>
+        <tr><td>Enter</td><td>пропустить реплику</td></tr>
+        <tr><td>V</td><td>вид: из коляски / снаружи автобуса</td></tr>
+        <tr><td>F (держать)</td><td>перемотка поездки ×8</td></tr>
+        <tr><td>W A S D</td><td>ехать на коляске (на улице)</td></tr>
+        <tr><td>Shift</td><td>быстрый режим коляски</td></tr>
+        <tr><td>M</td><td>звук вкл/выкл</td></tr>
+        <tr><td>Esc / P</td><td>пауза</td></tr>
+      </table>
+    </details>
+  </div>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="objective"></div>
+  <div id="route-hud"><div id="route-line"></div><div id="route-stops"></div><div id="route-bus"></div></div>
+  <div id="crosshair"></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="ff-indicator" class="hidden">⏩ ×8</div>
+  <div id="choices" class="hidden"></div>
+  <div id="subtitle" class="hidden"><span id="sub-speaker"></span><span id="sub-text"></span></div>
+  <div id="lock-hint" class="hidden">Щёлкни по экрану, чтобы осмотреться мышью</div>
+</div>
+
+<div id="title-card" class="hidden"><div id="tc-title"></div><div id="tc-sub"></div></div>
+<div id="fade"></div>
+
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>Пауза</h2>
+    <button id="btn-resume" class="primary">Продолжить</button>
+    <button id="btn-restart">Начать заново</button>
+    <label>Громкость <input id="pause-volume" type="range" min="0" max="1" step="0.05" value="0.8"></label>
+  </div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <div class="panel">
+    <h2 id="end-title">Конец пролога</h2>
+    <p id="end-text" class="muted">Продолжение следует…</p>
+    <button id="btn-again" class="primary">Начать заново</button>
+  </div>
+</div>
+
+<div id="debug" class="hidden"></div>
+
+<script src="src/config.js"></script>
+<script src="src/story.js"></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
