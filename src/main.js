@@ -468,8 +468,9 @@ async function runArrival() {
 
   audio.rampMotor(2.2);
   await tween({ duration: 2.2, onUpdate: (k) => bus.setRamp(k) });
-  await walkPath(mom, [V(HW - 0.15, FY, 1.25), V(HW + 0.5, 0.2, 1.35), V(HW + 1.7, 0.15, 1.7), V(HW + 2.5, 0.15, 1.9)], 1.0, false);
-  mom.root.rotation.y = Math.atan2(-(HW - (HW + 2.5)), -(0.5 - 1.9));
+  // Мама выходит и ждёт сбоку от пандуса (ближе к передней двери), чтобы не закрывать выезд.
+  await walkPath(mom, [V(HW - 0.15, FY, 1.1), V(HW + 0.5, 0.2, 0.9), V(HW + 1.3, 0.15, 0.0), V(HW + 1.9, 0.15, -0.9)], 1.0, false);
+  mom.root.rotation.y = Math.atan2(-((HW + 0.6) - (HW + 1.9)), -(0.5 - -0.9));
   mom.lookTarget = headPos(hero.hero);
   G.dialogue.play([['mom', 'Осторожно, пандус…']]);
 
@@ -521,7 +522,7 @@ function enterOutside(smooth) {
     H.group.add(mom.root);
     hero.root.position.set(5.62 + CONFIG.bus.width / 2 + 2.0, 0.15, 0.5);
     hero.root.rotation.set(0, -Math.PI / 2, 0);
-    mom.root.position.set(5.62 + CONFIG.bus.width / 2 + 2.5, 0.15, 1.9);
+    mom.root.position.set(5.62 + CONFIG.bus.width / 2 + 1.9, 0.15, -0.9);
     mom.setMode('stand', true);
   }
   G.player = { x: hero.root.position.x, z: hero.root.position.z, yaw: hero.root.rotation.y, v: 0, w: 0 };
