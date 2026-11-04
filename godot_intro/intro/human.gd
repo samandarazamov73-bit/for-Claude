@@ -32,6 +32,7 @@ var head_meshes: Array = []
 
 var turn_body: bool = false          # совместимость с person.gd
 var height: float = 1.5
+var anim = null                      # у человечка-заглушки анимаций нет
 var look_target: Variant = null     # Vector3 (мировые координаты) или null
 var talking: float = 0.0            # >0 — говорит: кивает головой
 var _head_yaw: float = 0.0
@@ -219,3 +220,8 @@ func walk(speed: float, delta: float) -> void:
 	leg_r_hip.rotation.x = -sin(_t) * 0.45 * k
 	leg_l_knee.rotation.x = -maxf(0.0, -sin(_t)) * 0.5 * k
 	leg_r_knee.rotation.x = -maxf(0.0, sin(_t)) * 0.5 * k
+
+
+## Совместимость с person.gd: анимаций нет — поза задаётся set_pose().
+func play_anim(anim_name: String, _blend: float = 0.3) -> void:
+	set_pose("stand" if anim_name != "sit" else "sit")

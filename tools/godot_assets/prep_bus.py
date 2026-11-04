@@ -51,20 +51,24 @@ def add(name, x, y, z, yaw_deg):
     root.setdefault("children", []).append(len(js["nodes"]) - 1)
 FACE_FWD = -90.0                      # «вперёд» метки (−Z) смотрит в нос автобуса (+X)
 add("anchor_wheelchair", -4.23, FLOOR, -0.796, FACE_FWD)
-# Мама стоит у коляски лицом к сыну, правой рукой держится за потолочный поручень (Z = −0.40, высота 2.60).
-hx, hz = -4.23, -0.796 + 0.20         # голова героя (на 0.2 м позади центра коляски)
+# Мама стоит у коляски, правой рукой держится за верхний поручень (Z = −0.40, высота 2.60).
+# Корпус — между сыном и окном: голова поворачивается то к окну, то к сыну. Кисть в позе hold: (0.26, 1.78, −0.04) от ног.
+GRIP = (0.26, 1.78, -0.04)
+hx, hz = -4.23, -0.796 + 0.20         # голова героя
 mx = -3.36
 best = None
-for i in range(-60, 30):
+for i in range(-70, 30):
     mz = i / 100
-    fx, fz = hx - mx, hz - mz; L = math.hypot(fx, fz); fx, fz = fx / L, fz / L
+    hxv, hzv = hx - mx, hz - mz; L = math.hypot(hxv, hzv); hxv, hzv = hxv / L, hzv / L
+    wx, wz = 0.3, -1.0; Lw = math.hypot(wx, wz); wx, wz = wx / Lw, wz / Lw      # окно слева, чуть вперёд
+    fx, fz = hxv + wx, hzv + wz; Lf = math.hypot(fx, fz); fx, fz = fx / Lf, fz / Lf
     rx, rz = -fz, fx
-    gz = mz + rz * 0.30 + fz * 0.05
+    gz = mz + rz * GRIP[0] + fz * (-GRIP[2])
     if best is None or abs(gz + 0.40) < best[0]:
-        best = (abs(gz + 0.40), mz, math.degrees(math.atan2(-fx, -fz)))
-_, mz, myaw = best
+        best = (abs(gz + 0.40), mz, math.degrees(math.atan2(-fx, -fz)), mx + rx * GRIP[0] + fx * (-GRIP[2]))
+err, mz, myaw, gx = best
 add("anchor_mom", mx, FLOOR, mz, myaw)
-print(f"mom at x={mx} z={mz:.2f} yaw={myaw:.1f}")
+print(f"mom at x={mx} z={mz:.2f} yaw={myaw:.1f}, grip at x={gx:.2f} z=-0.40 (err {err:.3f})")
 add("anchor_driver", 4.20, 1.185, -0.72, FACE_FWD)
 LEFT = [(3.25, True), (2.50, True), (1.75, False), (1.00, False), (0.25, False), (-0.50, False), (-1.25, False), (-2.00, True), (-2.75, True)]
 RIGHT = [(2.75, True), (2.00, False), (1.25, False), (0.50, False), (-0.25, False), (-1.00, False), (-1.85, True)]

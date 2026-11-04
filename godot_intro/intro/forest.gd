@@ -157,6 +157,13 @@ func _build_road() -> void:
 	_ribbon(rd, -200.0, end_s, [[-half, 0.0], [half, 0.0]], Color.WHITE, 2.0, 6.0, 6.0)
 	_ribbon(gr, -200.0, end_s, [[-C.SIDE_OUT, -0.02], [-half, -0.004]], Color.WHITE, 3.0, 2.0, 2.0)
 	_ribbon(gr, -200.0, end_s, [[half, -0.004], [C.SIDE_OUT, -0.02]], Color.WHITE, 3.0, 2.0, 2.0)
+	# осенняя трава между обочиной и лесом
+	var gk: Object = MeshKit.new()
+	var autumn: Color = Color(1.0, 0.86, 0.55)
+	_ribbon(gk, -200.0, end_s, [[C.SIDE_OUT - 0.02, -0.022], [C.FOREST_FROM + 4.0, -0.026]], autumn, 4.0, 3.0, 3.0)
+	_ribbon(gk, -200.0, end_s, [[-C.FOREST_FROM - 4.0, -0.026], [-C.SIDE_OUT + 0.02, -0.022]], autumn, 4.0, 3.0, 3.0)
+	var grass_m: StandardMaterial3D = _std(Tex.grass(), true, 1.0, "grass", 3.0)
+	root.add_child(_node(gk, grass_m, false))
 	# «карманы» у остановок
 	for ev in route.events:
 		var s: float = float(ev["s"])
@@ -544,33 +551,35 @@ func _tree_mesh(kind: String) -> ArrayMesh:
 	if _tree_meshes.has(kind):
 		return _tree_meshes[kind]
 	var kit: Object = MeshKit.new()
-	var bark: Color = Color(0.5, 0.32, 0.2)
-	var needles: Color = Color(0.17, 0.26, 0.14)
+	var bark: Color = Color(0.56, 0.37, 0.24)
+	var needles: Color = Color(0.22, 0.33, 0.17)
 	match kind:
 		"pine":
 			kit.add_cyl(Vector3(0, 5.0, 0), 0.22, 0.12, 10.0, bark, Vector3.ZERO, 6)
-			kit.add_cyl(Vector3(0, 9.4, 0), 2.1, 0.0, 3.2, needles, Vector3.ZERO, 7)
-			kit.add_cyl(Vector3(0, 11.0, 0), 1.7, 0.0, 2.8, needles.lightened(0.05), Vector3.ZERO, 7)
-			kit.add_cyl(Vector3(0, 12.5, 0), 1.1, 0.0, 2.4, needles, Vector3.ZERO, 6)
+			kit.add_cyl(Vector3(0, 8.4, 0), 1.7, 0.0, 2.4, needles.darkened(0.08), Vector3.ZERO, 9)
+			kit.add_cyl(Vector3(0, 9.6, 0), 2.1, 0.0, 3.0, needles, Vector3.ZERO, 9)
+			kit.add_cyl(Vector3(0, 11.1, 0), 1.7, 0.0, 2.7, needles.lightened(0.06), Vector3.ZERO, 9)
+			kit.add_cyl(Vector3(0, 12.5, 0), 1.1, 0.0, 2.3, needles.lightened(0.03), Vector3.ZERO, 8)
 		"spruce":
 			kit.add_cyl(Vector3(0, 1.0, 0), 0.2, 0.14, 2.0, bark.darkened(0.3), Vector3.ZERO, 6)
-			var dark: Color = Color(0.09, 0.17, 0.1)
-			kit.add_cyl(Vector3(0, 3.0, 0), 2.7, 0.0, 4.4, dark, Vector3.ZERO, 8)
-			kit.add_cyl(Vector3(0, 5.4, 0), 2.1, 0.0, 3.8, dark.lightened(0.04), Vector3.ZERO, 8)
-			kit.add_cyl(Vector3(0, 7.6, 0), 1.5, 0.0, 3.2, dark, Vector3.ZERO, 7)
-			kit.add_cyl(Vector3(0, 9.5, 0), 0.9, 0.0, 2.6, dark.lightened(0.03), Vector3.ZERO, 6)
+			var dark: Color = Color(0.13, 0.23, 0.13)
+			kit.add_cyl(Vector3(0, 3.0, 0), 2.7, 0.0, 4.4, dark.darkened(0.05), Vector3.ZERO, 10)
+			kit.add_cyl(Vector3(0, 5.4, 0), 2.1, 0.0, 3.8, dark.lightened(0.05), Vector3.ZERO, 10)
+			kit.add_cyl(Vector3(0, 7.6, 0), 1.5, 0.0, 3.2, dark, Vector3.ZERO, 9)
+			kit.add_cyl(Vector3(0, 9.5, 0), 0.9, 0.0, 2.6, dark.lightened(0.06), Vector3.ZERO, 8)
 		"birch":
 			kit.add_cyl(Vector3(0, 4.0, 0), 0.14, 0.07, 8.0, Color(0.86, 0.85, 0.8), Vector3.ZERO, 6)
 			for y in [1.2, 2.3, 3.1, 4.4, 5.6]:
 				kit.add_cyl(Vector3(0, y, 0), 0.15, 0.15, 0.06, Color(0.12, 0.12, 0.12), Vector3.ZERO, 6)
-			var leaf: Color = Color(0.78, 0.63, 0.2)
-			kit.add_sphere(Vector3(0, 6.4, 0), 1.6, leaf, Vector3(1, 1.3, 1), 7)
-			kit.add_sphere(Vector3(0.6, 7.6, 0.2), 1.1, leaf.lightened(0.08), Vector3(1, 1.2, 1), 6)
-			kit.add_sphere(Vector3(-0.5, 5.6, -0.3), 1.0, leaf.darkened(0.1), Vector3(1, 1.1, 1), 6)
+			var leaf: Color = Color(0.86, 0.69, 0.24)
+			kit.add_sphere(Vector3(0, 6.4, 0), 1.6, leaf, Vector3(1, 1.3, 1), 10)
+			kit.add_sphere(Vector3(0.6, 7.6, 0.2), 1.1, leaf.lightened(0.08), Vector3(1, 1.2, 1), 9)
+			kit.add_sphere(Vector3(-0.5, 5.6, -0.3), 1.0, leaf.darkened(0.1), Vector3(1, 1.1, 1), 9)
+			kit.add_sphere(Vector3(0.4, 5.2, 0.5), 0.8, leaf.darkened(0.04), Vector3(1, 1.1, 1), 8)
 		_:
-			var b: Color = Color(0.14, 0.22, 0.11)
-			kit.add_sphere(Vector3(0, 0.5, 0), 0.8, b, Vector3(1.2, 0.8, 1.0), 6)
-			kit.add_sphere(Vector3(0.5, 0.4, 0.3), 0.55, b.lightened(0.05), Vector3(1, 0.8, 1), 5)
+			var b: Color = Color(0.25, 0.32, 0.14)
+			kit.add_sphere(Vector3(0, 0.5, 0), 0.8, b, Vector3(1.2, 0.8, 1.0), 8)
+			kit.add_sphere(Vector3(0.5, 0.4, 0.3), 0.55, Color(0.55, 0.42, 0.16), Vector3(1, 0.8, 1), 7)
 	var m: ArrayMesh = kit.build_mesh()
 	_tree_meshes[kind] = m
 	return m
@@ -603,6 +612,7 @@ func _build_trees() -> void:
 							skip = true
 				if not skip:
 					var p: Vector3 = route.point(ss, side * ll, 0.0)
+					p.y = lerpf(0.65, 1.0, clampf((ll - C.FOREST_FROM) / 8.0, 0.0, 1.0))   # у кромки деревья моложе
 					if not _near_path(p.x, p.z, 4.0) and p.distance_to(b_center) > 42.0:
 						add.call(p, false)
 				lat += gap * rng.randf_range(0.8, 1.25)
@@ -628,6 +638,22 @@ func _build_trees() -> void:
 					add.call(p2, true)
 			gz += gap
 		gx += gap
+	# кусты на травяной полосе вдоль дороги
+	var sb: float = float(route.start_s) - 200.0
+	while sb < fs + 400.0:
+		for side3 in [-1.0, 1.0]:
+			if rng.randf() < 0.55:
+				var bp2: Vector3 = route.point(sb + rng.randf_range(-2.0, 2.0), side3 * rng.randf_range(C.SIDE_OUT + 2.0, C.FOREST_FROM + 1.0), 0.0)
+				var near_stop: bool = false
+				for ev in route.events:
+					if absf(sb - float(ev["s"])) < 20.0 and side3 > 0.0:
+						near_stop = true
+				if not near_stop and not _near_path(bp2.x, bp2.z, 3.0):
+					var kb: String = "bush:" + str(int(floor(bp2.x / 160.0))) + "," + str(int(floor(bp2.z / 160.0)))
+					if not cells.has(kb):
+						cells[kb] = []
+					(cells[kb] as Array).append(bp2)
+		sb += 6.0
 	# кусты у края тропинки
 	for i in range(6, int(path_len) - 6, 5):
 		var pp: Vector3 = path_at(float(i))
@@ -649,10 +675,11 @@ func _build_trees() -> void:
 		mm.mesh = _tree_mesh(kind2)
 		mm.instance_count = pts.size()
 		for i in pts.size():
-			var sc: float = rng.randf_range(0.75, 1.3)
+			var pt: Vector3 = pts[i]
+			var sc: float = rng.randf_range(0.75, 1.3) * (pt.y if pt.y > 0.01 else 1.0)
 			var bs: Basis = Basis(Vector3.UP, rng.randf() * TAU) * Basis.from_scale(Vector3(sc, sc * rng.randf_range(0.9, 1.2), sc))
 			bs = Basis(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.04)) * bs
-			mm.set_instance_transform(i, Transform3D(bs, pts[i]))
+			mm.set_instance_transform(i, Transform3D(bs, Vector3(pt.x, 0.0, pt.z)))
 			mm.set_instance_color(i, tints[rng.randi_range(0, tints.size() - 1)])
 		var inst: MultiMeshInstance3D = MultiMeshInstance3D.new()
 		inst.multimesh = mm

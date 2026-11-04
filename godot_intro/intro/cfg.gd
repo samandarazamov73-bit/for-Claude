@@ -30,7 +30,7 @@ const ROAD_HALF: float = 3.6        # асфальт: 2 полосы по 3.6 м
 const SHOULDER: float = 1.6         # гравийная обочина
 const SIDE_OUT: float = 5.2         # край обочины = ROAD_HALF + SHOULDER
 const POCKET_OUT: float = 6.4       # край заездного кармана у остановки
-const FOREST_FROM: float = 8.0      # лес начинается в стольких метрах от оси дороги
+const FOREST_FROM: float = 12.0      # лес начинается в стольких метрах от оси дороги (до него — трава и кусты)
 const FOREST_TO: float = 52.0       # дальше — туман
 const TREE_SPACING: float = 4.5     # среднее расстояние между деревьями (меньше — гуще и тяжелее)
 const ONCOMING_CARS: int = 5        # встречные машины
@@ -54,10 +54,11 @@ const WHEELCHAIR_YAW_DEG: float = 180.0
 const WHEELCHAIR_LIFT: float = 0.552        # колёса — на пол
 const WHEELCHAIR_EYE: Vector3 = Vector3(0.0, 1.19, 0.20)   # глаза героя: от центра коляски на полу (+Z — назад)
 # Кто на каком сиденье (метки seat_* в bus.glb → файл в models/people/). Пустые сиденья — просто не пиши их.
+# У окна — только те, кто помещается; слишком широких код сам чуть сдвигает к проходу.
 const PASSENGERS: Dictionary = {
-	"seat_13_w_r": "man_newspaper",     # прямо перед героем, у окна
-	"seat_19_s": "grandma_scarf",       # справа
-	"seat_08_w": "mother_baby",         # слева, дальше по салону
+	"seat_13_w_r": "grandma_scarf",     # прямо перед героем, у окна
+	"seat_11_a": "man_newspaper",       # дед с газетой — у прохода: газета шире места у окна
+	"seat_19_s": "mother_baby",         # справа
 }
 
 # --- Фото-текстуры ---

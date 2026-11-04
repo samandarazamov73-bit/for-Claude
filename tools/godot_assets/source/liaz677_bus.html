@@ -1705,21 +1705,21 @@
       {
         const cushion = superquadric(0.205, 0.056, 0.205, 0.38, 0.24, 10, 4, 0.014); cushion.rotateY(Math.PI / 2); cushion.translate(0, 0.43, 0);
         const back = superquadric(0.205, 0.225, 0.046, 0.42, 0.24, 8, 4, 0); back.rotateY(Math.PI / 2); back.rotateZ(0.20); back.translate(-0.245, 0.745, 0);
-        const places = [], fr = { double: [], single: [] };
+        const places = [], fr = { double: [], single: [], doubleR: [], singleR: [] };
         SEATS.forEach(s => {
           const y = BUS.floorY + (s.raised ? HOUSING_H : 0);
           (s.type === 'double' ? [-0.215, 0.215] : [0]).forEach(dz => places.push(M4(s.x, y, s.z + dz)));
-          fr[s.type].push(M4(s.x, y, s.z));
+          fr[s.type + (s.raised ? 'R' : '')].push(M4(s.x, y, s.z));
         });
         instanced(G, cushion, MAT.seat, places, 'Seats_Cushions_BurgundyDermatine');
         instanced(G, back, MAT.seat, places, 'Seats_Backrests_BurgundyDermatine');
-        const frameGeo = (halfW, s, wallLocal) => {
+        const frameGeo = (halfW, s, wallLocal, drop = 0) => {   // drop: у сидений на подиуме ножка у прохода идёт до пола
           const zA = s * (halfW - 0.025), zW = -s * (halfW - 0.025), p = [];
-          p.push(cylBetween(new V3(0.03, 0.0, zA), new V3(0.03, 0.37, zA), 0.014, 5));
+          p.push(cylBetween(new V3(0.03, -drop, zA), new V3(0.03, 0.37, zA), 0.014, 5));
           p.push(tubePath([new V3(0.19, 0.37, zA), new V3(0.03, 0.37, zA), new V3(-0.215, 0.37, zA), new V3(-0.31, 0.80, zA)], 0.012, 4, 0.04, 1));
           p.push(cylBetween(new V3(-0.05, 0.37, zA), new V3(-0.05, 0.37, wallLocal), 0.011, 4));
           p.push(cylBetween(new V3(-0.05, 0.10, wallLocal), new V3(-0.05, 0.36, zW), 0.011, 4));
-          p.push(new THREE.CylinderGeometry(0.032, 0.04, 0.01, 6, 1, true).translate(0.03, 0.005, zA));
+          p.push(new THREE.CylinderGeometry(0.032, 0.04, 0.01, 6, 1, true).translate(0.03, 0.005 - drop, zA));
           p.push(new THREE.BoxGeometry(0.07, 0.36, 0.01).translate(-0.05, 0.22, wallLocal));
           return mergeList(p);
         };
@@ -1727,8 +1727,10 @@
         const zLD = -BUS.inZ + 0.05 + 0.43, zRS = BUS.inZ - 0.05 - 0.215;
         instanced(G, frameGeo(0.43, 1, -BUS.inZ - zLD), MAT.framePaint, fr.double, 'Seats_Frames_Double');
         instanced(G, frameGeo(0.215, -1, BUS.inZ - zRS), MAT.framePaint, fr.single, 'Seats_Frames_Single');
-        instanced(G, grabGeo(0.43, 1), MAT.chrome, fr.double, 'Seats_GrabBars_Double_Chrome');
-        instanced(G, grabGeo(0.215, -1), MAT.chrome, fr.single, 'Seats_GrabBars_Single_Chrome');
+        instanced(G, frameGeo(0.43, 1, -BUS.inZ - zLD, HOUSING_H), MAT.framePaint, fr.doubleR, 'Seats_Frames_Double_Raised');
+        instanced(G, frameGeo(0.215, -1, BUS.inZ - zRS, HOUSING_H), MAT.framePaint, fr.singleR, 'Seats_Frames_Single_Raised');
+        instanced(G, grabGeo(0.43, 1), MAT.chrome, fr.double.concat(fr.doubleR), 'Seats_GrabBars_Double_Chrome');
+        instanced(G, grabGeo(0.215, -1), MAT.chrome, fr.single.concat(fr.singleR), 'Seats_GrabBars_Single_Chrome');
       }
 
       buildCab(G);

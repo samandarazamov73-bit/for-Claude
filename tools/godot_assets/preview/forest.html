@@ -1,0 +1,107 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script></head><body>
+<script type="module">
+// Превью леса из игры: те же формы и цвета деревьев, что в forest.gd, та же дорога и свет, что в route.gd / daylight.gd.
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+const W = 1280, H = 720;
+const srgb = (r, g, b) => new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace);
+function canvasTex(size, draw, rep) { const c = document.createElement('canvas'); c.width = c.height = size; draw(c.getContext('2d'), size); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; if (rep) t.repeat.set(rep, rep); t.anisotropy = 8; return t; }
+function noise(ctx, n, base, amt, size) { ctx.fillStyle = base; ctx.fillRect(0, 0, size, size); for (let i = 0; i < n; i++) { const g = (Math.random() * 2 - 1) * amt; const c = new THREE.Color(base); ctx.fillStyle = `rgb(${(c.r + g) * 255},${(c.g + g) * 255},${(c.b + g * 0.8) * 255})`; ctx.fillRect(Math.random() * size, Math.random() * size, 2, 2); } }
+function vc(geo, col) { const n = geo.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = col.r; a[i * 3 + 1] = col.g; a[i * 3 + 2] = col.b; } geo.setAttribute('color', new THREE.BufferAttribute(a, 3)); return geo.index ? geo.toNonIndexed() : geo; }
+const cyl = (y, rb, rt, h, col, segs) => vc(new THREE.CylinderGeometry(rt, rb, h, segs, 1).translate(0, y, 0), col);
+const sph = (x, y, z, r, sy, col, segs) => vc(new THREE.SphereGeometry(r, segs, Math.max(3, segs >> 1)).scale(1, sy, 1).translate(x, y, z), col);
+const light = (c, k) => c.clone().lerp(new THREE.Color(1, 1, 1), k), dark = (c, k) => c.clone().lerp(new THREE.Color(0, 0, 0), k);
+function treeGeo(kind) {
+  const bark = srgb(0.56, 0.37, 0.24), needles = srgb(0.22, 0.33, 0.17), parts = [];
+  if (kind === 'pine') { parts.push(cyl(5, 0.22, 0.12, 10, bark, 6), cyl(8.4, 1.7, 0, 2.4, dark(needles, 0.08), 9), cyl(9.6, 2.1, 0, 3.0, needles, 9), cyl(11.1, 1.7, 0, 2.7, light(needles, 0.06), 9), cyl(12.5, 1.1, 0, 2.3, light(needles, 0.03), 8)); }
+  else if (kind === 'spruce') { const d = srgb(0.13, 0.23, 0.13); parts.push(cyl(1, 0.2, 0.14, 2, dark(bark, 0.3), 6), cyl(3.0, 2.7, 0, 4.4, dark(d, 0.05), 10), cyl(5.4, 2.1, 0, 3.8, light(d, 0.05), 10), cyl(7.6, 1.5, 0, 3.2, d, 9), cyl(9.5, 0.9, 0, 2.6, light(d, 0.06), 8)); }
+  else if (kind === 'bush') { const b = srgb(0.25, 0.32, 0.14); parts.push(sph(0, 0.5, 0, 0.8, 0.8, b, 8), sph(0.5, 0.4, 0.3, 0.55, 0.8, srgb(0.55, 0.42, 0.16), 7)); }
+  else { const leaf = srgb(0.86, 0.69, 0.24); parts.push(cyl(4, 0.14, 0.07, 8, srgb(0.86, 0.85, 0.8), 6)); for (const y of [1.2, 2.3, 3.1, 4.4, 5.6]) parts.push(cyl(y, 0.15, 0.15, 0.06, srgb(0.12, 0.12, 0.12), 6));
+    parts.push(sph(0, 6.4, 0, 1.6, 1.3, leaf, 10), sph(0.6, 7.6, 0.2, 1.1, 1.2, light(leaf, 0.08), 9), sph(-0.5, 5.6, -0.3, 1.0, 1.1, dark(leaf, 0.1), 9), sph(0.4, 5.2, 0.5, 0.8, 1.1, dark(leaf, 0.04), 8)); }
+  const g = mergeGeometries(parts, false); g.computeVertexNormals(); return g;
+}
+window.run = async () => {
+  const D = await (await fetch('forest_data.json')).json();
+  const day = D.day;
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); r.outputColorSpace = THREE.SRGBColorSpace;
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.0; r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; document.body.appendChild(r.domElement);
+  const sc = new THREE.Scene();
+  const fogC = srgb(...day.fog); sc.fog = new THREE.FogExp2(fogC, Math.sqrt(day.fog_density * 60) / 60);
+  // небо: градиент от горизонта к зениту
+  const top = srgb(...day.top), hor = srgb(...day.horizon);
+  const skyGeo = new THREE.SphereGeometry(900, 32, 16), cols = []; const pos = skyGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) { const h = Math.max(0, pos.getY(i) / 900); const c = hor.clone().lerp(top, Math.pow(h, 0.6)); cols.push(c.r, c.g, c.b); }
+  skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })); sc.add(sky);
+  // солнце (как в daylight.gd: высота day.elev, азимут −35°)
+  const E = day.elev * Math.PI / 180, az = -35 * Math.PI / 180;
+  const dir = new THREE.Vector3(Math.cos(E) * Math.sin(-az), -Math.sin(E), -Math.cos(E) * Math.cos(-az));
+  const sun = new THREE.DirectionalLight(srgb(...day.sun_color), day.sun_energy * 2.6);
+  sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); const sh = sun.shadow.camera; sh.left = -70; sh.right = 70; sh.top = 70; sh.bottom = -70; sh.near = 1; sh.far = 400; sun.shadow.bias = -0.0004;
+  sc.add(sun); sc.add(sun.target);
+  sc.add(new THREE.HemisphereLight(top.clone().lerp(hor, 0.5), srgb(0.2, 0.18, 0.12), day.ambient * 1.45));
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(18, 24), new THREE.MeshBasicMaterial({ color: srgb(1.0, 0.92, 0.75), fog: false })); sc.add(disc);
+  // земля
+  const floorTex = canvasTex(256, (c, s) => { noise(c, 9000, '#38331f', 0.07, s); for (let i = 0; i < 50; i++) { c.fillStyle = Math.random() < 0.5 ? 'rgba(52,70,30,0.5)' : 'rgba(70,54,32,0.5)'; c.beginPath(); c.arc(Math.random() * s, Math.random() * s, 6 + Math.random() * 16, 0, 7); c.fill(); } }, 2000);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03; ground.receiveShadow = true; sc.add(ground);
+  // дорога, обочины, разметка
+  const roadTex = await new THREE.TextureLoader().loadAsync('road_color.jpg'); roadTex.wrapS = roadTex.wrapT = THREE.RepeatWrapping; roadTex.colorSpace = THREE.SRGBColorSpace; roadTex.anisotropy = 8;
+  const gravelTex = canvasTex(128, (c, s) => noise(c, 3000, '#6b6357', 0.14, s));
+  function ribbon(l0, l1, y, mat, every, len) {
+    const P = [], U = [], I = []; let v = 0;
+    D.road.forEach(([s, x, z, rx, rz], i) => { P.push(x + rx * l0, y, z + rz * l0, x + rx * l1, y, z + rz * l1); U.push(l0 / 3, s / 3, l1 / 3, s / 3); if (i) { const a = (i - 1) * 2; I.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } });
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.setIndex(I); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; sc.add(m); return m;
+  }
+  ribbon(-3.6, 3.6, 0.0, new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.95, side: THREE.DoubleSide }));
+  ribbon(3.6, 5.2, -0.012, new THREE.MeshStandardMaterial({ map: gravelTex, roughness: 1, side: THREE.DoubleSide }));
+  ribbon(-5.2, -3.6, -0.012, new THREE.MeshStandardMaterial({ map: gravelTex, roughness: 1, side: THREE.DoubleSide }));
+  const grassTex = canvasTex(128, (c, s) => { noise(c, 4000, '#86884a', 0.1, s); }, 1);
+  const grassM = new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1, side: THREE.DoubleSide });
+  ribbon(5.18, 16.0, -0.024, grassM); ribbon(-16.0, -5.18, -0.024, grassM);
+  const white = new THREE.MeshStandardMaterial({ color: srgb(0.9, 0.9, 0.86), roughness: 0.8, side: THREE.DoubleSide });
+  ribbon(-3.48, -3.36, 0.012, white); ribbon(3.36, 3.48, 0.012, white);
+  { const P = [], I = []; let n = 0; D.road.forEach(([s, x, z, rx, rz], i) => { if (i + 1 < D.road.length && Math.floor(s / 12) !== Math.floor((s + 3) / 12) - 0 && (s % 12) < 3) { const [s2, x2, z2] = D.road[i + 1]; for (const [px, pz] of [[x - rx * 0.06, z - rz * 0.06], [x + rx * 0.06, z + rz * 0.06], [x2 + rx * 0.06, z2 + rz * 0.06], [x2 - rx * 0.06, z2 - rz * 0.06]]) P.push(px, 0.012, pz); I.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; } });
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setIndex(I); g.computeVertexNormals(); sc.add(new THREE.Mesh(g, white)); }
+  // деревья — инстансами, как MultiMesh в игре
+  const tints = [srgb(1, 1, 1), srgb(0.9, 0.95, 0.88), srgb(1.05, 1.0, 0.92), srgb(0.85, 0.88, 0.85)];
+  for (const kind of ['pine', 'spruce', 'birch', 'bush']) {
+    const list = D.trees.filter(t => t[0] === kind);
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+    const im = new THREE.InstancedMesh(treeGeo(kind), mat, list.length); im.castShadow = true; im.receiveShadow = true;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+    list.forEach((t, i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), t[3]); m.compose(new THREE.Vector3(t[1], 0, t[2]), q, new THREE.Vector3(t[4], t[5], t[4])); im.setMatrixAt(i, m); im.setColorAt(i, tints[t[6]]); });
+    sc.add(im);
+  }
+  // автобус с людьми (как в игре)
+  const loader = new GLTFLoader();
+  const bus = (await loader.loadAsync('bus_export/bus.glb')).scene; bus.position.set(D.bus.x, 0, D.bus.z); bus.rotation.y = D.bus.yaw; sc.add(bus);
+  bus.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  bus.updateMatrixWorld(true);
+  const anchors = {}; bus.traverse(o => { if (/^(anchor_|seat_)/.test(o.name)) anchors[o.name] = o; });
+  const att = [['anchor_wheelchair', 'assets/74e6c133-wheelchair.glb', 1.2, 180, 0.552], ['anchor_mom', 'people2/mom_rig.glb'], ['anchor_driver', 'people2/driver.glb'],
+               ['seat_13_w_r', 'people2/grandma_scarf.glb'], ['seat_11_a', 'people2/man_newspaper.glb'], ['seat_19_s', 'people2/mother_baby.glb']];
+  for (const [an, file, s = 1, yaw = 0, lift = 0] of att) {
+    const g = await loader.loadAsync(file); const m = g.scene; m.scale.setScalar(s); m.rotation.y = yaw * Math.PI / 180; m.position.y = lift;
+    m.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    if (g.animations.length) { const mx = new THREE.AnimationMixer(m); mx.clipAction(THREE.AnimationClip.findByName(g.animations, 'hold_loop')).play(); mx.setTime(0); }
+    anchors[an].add(m);
+  }
+  for (const p of [[0, 2.35, 2.6], [0, 2.35, -0.6], [0, 2.35, 4.0]]) { const l = new THREE.PointLight(0xffe6c0, 1.4, 8, 2); l.position.set(...p); bus.add(l); }
+  sc.updateMatrixWorld(true);
+  const center = new THREE.Vector3(D.bus.x, 0, D.bus.z);
+  sun.position.copy(center).addScaledVector(dir, -150); sun.target.position.copy(center); sun.target.updateMatrixWorld();
+  disc.position.copy(center).addScaledVector(dir, -800); disc.lookAt(center);
+  const shots = [];
+  const eyeL = new THREE.Vector3(-0.796, 1.99, 4.43);
+  const shot = (pos, look, fov) => { const cam = new THREE.PerspectiveCamera(fov, W / H, 0.05, 1500); cam.position.copy(pos); cam.lookAt(look); sky.position.copy(pos); disc.position.copy(pos).addScaledVector(dir, -800); disc.lookAt(pos); r.render(sc, cam); shots.push(r.domElement.toDataURL('image/jpeg', 0.88)); };
+  shot(bus.localToWorld(eyeL.clone()), bus.localToWorld(new THREE.Vector3(-4.0, 1.85, 1.5)), 72);         // из коляски: в левое окно
+  shot(bus.localToWorld(eyeL.clone()), bus.localToWorld(new THREE.Vector3(-0.35, 1.75, -6.0)), 72);       // из коляски: вперёд по салону
+  shot(new THREE.Vector3(D.ahead[0], 1.5, D.ahead[1]), new THREE.Vector3(D.ahead_look[0], 1.6, D.ahead_look[1]), 55);   // с обочины
+  shot(new THREE.Vector3(D.behind[0], 1.7, D.behind[1]), new THREE.Vector3(D.bus.x, 1.6, D.bus.z), 55);   // сзади, с дороги
+  return shots;
+};
+window.ready = true;
+</script></body></html>

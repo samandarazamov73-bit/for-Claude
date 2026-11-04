@@ -173,8 +173,9 @@ func _build_people() -> void:
 func _build_people_models() -> void:
 	mom = _spawn_person("mom", "anchor_mom")
 	if mom != null:
-		mom.turn_body = true                            # стоит — поворачивается к сыну и к окну всем телом
 		mom.height = 1.52
+		mom.turn_body = mom.anim == null                # без скелета — поворачивается всем телом
+		mom.play_anim("hold_loop")                     # правой рукой держится за верхний поручень
 	_spawn_person("driver", "anchor_driver")
 	for seat_name in C.PASSENGERS:
 		var p = _spawn_person(str(C.PASSENGERS[seat_name]), str(seat_name))
@@ -194,7 +195,26 @@ func _spawn_person(file_name: String, anchor: String):
 	bus.body.add_child(p)
 	p.transform = bus.anchor_xf[anchor]
 	p.setup(res)
+	if anchor.begins_with("seat_"):
+		_fit_to_wall(p, anchor)
 	return p
+
+
+## Если человек у окна шире своего места — чуть сдвигаем его к проходу, чтобы руки не уходили в стенку.
+func _fit_to_wall(p: Node3D, anchor: String) -> void:
+	var side: float = -1.0 if anchor.contains("_w") else (1.0 if anchor.contains("_s") else 0.0)
+	if side == 0.0:
+		return
+	var ext: float = 0.0
+	var inv: Transform3D = p.global_transform.affine_inverse()
+	for n in p.find_children("*", "MeshInstance3D", true, false):
+		var mi: MeshInstance3D = n as MeshInstance3D
+		var xf: Transform3D = inv * mi.global_transform
+		var bb: AABB = mi.get_aabb()
+		for i in 8:
+			ext = maxf(ext, (xf * bb.get_endpoint(i)).x * side)
+	if ext > 0.245:
+		p.position -= p.transform.basis.x * (ext - 0.245) * side
 
 
 func _build_hero() -> void:
@@ -523,17 +543,17 @@ func _place_bus(dt: float, moving: bool = true) -> void:
 	bus.update(dt, driver.v if moving else 0.0, driver.accel if moving else 0.0, route.curvature(s), time)
 
 
-## Мама смотрит на сына, иногда — в окно.
+## Пока не разговариваем — мама держится за поручень и задумчиво смотрит в окно.
+## Как только начинается разговор (её или наша реплика, выбор ответа) — поворачивает голову к сыну.
 func _update_mom(delta: float) -> void:
-	_mom_look_timer -= delta
-	if _mom_look_timer <= 0.0:
-		_mom_look_window = 0.0 if _mom_look_window > 0.0 else 4.0
-		_mom_look_timer = 4.0 if _mom_look_window > 0.0 else 6.0 + randf() * 8.0
-	var talking: bool = _speaker != "" and _speaker != "announcer"
-	if _mom_look_window > 0.0 and not talking:
-		mom.look_target = bus.body.to_global(bus.body.to_local(mom.focus_point()) + Vector3(-1.8, 0.05, -0.6))
-	else:
+	var conversation: bool = ui.is_choosing() or _speaker == "mom" or _speaker == "hero"
+	_mom_look_window = 2.5 if conversation else maxf(0.0, _mom_look_window - delta)
+	if _mom_look_window > 0.0:
 		mom.look_target = head.global_position
+		return
+	var base: Vector3 = bus.body.to_local(mom.global_position)
+	var drift: Vector3 = Vector3(sin(time * 0.13) * 0.6, sin(time * 0.21) * 0.25, cos(time * 0.17) * 0.8)   # взгляд «плавает»
+	mom.look_target = bus.body.to_global(base + Vector3(-3.75, 1.3, -0.66) + drift)
 
 
 # --- Взаимодействие (клавиша E) ------------------------------------------------------------------------------
@@ -688,6 +708,8 @@ func _go_outside() -> void:
 	mom.reparent(self, true)
 	mom.look_target = null
 	mom.turn_body = false
+	if mom.has_method("play_anim"):
+		mom.play_anim("idle_loop", 0.0)                # на улице рука опущена
 	var hx: Transform3D = city.exit_xf                  # мама стоит слева от коляски, тоже смотрит на дорогу
 	mom.global_position = hx.origin - hx.basis.x * 0.95 - hx.basis.z * 0.2
 	mom.rotation = Vector3(0, hero_rig.rotation.y + 0.25, 0)
