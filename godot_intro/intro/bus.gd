@@ -32,6 +32,8 @@ var placeholder: Node3D                # заглушка (прячется, к�
 var placeholder_wheels: Node3D        # колёса заглушки (не качаются вместе с кузовом)
 var anchor_wheelchair: Vector3 = Vector3(-0.78, C.FLOOR_Y, 0.72)   # где стоит коляска (лицом назад)
 var anchor_mom: Vector3 = Vector3(-0.83, C.FLOOR_Y, 2.32)          # где сидит мама
+var has_model: bool = false           # подставлена настоящая модель (bus.glb)
+var anchor_xf: Dictionary = {}        # метки из bus.glb (anchor_*, seat_*) → Transform3D в координатах кузова
 var door_open: Dictionary = {"front": 0.0, "middle": 0.0}   # 0…1
 var indicator: int = 0                # поворотник: 0 нет, 1 правый, -1 левый
 var stop_requested: bool = false
@@ -47,6 +49,8 @@ var _indicators: Array = []
 var _led_labels: Array = []
 var _stop_sign: Label3D
 var _button_mat: StandardMaterial3D
+var _stop_parts: Array = []
+var _door_rigs: Dictionary = {"front": [], "middle": []}   # створки дверей настоящей модели
 
 
 func build() -> void:
@@ -265,6 +269,10 @@ func _build_interior() -> void:
 	lab.position = Vector3(-HW + 0.095, fy + 0.98, 1.25)
 	lab.rotation = Vector3(0, PI / 2.0, 0)
 	body.add_child(lab)
+	# В 1975-м кнопок «остановка» в автобусах не было — водителю говорили голосом.
+	_stop_parts = [stop_button, plate, lab]
+	for part in _stop_parts:
+		(part as Node3D).visible = false
 
 
 func _build_doors() -> void:
@@ -399,6 +407,14 @@ func update(dt: float, speed: float, accel: float, curvature: float, time: float
 			leaf.position.x = HW - 0.03 + out * 0.12
 			leaf.position.z = zc + dir * slide * half
 
+	# Двери настоящей модели: створки поворачиваются на петле и складываются пополам (до 80°).
+	for door_name in _door_rigs:
+		var th: float = deg_to_rad(80.0) * _ease(float(door_open[door_name]))
+		for rig in _door_rigs[door_name]:
+			var d: float = float(rig["dir"])
+			(rig["hinge"] as Node3D).rotation = Vector3(0.0, th if d > 0.0 else PI - th, 0.0)
+			(rig["fold"] as Node3D).rotation = Vector3(0.0, -2.0 * th * d, 0.0)
+
 	# Поворотник: 1.5 Гц.
 	var blink: bool = indicator != 0 and sin(time * PI * 3.0) > 0.0
 	for ind in _indicators:
@@ -407,18 +423,44 @@ func update(dt: float, speed: float, accel: float, curvature: float, time: float
 
 
 ## Подставляет настоящую модель (intro/assets/models/bus.glb) вместо заглушки.
-## Модель — в метрах, нос автобуса смотрит в −Z, двери справа (+X), пол салона на высоте FLOOR_Y.
-## Необязательные пустышки (Node3D) в модели: anchor_wheelchair (где коляска), anchor_mom_seat (где мама).
+## Модель — в метрах, нос автобуса смотрит в −Z, двери справа (+X).
+## Пустышки-метки внутри модели: anchor_wheelchair, anchor_mom, anchor_driver, seat_NN_* (места пассажиров).
+## Створки дверей ЛиАЗа (Door_Front_4Leaf_*, Door_Rear_4Leaf_*) открываются, как в исходной модели.
 func use_model(scene: PackedScene) -> void:
 	var model: Node3D = scene.instantiate() as Node3D
 	if model == null:
 		return
 	body.add_child(model)
+	has_model = true
 	placeholder.visible = false
 	placeholder_wheels.visible = false
-	var wc: Node = model.find_child("anchor_wheelchair", true, false)
-	if wc is Node3D:
-		anchor_wheelchair = body.to_local((wc as Node3D).global_position)
-	var mm: Node = model.find_child("anchor_mom_seat", true, false)
-	if mm is Node3D:
-		anchor_mom = body.to_local((mm as Node3D).global_position)
+	var inv: Transform3D = body.global_transform.affine_inverse()
+	for n in model.find_children("*", "Node3D", true, false):
+		var nm: String = str(n.name)
+		if nm.begins_with("anchor_") or nm.begins_with("seat_"):
+			anchor_xf[nm] = inv * (n as Node3D).global_transform
+	if anchor_xf.has("anchor_wheelchair"):
+		anchor_wheelchair = (anchor_xf["anchor_wheelchair"] as Transform3D).origin
+	if anchor_xf.has("anchor_mom"):
+		anchor_mom = (anchor_xf["anchor_mom"] as Transform3D).origin
+	for pair in [["front", "Door_Front_4Leaf"], ["middle", "Door_Rear_4Leaf"]]:
+		for k in [1, 2]:
+			var hinge: Node3D = model.find_child("%s_LeafPair%d_Hinge" % [pair[1], k], true, false) as Node3D
+			var fold: Node3D = model.find_child("%s_LeafPair%d_Fold" % [pair[1], k], true, false) as Node3D
+			if hinge != null and fold != null:
+				var dir: float = 1.0 if hinge.transform.basis.z.z > 0.0 else -1.0
+				(_door_rigs[pair[0]] as Array).append({"hinge": hinge, "fold": fold, "dir": dir})
+	# Плафоны салона — пониже: у ЛиАЗа потолок ниже, пол выше.
+	for l in body.get_children():
+		if l is OmniLight3D:
+			(l as OmniLight3D).position.y = 2.35
+	var rear_light: OmniLight3D = OmniLight3D.new()
+	rear_light.position = Vector3(0, 2.35, 4.0)
+	rear_light.omni_range = 7.0
+	rear_light.light_energy = 1.3
+	rear_light.light_color = Color(1.0, 0.92, 0.8)
+	body.add_child(rear_light)
+
+
+static func _ease(t: float) -> float:
+	return 4.0 * t * t * t if t < 0.5 else 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0

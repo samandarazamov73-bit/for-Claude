@@ -2,7 +2,7 @@ extends Node3D
 ## НАЧАЛО ИГРЫ «Дедовская палата»: поездка с мамой на автобусе в больницу (3–5 минут).
 ##
 ## Игрок сидит в электроколяске в автобусе (вид от первого лица, можно осматриваться мышью), разговаривает
-## с мамой (выбор ответов 1/2/3), нажимает кнопку остановки. Автобус стоит на остановках и светофоре.
+## с мамой (выбор ответов 1/2/3), просит водителя остановить у больницы. Автобус стоит на остановках и светофоре.
 ## У больницы он останавливается, экран темнеет, мама и коляска выходят — и загружается твой уровень.
 ##
 ## Все тексты — в story.gd, все числа — в cfg.gd.
@@ -18,6 +18,7 @@ const HumanScript = preload("res://intro/human.gd")
 const UIScript = preload("res://intro/ui.gd")
 const AudioScript = preload("res://intro/audio.gd")
 const WheelchairScript = preload("res://intro/wheelchair.gd")
+const PersonScript = preload("res://intro/person.gd")
 
 enum Phase { RIDE, ARRIVAL, DARK, END }
 
@@ -85,6 +86,9 @@ func _ready() -> void:
 	traffic.build(self, route, city)
 	_build_people()
 	_build_hero()
+	if mom != null:                                    # сразу видно маму (поворот головы героя к ней)
+		var lp: Vector3 = hero_rig.to_local(mom.focus_point()) - head.position
+		look_yaw = clampf(atan2(-lp.x, -lp.z) * 0.8, -2.4, 2.4)
 	ui = UIScript.new()
 	add_child(ui)
 	audio = AudioScript.new()
@@ -149,12 +153,20 @@ func _setup_environment() -> void:
 # --- Люди ----------------------------------------------------------------------------------------
 
 func _build_people() -> void:
+	if bus.has_model and ResourceLoader.exists(C.PEOPLE_DIR + "mom.glb"):
+		_build_people_models()
+		if mom != null:
+			return
 	mom = HumanScript.new()
 	mom.setup({"height": 1.62, "shirt": "#8e3b46", "pants": "#2b2d42", "hair": "#2a1b12", "shoes": "#3a2a20",
 		"hair_style": "bun", "sit_height": 0.47, "shadows": false})
 	bus.body.add_child(mom)
 	mom.position = bus.anchor_mom                       # напротив места коляски, лицом вперёд (на героя)
 	mom.set_pose("sit")
+	if bus.has_model:                                  # настоящий автобус, но моделей людей нет: мама стоит у коляски
+		mom.transform = bus.anchor_xf.get("anchor_mom", mom.transform)
+		mom.set_pose("stand")
+		return
 
 	var drv: Node3D = HumanScript.new()
 	drv.setup({"height": 1.75, "shirt": "#7da6d1", "pants": "#2c2c34", "hair": "#3b2a20", "sit_height": 0.5, "shadows": false})
@@ -184,31 +196,64 @@ func _build_people() -> void:
 		p.set_pose("sit")
 
 
+## Мама, водитель и пассажиры из intro/assets/models/people/ на метках из bus.glb.
+func _build_people_models() -> void:
+	mom = _spawn_person("mom", "anchor_mom")
+	_spawn_person("driver", "anchor_driver")
+	for seat_name in C.PASSENGERS:
+		var p = _spawn_person(str(C.PASSENGERS[seat_name]), str(seat_name))
+		if p != null:
+			p.glances = true
+
+
+func _spawn_person(file_name: String, anchor: String):
+	var path: String = C.PEOPLE_DIR + file_name + ".glb"
+	if not bus.anchor_xf.has(anchor) or not ResourceLoader.exists(path):
+		return null
+	var res: Resource = load(path)
+	if not (res is PackedScene):
+		return null
+	var p = PersonScript.new()
+	p.name = file_name
+	bus.body.add_child(p)
+	p.transform = bus.anchor_xf[anchor]
+	p.setup(res)
+	return p
+
+
 func _build_hero() -> void:
 	hero_rig = Node3D.new()
 	hero_rig.name = "Hero"
 	bus.body.add_child(hero_rig)
-	hero_rig.position = bus.anchor_wheelchair
-	hero_rig.rotation.y = PI                          # лицом назад, на маму; спина к упору
-	var chair: Node3D = WheelchairScript.build()
-	var chair_model: String = "res://intro/assets/models/wheelchair.glb"
-	if ResourceLoader.exists(chair_model):
-		var res: Resource = load(chair_model)
-		if res is PackedScene:
-			var inst: Node3D = (res as PackedScene).instantiate() as Node3D
-			if inst != null:
-				chair.queue_free()
-				chair = inst
-	hero_rig.add_child(chair)
-	var body: Node3D = HumanScript.new()
-	body.setup({"height": 1.75, "shirt": "#3a6ea5", "pants": "#2f3e5c", "hair": "#21160f",
-		"sit_height": WheelchairScript.SEAT_HEIGHT, "shadows": false})
-	hero_rig.add_child(body)
-	body.position = Vector3(0, 0, 0.04)
-	body.set_pose("wheelchair")
-	body.set_head_visible(false)                      # свою голову изнутри не видно
+	if bus.anchor_xf.has("anchor_wheelchair"):
+		hero_rig.transform = bus.anchor_xf["anchor_wheelchair"]   # место для коляски у задней двери, лицом вперёд
+	else:
+		hero_rig.position = bus.anchor_wheelchair
+		hero_rig.rotation.y = PI                      # заглушка: лицом назад, на маму; спина к упору
+	var eye: Vector3 = Vector3(0, C.EYE_HEIGHT, -0.06)
+	var chair_model: String = C.MODELS_DIR + "wheelchair.glb"
+	var res: Resource = load(chair_model) if ResourceLoader.exists(chair_model) else null
+	if res is PackedScene:
+		# Модель коляски уже с сидящим героем (без головы — вид от первого лица), своё тело не нужно.
+		var fix: Node3D = Node3D.new()
+		fix.name = "WheelchairModel"
+		hero_rig.add_child(fix)
+		fix.position.y = C.WHEELCHAIR_LIFT
+		fix.rotation.y = deg_to_rad(C.WHEELCHAIR_YAW_DEG)
+		fix.scale = Vector3.ONE * C.WHEELCHAIR_SCALE
+		fix.add_child((res as PackedScene).instantiate())
+		eye = C.WHEELCHAIR_EYE
+	else:
+		hero_rig.add_child(WheelchairScript.build())
+		var body = HumanScript.new()
+		body.setup({"height": 1.75, "shirt": "#3a6ea5", "pants": "#2f3e5c", "hair": "#21160f",
+			"sit_height": WheelchairScript.SEAT_HEIGHT, "shadows": false})
+		hero_rig.add_child(body)
+		body.position = Vector3(0, 0, 0.04)
+		body.set_pose("wheelchair")
+		body.set_head_visible(false)                  # свою голову изнутри не видно
 	head = Node3D.new()
-	head.position = Vector3(0, C.EYE_HEIGHT, -0.06)
+	head.position = eye
 	hero_rig.add_child(head)
 	cam = Camera3D.new()
 	cam.fov = 70.0
@@ -375,7 +420,8 @@ func _press_stop(by_mom: bool) -> void:
 	if bus.stop_requested:
 		return
 	bus.set_stop_requested(true)
-	audio.play_sfx("ding")
+	if bus.stop_button.visible:
+		audio.play_sfx("ding")
 	if _task_stop:
 		ui.set_objective(Story.OBJECTIVE_RIDE)
 		play(Story.STOP_MOM_PRESSED if by_mom else Story.STOP_PRESSED)
@@ -497,7 +543,7 @@ func _update_mom(delta: float) -> void:
 		_mom_look_timer = 4.0 if _mom_look_window > 0.0 else 6.0 + randf() * 8.0
 	var talking: bool = _speaker != "" and _speaker != "announcer"
 	if _mom_look_window > 0.0 and not talking:
-		mom.look_target = bus.body.to_global(Vector3(-1.6, 1.7, 1.6))
+		mom.look_target = bus.body.to_global(bus.body.to_local(mom.focus_point()) + Vector3(-1.8, 0.05, -0.6))
 	else:
 		mom.look_target = head.global_position
 
@@ -513,7 +559,9 @@ func _update_interaction() -> void:
 	var fwd: Vector3 = -cam.global_transform.basis.z
 	var best: String = ""
 	var best_dot: float = 0.975
-	var cands: Array = [["mom", mom.global_position + Vector3(0, 0.9, 0)], ["button", bus.stop_button.global_position]]
+	var cands: Array = [["mom", mom.focus_point()]]
+	if bus.stop_button.visible:
+		cands.append(["button", bus.stop_button.global_position])
 	for cand in cands:
 		var to: Vector3 = (cand[1] as Vector3) - cam_pos
 		var dist: float = to.length()
@@ -528,6 +576,9 @@ func _update_interaction() -> void:
 		ui.set_prompt("" if _dq_running else "E — поговорить с мамой")
 	elif best == "button":
 		ui.set_prompt("Остановка запрошена" if bus.stop_requested else "E — нажать кнопку остановки")
+	elif _task_stop and not bus.stop_requested:
+		_target = "driver"                             # куда ни смотри — можно крикнуть водителю
+		ui.set_prompt("E — " + Story.CALL_DRIVER_PROMPT)
 	else:
 		ui.set_prompt("")
 
@@ -537,7 +588,7 @@ func _interact() -> void:
 		return
 	if _target == "mom":
 		_talk_to_mom()
-	elif _target == "button":
+	elif _target == "button" or _target == "driver":
 		_press_stop(false)
 
 

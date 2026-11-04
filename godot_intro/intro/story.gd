@@ -6,16 +6,16 @@ extends RefCounted
 ##   ["mom", "Текст"]                      — реплика (mom, hero, announcer, driver)
 ##   {"choice": [ {"text": "Ответ", "then": [ ...шаги... ]}, ... ]}   — выбор игрока (клавиши 1 / 2 / 3)
 ##   {"pause": 1.5}                        — пауза в секундах
-##   {"action": "stop_button_task"}        — игровое действие (мама просит нажать кнопку остановки)
+##   {"action": "stop_button_task"}        — игровое действие (мама просит крикнуть водителю, чтобы остановил)
 
 const TITLE: String = "Дедовская палата"
 const SUBTITLE: String = "Пролог"
-const ROUTE_NUMBER: String = "62"
+const ROUTE_NUMBER: String = "23"            # как на табличке ЛиАЗа «23 Ташкент»
 
 const SPEAKERS: Dictionary = {
 	"mom": {"name": "Мама", "color": "#ffb7c9"},
 	"hero": {"name": "Ты", "color": "#9fd3ff"},
-	"announcer": {"name": "Автоинформатор", "color": "#ffd27a"},
+	"announcer": {"name": "Водитель (в микрофон)", "color": "#ffd27a"},
 	"driver": {"name": "Водитель", "color": "#c6e8a2"},
 }
 
@@ -29,7 +29,8 @@ const ANNOUNCE_ARRIVE: String = "Остановка «%s»."
 const ANNOUNCE_NEXT: String = "Следующая остановка — «%s»."
 
 const OBJECTIVE_RIDE: String = "Ты едешь с мамой в больницу"
-const OBJECTIVE_PRESS_STOP: String = "Нажми кнопку остановки (E)"
+const OBJECTIVE_PRESS_STOP: String = "Попроси водителя остановить у больницы (E)"
+const CALL_DRIVER_PROMPT: String = "крикнуть водителю: «У больницы остановите!»"
 
 # Сразу после того, как экран посветлел.
 const INTRO: Array = [
@@ -89,11 +90,11 @@ const ARRIVE_MARKET: Array = [
 ]
 
 const APPROACH_HOSPITAL: Array = [
-	["mom", "Следующая — наша. Нажмёшь кнопку?"],
+	["mom", "Следующая — наша. Крикни водителю, чтобы остановил."],
 	{"action": "stop_button_task"},
 ]
-const STOP_PRESSED: Array = [["mom", "Молодец. Водитель видит — откроет двери."]]
-const STOP_MOM_PRESSED: Array = [["mom", "Ладно, я сама нажала."]]
+const STOP_PRESSED: Array = [["hero", "Водитель, у больницы остановите, пожалуйста!"], ["driver", "Остановлю!"], ["mom", "Молодец."]]
+const STOP_MOM_PRESSED: Array = [["mom", "Водитель! У больницы остановите, пожалуйста!"], ["driver", "Слышу, слышу!"]]
 
 const ARRIVE_HOSPITAL: Array = [
 	["mom", "Приехали. Давай потихоньку, не спеши."],

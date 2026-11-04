@@ -182,6 +182,10 @@ func set_pose(pose: String) -> void:
 	hips.position.y = hip_height if _pose_name == "stand" else sit_height + 0.06
 
 
+func focus_point() -> Vector3:
+	return head.global_position
+
+
 func set_head_visible(v: bool) -> void:
 	for m in head_meshes:
 		(m as MeshInstance3D).visible = v

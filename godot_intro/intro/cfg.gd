@@ -32,6 +32,25 @@ const CURB: float = 0.15
 const SIDE_OUT: float = 11.2        # край тротуара = ROAD_HALF + SIDEWALK
 
 # --- Герой ---
+# --- Модели (intro/assets/models/) ---
+const MODELS_DIR: String = "res://intro/assets/models/"
+const PEOPLE_DIR: String = "res://intro/assets/models/people/"
+# Коляска с героем (wheelchair.glb) «смотрит» в +Z и мельче настоящей — поправка при загрузке:
+const WHEELCHAIR_SCALE: float = 1.2         # длина станет 1.08 м, спинка 1.10 м
+const WHEELCHAIR_YAW_DEG: float = 180.0
+const WHEELCHAIR_LIFT: float = 0.552        # колёса — на пол
+const WHEELCHAIR_EYE: Vector3 = Vector3(0.0, 1.19, 0.20)   # глаза героя: от центра коляски на полу (+Z — назад)
+# Кто на каком сиденье (метки seat_* в bus.glb → файл в models/people/). Пустые сиденья — просто не пиши их.
+const PASSENGERS: Dictionary = {
+	"seat_13_w_r": "elder",        # прямо перед героем, у окна
+	"seat_12_w_r": "hatman",
+	"seat_20_s_r": "student",
+	"seat_19_s": "worker",
+	"seat_10_w": "grandma",
+	"seat_11_a": "schoolgirl",
+	"seat_06_w": "woman",
+}
+
 # --- Фото-текстуры ---
 # Сколько метров покрывает одна картинка. Плитка или трещины выглядят слишком крупными — уменьши число.
 const TEX_METERS: Dictionary = {"road": 3.0, "sidewalk": 2.0, "curb": 1.0, "grass": 3.0, "facade": 3.0, "hospital": 3.0}
