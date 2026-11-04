@@ -171,3 +171,67 @@ static func facade(variant: int = 0) -> Texture2D:
 	img.fill_rect(Rect2i(wx + ww / 2 - 2, 30, 4, 62), Color(0.82, 0.83, 0.84))     # импост
 	img.fill_rect(Rect2i(wx - 8, 96, ww + 16, 6), Color(0.77, 0.78, 0.79))         # подоконник
 	return _tex(img)
+
+
+## Лесная подстилка: хвоя, мох, земля.
+static func forest_floor() -> Texture2D:
+	var c: Texture2D = custom("forest_floor")
+	if c != null:
+		return c
+	var img: Image = _img(256, 256)
+	img.fill(Color(0.22, 0.2, 0.13))
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 31
+	for i in 60:                                       # пятна мха и земли
+		var col: Color = Color(0.2, 0.27, 0.12) if rng.randf() < 0.5 else Color(0.27, 0.21, 0.13)
+		var cx: int = rng.randi_range(0, 255)
+		var cy: int = rng.randi_range(0, 255)
+		var r: int = rng.randi_range(6, 22)
+		for k in r * r * 2:
+			var x: int = (cx + rng.randi_range(-r, r) + 256) % 256
+			var y: int = (cy + rng.randi_range(-r, r) + 256) % 256
+			img.set_pixel(x, y, col.lerp(img.get_pixel(x, y), 0.5))
+	for i in 7000:                                     # хвоинки и листочки
+		var g: float = rng.randf_range(-0.06, 0.08)
+		var col2: Color = Color(0.36 + g, 0.24 + g * 0.7, 0.12) if rng.randf() < 0.6 else Color(0.14 + g, 0.12 + g, 0.07)
+		var x2: int = rng.randi_range(0, 255)
+		var y2: int = rng.randi_range(0, 255)
+		img.set_pixel(x2, y2, col2)
+		if rng.randf() < 0.5:
+			img.set_pixel((x2 + 1) % 256, (y2 + 1) % 256, col2)
+	return _tex(img)
+
+
+## Гравий обочины.
+static func gravel() -> Texture2D:
+	var c: Texture2D = custom("gravel")
+	if c != null:
+		return c
+	var img: Image = _img(128, 128)
+	img.fill(Color(0.42, 0.39, 0.34))
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 41
+	for i in 2600:
+		var g: float = rng.randf_range(-0.14, 0.12)
+		var col: Color = Color(0.42 + g, 0.39 + g, 0.34 + g)
+		var x: int = rng.randi_range(0, 126)
+		var y: int = rng.randi_range(0, 126)
+		img.fill_rect(Rect2i(x, y, rng.randi_range(1, 2), rng.randi_range(1, 2)), col)
+	return _tex(img)
+
+
+## Утоптанная лесная тропинка.
+static func path_dirt() -> Texture2D:
+	var c: Texture2D = custom("path")
+	if c != null:
+		return c
+	var img: Image = _img(128, 128)
+	img.fill(Color(0.33, 0.26, 0.18))
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 51
+	for i in 3000:
+		var g: float = rng.randf_range(-0.08, 0.06)
+		img.set_pixel(rng.randi_range(0, 127), rng.randi_range(0, 127), Color(0.33 + g, 0.26 + g, 0.18 + g * 0.8))
+	for i in 25:                                       # корни и камешки
+		img.fill_rect(Rect2i(rng.randi_range(0, 120), rng.randi_range(0, 124), rng.randi_range(3, 8), 2), Color(0.2, 0.15, 0.1))
+	return _tex(img)

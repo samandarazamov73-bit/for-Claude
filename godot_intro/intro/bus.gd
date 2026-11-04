@@ -330,7 +330,7 @@ func _build_boards() -> void:
 	placeholder.add_child(rear_in)
 	_led_labels = [front_in, rear_in]
 
-	var route_text: String = Story.ROUTE_NUMBER + "  " + Story.STOPS["hospital"]
+	var route_text: String = Story.ROUTE_NUMBER + "  " + Story.ROUTE_SIGN
 	var front_out: Label3D = _make_label(route_text, 48, 0.0024, amber)
 	front_out.position = Vector3(0, 2.86, -L2 - 0.045)
 	front_out.rotation = Vector3(0, PI, 0)

@@ -30,6 +30,8 @@ var leg_r_hip: Node3D
 var leg_r_knee: Node3D
 var head_meshes: Array = []
 
+var turn_body: bool = false          # совместимость с person.gd
+var height: float = 1.5
 var look_target: Variant = null     # Vector3 (мировые координаты) или null
 var talking: float = 0.0            # >0 — говорит: кивает головой
 var _head_yaw: float = 0.0
@@ -205,3 +207,15 @@ func _process(delta: float) -> void:
 	talking = maxf(0.0, talking - delta)
 	var nod: float = sin(_t * 9.0) * 0.03 if talking > 0.0 else 0.0
 	head.basis = Basis.from_euler(Vector3(_head_pitch + nod, _head_yaw, 0.0), EULER_ORDER_YXZ)
+
+
+## Шаг (для заглушки, когда нет модели мамы): ноги качаются от бедра.
+func walk(speed: float, delta: float) -> void:
+	if _pose_name != "stand":
+		set_pose("stand")
+	_t += speed * delta * 5.4
+	var k: float = clampf(speed / 1.2, 0.0, 1.0)
+	leg_l_hip.rotation.x = sin(_t) * 0.45 * k
+	leg_r_hip.rotation.x = -sin(_t) * 0.45 * k
+	leg_l_knee.rotation.x = -maxf(0.0, -sin(_t)) * 0.5 * k
+	leg_r_knee.rotation.x = -maxf(0.0, sin(_t)) * 0.5 * k

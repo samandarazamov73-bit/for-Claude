@@ -1,10 +1,12 @@
 extends RefCounted
-## Машины и пешеходы вдоль маршрута. Машины держат дистанцию и стоят на красный, пешеходы ходят по тротуарам.
+## Машины (и пешеходы, если есть тротуары) вдоль маршрута. На лесной дороге — только редкие встречные машины.
+## Светофор необязателен: если в маршруте нет события «light», машины его не ждут.
 
 const C = preload("res://intro/cfg.gd")
 const MeshKit = preload("res://intro/meshkit.gd")
 
-const CAR_COLORS: Array = ["c0392b", "2c3e50", "ecf0f1", "7f8c8d", "2980b9", "16a085", "f39c12", "1b1b1b", "8e44ad", "d35400", "bdc3c7"]
+# Приглушённые цвета советских машин: «Волги», «Жигули», «Москвичи», УАЗики.
+const CAR_COLORS: Array = ["e8e2cf", "2f4f6f", "6d1f1f", "3b5b3b", "c9b27a", "1b1b1b", "8a8f88", "5a7b9a", "b06a2a", "d8d4c4"]
 
 var route
 var city
@@ -17,6 +19,7 @@ var peds: Array = []
 var _stop_fwd: float = 0.0
 var _stop_back: float = 0.0
 var _cross_timer: float = 0.0
+var _has_light: bool = false
 var _m_vc: StandardMaterial3D
 var _car_meshes: Dictionary = {}
 
@@ -33,16 +36,14 @@ func build(parent: Node3D, rt, world) -> void:
 	_m_vc.vertex_color_is_srgb = true
 	_m_vc.roughness = 0.4
 	_m_vc.metallic = 0.2
-	_stop_fwd = float(route.by_id["light"]["stop_line"])
-	_stop_back = city.cross_s + 9.0
+	_has_light = route.by_id.has("light")
+	if _has_light:
+		_stop_fwd = float(route.by_id["light"]["stop_line"])
+		_stop_back = float(world.cross_s) + 9.0
 	var start_s: float = route.start_s
-	# Встречные: две полосы. Попутные: обгоняют автобус.
-	for i in 12:
-		_add_car(-1.75 if i % 2 == 1 else -5.25, -1, start_s + 40.0 + float(i) * 38.0 + rng.randf_range(-8.0, 8.0))
-	for i in 4:
-		_add_car(1.75, 1, start_s - 40.0 - float(i) * 45.0)
-	for i in 16:
-		_add_ped(start_s + rng.randf_range(-80.0, 220.0))
+	# Двухполосная дорога: только встречные, редко.
+	for i in C.ONCOMING_CARS:
+		_add_car(-C.LANE_OFFSET, -1, start_s + 120.0 + float(i) * 190.0 + rng.randf_range(-40.0, 40.0))
 
 
 # --- Машины ----------------------------------------------------------------------
@@ -149,7 +150,7 @@ func _add_ped(s: float) -> void:
 # --- Каждый кадр ---------------------------------------------------------------------
 
 func update(dt: float, bus_s: float, bus_v: float) -> void:
-	var red: bool = city.light_state == "red" or city.light_state == "yellow"
+	var red: bool = _has_light and (city.light_state == "red" or city.light_state == "yellow")
 	for car in cars:
 		var cs: float = float(car["s"])
 		var dir: float = float(car["dir"])
@@ -189,6 +190,9 @@ func update(dt: float, bus_s: float, bus_v: float) -> void:
 		node.rotation.y = route.yaw(cs) + (PI if dir < 0.0 else 0.0)
 
 	# Поперечный поток, пока у нас красный.
+	if not _has_light:
+		_update_peds(dt, bus_s, bus_v)
+		return
 	_cross_timer -= dt
 	if city.light_state == "red" and _cross_timer <= 0.0 and absf(bus_s - city.cross_s) < 200.0:
 		_spawn_cross_car()
@@ -210,7 +214,10 @@ func update(dt: float, bus_s: float, bus_v: float) -> void:
 			cross.remove_at(i)
 		i -= 1
 
-	# Пешеходы.
+	_update_peds(dt, bus_s, bus_v)
+
+
+func _update_peds(dt: float, bus_s: float, bus_v: float) -> void:
 	for p in peds:
 		var ps: float = float(p["s"])
 		var pdir: float = float(p["dir"])
@@ -222,7 +229,7 @@ func update(dt: float, bus_s: float, bus_v: float) -> void:
 			pdir = float(p["dir"])
 		p["s"] = ps
 		var pn: Node3D = p["node"]
-		pn.position = route.point(ps, float(p["lat"]), C.CURB)
+		pn.position = route.point(ps, float(p["lat"]), 0.0)
 		pn.rotation.y = route.yaw(ps) + (PI if pdir < 0.0 else 0.0)
 		var swing: float = sin(float(p["phase"])) * 0.45
 		(p["legs"][0] as Node3D).rotation.x = swing

@@ -5,7 +5,9 @@ extends Node
 ##   motor   — мотор коляски (петля)             hiss   — пневматика дверей
 ##   beeps   — писк перед закрытием дверей       chime  — гонг автоинформатора
 ##   ding    — звонок кнопки «остановка»         tick   — поворотник
-##   ramp    — выезд пандуса
+##   ramp    — выезд пандуса                  wind   — ветер в лесу (петля)
+##   crickets — сверчки в сумерках (петля)     step   — шаг мамы по тропинке
+##   click   — щелчок фонаря                  snap   — хруст ветки        crow — карканье
 
 const RATE: int = 22050
 const AUDIO_DIR: String = "res://intro/assets/audio/"
@@ -15,6 +17,9 @@ var volume: float = 0.8
 var _engine: AudioStreamPlayer
 var _road: AudioStreamPlayer
 var _motor: AudioStreamPlayer
+var _wind: AudioStreamPlayer
+var _crickets: AudioStreamPlayer
+var engine_gain: float = 1.0          # 1 — в салоне; меньше — автобус уезжает
 var _pool: Array = []
 var _sfx: Dictionary = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -26,6 +31,8 @@ func _ready() -> void:
 	_engine = _make_player(_custom("engine", _engine_loop()))
 	_road = _make_player(_custom("road", _noise_loop(2.0, 0.08)))
 	_motor = _make_player(_custom("motor", _motor_loop()))
+	_wind = _make_player(_custom("wind", _wind_loop()))
+	_crickets = _make_player(_custom("crickets", _crickets_loop()))
 	for i in 5:
 		var p: AudioStreamPlayer = AudioStreamPlayer.new()
 		add_child(p)
@@ -37,10 +44,16 @@ func _ready() -> void:
 		"ding": _custom("ding", _ding()),
 		"tick": _custom("tick", _tick()),
 		"ramp": _custom("ramp", _ramp()),
+		"step": _custom("step", _step()),
+		"click": _custom("click", _tick()),
+		"snap": _custom("snap", _snap()),
+		"crow": _custom("crow", _crow()),
 	}
 	_set_vol(_engine, 0.0)
 	_set_vol(_road, 0.0)
 	_set_vol(_motor, 0.0)
+	_set_vol(_wind, 0.0)
+	_set_vol(_crickets, 0.0)
 
 
 func _make_player(stream: AudioStream) -> AudioStreamPlayer:
@@ -70,9 +83,15 @@ func _set_vol(p: AudioStreamPlayer, v: float) -> void:
 func update(speed: float, accel: float, moving: bool) -> void:
 	var throttle: float = clampf(accel / 0.9, 0.0, 1.0)
 	_engine.pitch_scale = 0.8 + speed / 25.0 + throttle * 0.1
-	_set_vol(_engine, (0.07 + throttle * 0.04 + speed * 0.002) if moving else 0.0)
+	_set_vol(_engine, ((0.07 + throttle * 0.04 + speed * 0.002) if moving else 0.0) * engine_gain)
 	_road.pitch_scale = 0.7 + speed / 30.0
-	_set_vol(_road, clampf(speed / 12.0, 0.0, 1.0) * 0.12 if moving else 0.0)
+	_set_vol(_road, (clampf(speed / 12.0, 0.0, 1.0) * 0.12 if moving else 0.0) * engine_gain)
+
+
+## Лес: inside — 1 в салоне (ветер глуше), night — 0 день, 1 ночь (больше сверчков, ветер сильнее).
+func set_forest(inside: float, night: float) -> void:
+	_set_vol(_wind, lerpf(0.05, 0.012, inside) * (1.0 + night * 0.8))
+	_set_vol(_crickets, (1.0 - inside) * clampf(night * 1.4 - 0.3, 0.0, 1.0) * 0.05)
 
 
 func set_motor(level: float) -> void:
@@ -237,4 +256,82 @@ func _ramp() -> AudioStreamWAV:
 			if start + i < s.size():
 				var sq: float = 1.0 if sin(TAU * 1800.0 * float(i) / float(RATE)) > 0.0 else -1.0
 				s[start + i] += sq * 0.1
+	return _wav(s, false)
+
+
+## Ветер в кронах: медленно «дышащий» шум (петля 4 с).
+func _wind_loop() -> AudioStreamWAV:
+	var n: int = RATE * 4
+	var s: PackedFloat32Array = PackedFloat32Array()
+	s.resize(n)
+	var y: float = 0.0
+	var y2: float = 0.0
+	for i in n:
+		y += 0.02 * (_rng.randf_range(-1.0, 1.0) - y)
+		y2 += 0.15 * (y - y2)
+		var t: float = float(i) / float(n)
+		s[i] = y2 * 6.0 * (0.6 + 0.4 * sin(TAU * t) * sin(TAU * 3.0 * t + 1.0))
+	var f: int = 3000                                  # мягкий стык петли
+	for i in f:
+		var k: float = float(i) / float(f)
+		s[i] = s[i] * k + s[n - f + i] * (1.0 - k)
+	return _wav(s, true)
+
+
+## Сверчки: короткие трели на высокой частоте (петля 3 с).
+func _crickets_loop() -> AudioStreamWAV:
+	var s: PackedFloat32Array = _buf(3.0)
+	for c in 3:
+		var f0: float = 4300.0 + float(c) * 350.0
+		var start: float = float(c) * 0.37
+		var t0: float = start
+		while t0 < 2.9:
+			for k in 4:                                # 4 «чирка» в трели
+				var b0: int = int((t0 + float(k) * 0.045) * float(RATE))
+				for i in int(0.025 * float(RATE)):
+					if b0 + i < s.size():
+						var tt: float = float(i) / float(RATE)
+						s[b0 + i] += sin(TAU * f0 * tt) * sin(PI * tt / 0.025) * 0.18
+			t0 += 0.9 + float(c) * 0.13
+	return _wav(s, true)
+
+
+## Шаг по сухой тропинке: короткий хруст.
+func _step() -> AudioStreamWAV:
+	var s: PackedFloat32Array = _buf(0.16)
+	var prev: float = 0.0
+	for i in s.size():
+		var t: float = float(i) / float(RATE)
+		var x: float = _rng.randf_range(-1.0, 1.0)
+		var hp: float = x - prev * 0.6
+		prev = x
+		s[i] = hp * exp(-t * 32.0) * 0.45 * (1.0 if _rng.randf() > 0.3 else 0.4)
+	return _wav(s, false)
+
+
+## Хруст ветки где-то рядом.
+func _snap() -> AudioStreamWAV:
+	var s: PackedFloat32Array = _buf(0.5)
+	for burst in [0.0, 0.06, 0.15]:
+		var b0: int = int(float(burst) * float(RATE))
+		for i in int(0.08 * float(RATE)):
+			if b0 + i < s.size():
+				var t: float = float(i) / float(RATE)
+				s[b0 + i] += _rng.randf_range(-1.0, 1.0) * exp(-t * 60.0) * 0.8
+	return _wav(s, false)
+
+
+## Ворона: три хриплых «кар».
+func _crow() -> AudioStreamWAV:
+	var s: PackedFloat32Array = _buf(1.6)
+	for k in 3:
+		var b0: int = int(float(k) * 0.45 * float(RATE))
+		var ln: int = int(0.3 * float(RATE))
+		for i in ln:
+			if b0 + i < s.size():
+				var t: float = float(i) / float(RATE)
+				var f: float = 520.0 - t * 300.0
+				var saw: float = fmod(t * f, 1.0) * 2.0 - 1.0
+				var env: float = minf(t / 0.02, 1.0) * exp(-t * 6.0)
+				s[b0 + i] += (saw * 0.6 + _rng.randf_range(-1.0, 1.0) * 0.4) * env * 0.35
 	return _wav(s, false)

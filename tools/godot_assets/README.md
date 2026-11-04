@@ -13,3 +13,9 @@
 1. Положи `three` в `www/three`, страницы — в `www/` (как в `people.html`), запусти `node export_bus.js out/liaz.glb`.
 2. `python3 prep_bus.py out/liaz.glb ../../godot_intro/intro/assets/models/bus.glb`
 3. `node people.js out/people` и скопируй `*.glb` в `godot_intro/intro/assets/models/people/`.
+
+## Люди автора (мама и пассажиры)
+`prep_people.py` (+ `glbmesh.py`) готовит модели автора: вырезает «табуретки» (ровные коробки под сидящими),
+переводит в метры, поворачивает лицом в −Z, ставит начало координат на сиденье (сидящие) или на пол (мама),
+сжимает текстуру в JPG и отделяет у мамы голени ниже подола (узлы `LegL` / `LegR`) для шага.
+Запуск: `python3 prep_people.py <папка с scripts/glbmesh.py и up2/*.glb> <куда сохранить>`.

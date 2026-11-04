@@ -287,6 +287,10 @@ func set_crosshair(v: bool) -> void:
 	_crosshair.visible = v
 
 
+func set_hint(text: String) -> void:
+	_hint.text = text
+
+
 func set_hint_alpha(a: float) -> void:
 	_hint.modulate.a = a
 

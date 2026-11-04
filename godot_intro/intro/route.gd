@@ -21,23 +21,32 @@ func _init(scale: float = 1.0) -> void:
 	build(scale)
 
 
-## Собирает маршрут. scale растягивает прямые участки — так подгоняется длительность.
+## Остановки по пути и конечная (id → тексты в story.gd).
+const STOP_IDS: Array = ["camp", "spring"]
+const FINAL_ID: String = "sanatorium"
+
+var final_id: String = FINAL_ID           # то же, но доступно через экземпляр
+var stop_ids: Array = STOP_IDS
+
+
+## Собирает маршрут через лес. scale растягивает прямые участки — так подгоняется длительность.
 func build(scale: float) -> void:
 	# ["S", длина] — прямая; ["A", радиус, градусы] — дуга (плюс — направо, минус — налево).
 	var defs: Array = [
 		["S", 400.0],                   # 0  дорога «за спиной» в начале
-		["S", 150.0 * scale],           # 1
-		["A", 26.0, 90.0],              # 2  направо
-		["S", 280.0 * scale],           # 3  остановка «Парк»
-		["A", 34.0, -90.0],             # 4  налево
-		["S", 300.0 * scale],           # 5  светофор
-		["A", 240.0, 24.0],             # 6  плавно направо
-		["S", 150.0 * scale],           # 7
-		["A", 240.0, -24.0],            # 8  плавно налево
-		["S", 330.0 * scale],           # 9  остановка «Рынок»
-		["A", 30.0, 90.0],              # 10 направо
-		["S", 240.0 * scale + 120.0],   # 11 до больницы
-		["S", 420.0],                   # 12 дальше автобус уезжает
+		["S", 160.0 * scale],           # 1
+		["A", 140.0, 28.0],             # 2  плавно направо
+		["S", 230.0 * scale],           # 3  остановка «Пионерлагерь»
+		["A", 110.0, -40.0],            # 4  налево
+		["S", 260.0 * scale],           # 5
+		["A", 200.0, 22.0],             # 6  плавно направо
+		["S", 170.0 * scale],           # 7
+		["A", 160.0, -26.0],            # 8  плавно налево
+		["S", 300.0 * scale],           # 9  остановка «Родник»
+		["A", 130.0, 34.0],             # 10 направо
+		["S", 240.0 * scale + 160.0],   # 11 до санатория
+		["A", 120.0, -38.0],            # 12 за остановкой поворот: автобус скрывается в лесу
+		["S", 700.0],                   # 13 дальше автобус уезжает
 	]
 	pieces = []
 	var s: float = 0.0
@@ -62,18 +71,16 @@ func build(scale: float) -> void:
 		s += ln
 	length = s
 
-	var stop_line: float = float(pieces[5]["s0"]) + float(pieces[5]["len"]) * 0.6
 	events = [
-		{"id": "park", "kind": "stop", "s": float(pieces[3]["s0"]) + float(pieces[3]["len"]) * 0.55},
-		{"id": "light", "kind": "light", "s": stop_line - 6.6, "stop_line": stop_line},
-		{"id": "market", "kind": "stop", "s": float(pieces[9]["s0"]) + float(pieces[9]["len"]) * 0.5},
-		{"id": "hospital", "kind": "final", "s": float(pieces[12]["s0"]) - 60.0},
+		{"id": "camp", "kind": "stop", "s": float(pieces[3]["s0"]) + float(pieces[3]["len"]) * 0.55},
+		{"id": "spring", "kind": "stop", "s": float(pieces[9]["s0"]) + float(pieces[9]["len"]) * 0.5},
+		{"id": FINAL_ID, "kind": "final", "s": float(pieces[12]["s0"]) - 70.0},
 	]
 	by_id = {}
 	for ev in events:
 		by_id[ev["id"]] = ev
 	turns = []
-	for i in [2, 4, 10]:
+	for i in [2, 4, 6, 8, 10, 12]:
 		turns.append({"s0": float(pieces[i]["s0"]), "s1": float(pieces[i]["s0"]) + float(pieces[i]["len"])})
 	start_s = 392.0
 	plan = make_plan()

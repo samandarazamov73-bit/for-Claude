@@ -1,9 +1,10 @@
 extends Node3D
-## НАЧАЛО ИГРЫ «Дедовская палата»: поездка с мамой на автобусе в больницу (3–5 минут).
+## НАЧАЛО ИГРЫ «Дедовская палата»: поездка с мамой на автобусе через лес к санаторию (3–5 минут),
+## потом — пешком (на коляске) через лес на закате.
 ##
-## Игрок сидит в электроколяске в автобусе (вид от первого лица, можно осматриваться мышью), разговаривает
-## с мамой (выбор ответов 1/2/3), просит водителя остановить у больницы. Автобус стоит на остановках и светофоре.
-## У больницы он останавливается, экран темнеет, мама и коляска выходят — и загружается твой уровень.
+## В автобусе: вид от первого лица из коляски, разговор с мамой (ответы 1/2/3), попросить водителя остановить.
+## На конечной экран темнеет, мама и коляска выходят; экран светлеет — мы на остановке, автобус уезжает.
+## Дальше едем за мамой по тропинке (W A S D), темнеет, есть фонарь (F). У ворот санатория — твой уровень.
 ##
 ## Все тексты — в story.gd, все числа — в cfg.gd.
 
@@ -11,7 +12,9 @@ const C = preload("res://intro/cfg.gd")
 const Story = preload("res://intro/story.gd")
 const RouteScript = preload("res://intro/route.gd")
 const DriverScript = preload("res://intro/driver.gd")
-const CityScript = preload("res://intro/city.gd")
+const ForestScript = preload("res://intro/forest.gd")
+const DaylightScript = preload("res://intro/daylight.gd")
+const OutsideScript = preload("res://intro/outside.gd")
 const BusScript = preload("res://intro/bus.gd")
 const TrafficScript = preload("res://intro/traffic.gd")
 const HumanScript = preload("res://intro/human.gd")
@@ -20,19 +23,20 @@ const AudioScript = preload("res://intro/audio.gd")
 const WheelchairScript = preload("res://intro/wheelchair.gd")
 const PersonScript = preload("res://intro/person.gd")
 
-enum Phase { RIDE, ARRIVAL, DARK, END }
+enum Phase { RIDE, ARRIVAL, DARK, OUTSIDE, END }
 
 @export var ride_minutes: float = C.RIDE_MINUTES              # длина поездки, мин
-@export var next_scene: String = C.NEXT_SCENE                 # куда идти после выхода из автобуса
+@export var next_scene: String = C.NEXT_SCENE                 # куда идти у ворот санатория
 @export var dark_seconds: float = C.DARK_SECONDS              # длина чёрного экрана
 @export var mouse_sensitivity: float = C.MOUSE_SENS
-@export var overcast: bool = true                             # пасмурный день (мрачнее)
-@export_enum("start", "light", "market", "hospital", "arrival") var debug_skip: String = "start"
+@export_enum("start", "spring", "final", "arrival", "outside") var debug_skip: String = "start"
 
 var phase: int = Phase.RIDE
 var route
 var driver
-var city
+var city                      # лес (forest.gd)
+var daylight
+var outside
 var bus
 var traffic
 var ui
@@ -55,6 +59,7 @@ var _idle_index: int = 0
 var _target: String = ""
 var _mom_look_timer: float = 4.0
 var _mom_look_window: float = 0.0
+var _bus_departing: bool = false
 
 # Разговоры
 var _dq: Array = []
@@ -67,11 +72,12 @@ var _speaker: String = ""
 
 func _ready() -> void:
 	randomize()
-	_setup_environment()
+	daylight = DaylightScript.new()
+	add_child(daylight)
 	route = RouteScript.new()
 	route.fit_to_duration(ride_minutes * 60.0)
 	driver = DriverScript.new(route)
-	city = CityScript.new()
+	city = ForestScript.new()
 	city.build(self, route)
 	bus = BusScript.new()
 	bus.name = "Bus"
@@ -97,57 +103,24 @@ func _ready() -> void:
 	ui.resume_pressed.connect(_on_resume)
 	ui.menu_pressed.connect(_on_menu)
 	ui.restart_pressed.connect(_on_restart)
-	var final_ev: Dictionary = route.by_id["hospital"]
+	var final_ev: Dictionary = route.by_id[route.final_id]
 	var span: float = float(final_ev["s"]) - route.start_s
 	var stops: Array = []
-	for id in ["park", "market", "hospital"]:
-		stops.append({"name": Story.STOPS[id], "at": (float(route.by_id[id]["s"]) - route.start_s) / span, "final": id == "hospital"})
+	for ev in route.events:
+		if ev["kind"] != "light":
+			stops.append({"name": Story.STOPS.get(ev["id"], ev["id"]), "at": (float(ev["s"]) - route.start_s) / span, "final": ev["kind"] == "final"})
 	ui.setup_route(stops)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_place_bus(0.0, false)
+	audio.set_forest(1.0, 0.0)
+	if debug_skip == "outside":
+		_jump_to("arrival_now")
+		ui.set_fade(1.0)
+		_go_outside()
+		return
 	if debug_skip != "start":
 		_jump_to(debug_skip)
 	_begin_ride()
-
-
-# --- Сцена: небо, свет, туман ----------------------------------------------------------------
-
-func _setup_environment() -> void:
-	var sky_mat: ProceduralSkyMaterial = ProceduralSkyMaterial.new()
-	if overcast:
-		sky_mat.sky_top_color = Color(0.46, 0.52, 0.58)
-		sky_mat.sky_horizon_color = Color(0.74, 0.77, 0.78)
-		sky_mat.ground_horizon_color = Color(0.70, 0.72, 0.72)
-		sky_mat.ground_bottom_color = Color(0.45, 0.47, 0.45)
-	else:
-		sky_mat.sky_top_color = Color(0.25, 0.49, 0.79)
-		sky_mat.sky_horizon_color = Color(0.81, 0.88, 0.93)
-		sky_mat.ground_horizon_color = Color(0.78, 0.85, 0.9)
-		sky_mat.ground_bottom_color = Color(0.45, 0.5, 0.45)
-	var sky: Sky = Sky.new()
-	sky.sky_material = sky_mat
-	var env: Environment = Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.0
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.72, 0.75, 0.77) if overcast else Color(0.81, 0.88, 0.93)
-	env.fog_density = 0.0028
-	env.adjustment_enabled = true
-	env.adjustment_saturation = 0.88 if overcast else 1.0
-	var we: WorldEnvironment = WorldEnvironment.new()
-	we.environment = env
-	add_child(we)
-	var sun: DirectionalLight3D = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52.0, -30.0, 0.0)
-	sun.light_energy = 1.05 if overcast else 1.7
-	sun.light_color = Color(1.0, 0.96, 0.9)
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 80.0
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	add_child(sun)
 
 
 # --- Люди ----------------------------------------------------------------------------------------
@@ -199,6 +172,9 @@ func _build_people() -> void:
 ## Мама, водитель и пассажиры из intro/assets/models/people/ на метках из bus.glb.
 func _build_people_models() -> void:
 	mom = _spawn_person("mom", "anchor_mom")
+	if mom != null:
+		mom.turn_body = true                            # стоит — поворачивается к сыну и к окну всем телом
+		mom.height = 1.52
 	_spawn_person("driver", "anchor_driver")
 	for seat_name in C.PASSENGERS:
 		var p = _spawn_person(str(C.PASSENGERS[seat_name]), str(seat_name))
@@ -276,7 +252,7 @@ func _start_sequence() -> void:
 	_title_card(Story.TITLE, Story.SUBTITLE, 2.5)
 	await _wait(3.0, false)
 	audio.play_sfx("chime")
-	play([["announcer", Story.ANNOUNCE_NEXT % Story.STOPS["park"]]])
+	play([["announcer", Story.ANNOUNCE_NEXT % Story.STOPS.get(route.events[0]["id"], "")]])
 	play(Story.INTRO)
 	await _wait(5.0, false)
 	for i in 10:                                       # подсказка управления плавно появляется и исчезает
@@ -332,6 +308,14 @@ func _fade_to(target: float, seconds: float) -> void:
 
 
 # --- Разговоры ---------------------------------------------------------------------------------------
+
+func play_and_wait(steps: Array) -> void:
+	await _play_and_wait(steps)
+
+
+func is_talking_choice() -> bool:
+	return ui.is_choosing()
+
 
 func play(steps: Array) -> void:
 	if steps.is_empty():
@@ -447,11 +431,14 @@ func _process(delta: float) -> void:
 	sim_dt = delta * (C.FAST_FORWARD if fast else 1.0)
 	if phase == Phase.RIDE:
 		_update_ride(delta)
+	elif phase == Phase.OUTSIDE or phase == Phase.END:
+		_update_departing(delta)
 	else:
 		_place_bus(delta)
 		traffic.update(delta, driver.s, driver.v)
 	head.rotation = Vector3(look_pitch, look_yaw, 0.0)
-	_update_mom(delta)
+	if phase <= Phase.DARK:
+		_update_mom(delta)
 	_update_interaction()
 
 
@@ -478,9 +465,10 @@ func _update_ride(delta: float) -> void:
 	_place_bus(delta)
 
 	# События по доле пути.
-	var final_ev: Dictionary = route.by_id["hospital"]
+	var final_ev: Dictionary = route.by_id[route.final_id]
 	var progress: float = (driver.s - route.start_s) / (float(final_ev["s"]) - route.start_s)
 	ui.set_route_progress(progress)
+	daylight.set_time(clampf(progress, 0.0, 1.0) * 0.38)       # солнце садится, пока едем
 	for p in Story.PROGRESS:
 		var key: String = "p" + str(p["at"])
 		if progress >= float(p["at"]) and not _fired.has(key):
@@ -490,8 +478,8 @@ func _update_ride(delta: float) -> void:
 	if to_final < 430.0 and not _fired.has("approach"):
 		_fired["approach"] = true
 		audio.play_sfx("chime")
-		play([["announcer", Story.ANNOUNCE_NEXT % Story.STOPS["hospital"]]])
-		play(Story.APPROACH_HOSPITAL)
+		play([["announcer", Story.ANNOUNCE_NEXT % Story.STOPS[route.final_id]]])
+		play(Story.APPROACH_FINAL)
 	if _task_stop and not bus.stop_requested and to_final < 140.0:
 		_press_stop(true)                              # игрок не нажал — мама нажимает сама
 
@@ -509,8 +497,8 @@ func _next_stop_name() -> String:
 	for i in range(driver.index, route.events.size()):
 		var e: Dictionary = route.events[i]
 		if e["kind"] != "light":
-			return Story.STOPS[e["id"]]
-	return Story.STOPS["hospital"]
+			return Story.STOPS.get(e["id"], "")
+	return Story.STOPS[route.final_id]
 
 
 func _curb_weight(s: float) -> float:
@@ -628,16 +616,12 @@ func _handle_stop(ev: Dictionary) -> void:
 	await _open_doors(true)
 	audio.play_sfx("chime")
 	var stop_id: String = str(ev["id"])
-	var line: String = Story.ANNOUNCE_ARRIVE % Story.STOPS[stop_id]
-	if stop_id == "park":
-		line += " " + Story.ANNOUNCE_NEXT % Story.STOPS["market"]
-	elif stop_id == "market":
-		line += " " + Story.ANNOUNCE_NEXT % Story.STOPS["hospital"]
+	var line: String = Story.ANNOUNCE_ARRIVE % Story.STOPS.get(stop_id, stop_id)
+	var next_i: int = route.events.find(ev) + 1
+	if next_i > 0 and next_i < route.events.size():
+		line += " " + Story.ANNOUNCE_NEXT % Story.STOPS.get(route.events[next_i]["id"], "")
 	play([["announcer", line]])
-	if stop_id == "park":
-		play(Story.ARRIVE_PARK)
-	elif stop_id == "market":
-		play(Story.ARRIVE_MARKET)
+	play(Story.ARRIVE_STOP.get(stop_id, []))
 	await _wait(C.BUS_DWELL)
 	audio.play_sfx("beeps")
 	await _wait(1.0)
@@ -663,37 +647,113 @@ func _arrival() -> void:
 	bus.indicator = 0
 	await _open_doors(true, false)
 	audio.play_sfx("chime")
-	await _play_and_wait([["announcer", Story.ANNOUNCE_ARRIVE % Story.STOPS["hospital"]]])
-	await _play_and_wait(Story.ARRIVE_HOSPITAL)
+	await _play_and_wait([["announcer", Story.ANNOUNCE_ARRIVE % Story.STOPS[route.final_id]]])
+	await _play_and_wait(Story.ARRIVE_FINAL)
 	await _fade_to(1.0, 1.3)
 	phase = Phase.DARK
-	audio.fade_engine_out()
 	await _dark_sequence()
-	_finish()
+	_go_outside()
 
 
-## Чёрный экран: слышно, как откидывается пандус, едет коляска, мама говорит, автобус уезжает (~10 секунд).
+## Чёрный экран: откидывается пандус, едет коляска, мама и водитель говорят (~8 секунд).
 func _dark_sequence() -> void:
 	var u: float = maxf(dark_seconds, 4.0) / 8.0
+	audio.update(0.0, 0.0, true)                       # двигатель на холостых
 	await _wait(0.4 * u, false)
 	audio.play_sfx("ramp")
 	play([Story.DARK_LINES[0]])
-	await _wait(2.3 * u, false)
-	audio.set_motor(1.0)                               # мотор коляски
+	await _wait(2.6 * u, false)
+	audio.set_motor(1.0)                               # мотор коляски — съезжаем по пандусу
 	play([Story.DARK_LINES[1]])
-	await _wait(2.5 * u, false)
+	await _wait(2.6 * u, false)
 	audio.set_motor(0.0)
-	audio.play_sfx("hiss")                             # закрываются двери
-	await _wait(0.6 * u, false)
-	audio.play_sfx("beeps")
-	await _wait(0.8 * u, false)
-	for i in 6:                                        # автобус уезжает
-		audio.update(1.5 + float(i) * 1.5, 0.9, true)
-		await _wait(0.27 * u, false)
-	audio.fade_engine_out()
 	play([Story.DARK_LINES[2]])
-	await _play_and_wait([])                           # ждём, пока мама договорит
-	await _wait(1.0, false)
+	await _play_and_wait([])                           # ждём, пока договорят
+	await _wait(0.8, false)
+
+
+# --- Снаружи: остановка, автобус уезжает, дорога через лес ----------------------------------------------------------
+
+func _go_outside() -> void:
+	phase = Phase.OUTSIDE
+	_clear_dialogue()
+	ui.set_prompt("")
+	ui.show_route(false)
+	ui.set_objective("")
+	# Герой и мама — из автобуса на площадку остановки.
+	hero_rig.reparent(self, true)
+	hero_rig.global_transform = city.exit_xf
+	look_yaw = -0.55                                   # чуть вправо — туда, куда уедет автобус
+	look_pitch = -0.04
+	mom.reparent(self, true)
+	mom.look_target = null
+	mom.turn_body = false
+	var hx: Transform3D = city.exit_xf                  # мама стоит слева от коляски, тоже смотрит на дорогу
+	mom.global_position = hx.origin - hx.basis.x * 0.95 - hx.basis.z * 0.2
+	mom.rotation = Vector3(0, hero_rig.rotation.y + 0.25, 0)
+	daylight.set_time(0.42)
+	audio.set_forest(0.0, 0.0)
+	audio.engine_gain = 0.7
+	_depart_bus()
+	outside = OutsideScript.new()
+	outside.main = self
+	outside.forest = city
+	outside.daylight = daylight
+	outside.audio = audio
+	outside.ui = ui
+	outside.hero_rig = hero_rig
+	outside.cam = cam
+	outside.mom = mom
+	add_child(outside)
+	outside.finished.connect(_end_walk)
+	await _fade_to(0.0, 2.5)
+	ui.set_crosshair(true)
+	await _wait(2.5, false)
+	await _play_and_wait(Story.OUTSIDE)
+	outside.start()
+	for i in 10:
+		ui.set_hint_alpha(float(i + 1) / 10.0)
+		await _wait(0.1, false)
+	await _wait(12.0, false)
+	for i in 10:
+		ui.set_hint_alpha(1.0 - float(i + 1) / 10.0)
+		await _wait(0.2, false)
+
+
+## Автобус закрывает двери и уезжает дальше по дороге, скрываясь за поворотом.
+func _depart_bus() -> void:
+	await _wait(1.2, false)
+	audio.play_sfx("beeps", 0.7)
+	await _wait(0.8, false)
+	await _open_doors(false, false)
+	bus.indicator = -1
+	if driver.stopped:
+		driver.release()
+	_bus_departing = true
+
+
+func _update_departing(delta: float) -> void:
+	if not _bus_departing:
+		return
+	driver.update(delta)
+	_place_bus(delta)
+	var dist: float = bus.global_position.distance_to(hero_rig.global_position)
+	audio.engine_gain = clampf(1.0 - dist / 170.0, 0.0, 1.0) * 0.8
+	audio.update(driver.v, driver.accel, true)
+	if driver.s - float(route.by_id[route.final_id]["s"]) > 40.0:
+		bus.indicator = 0
+	traffic.update(delta, driver.s, driver.v)
+	if dist > 230.0 or driver.s > route.length - 30.0:
+		_bus_departing = false
+		bus.visible = false
+		traffic.root.visible = false
+		audio.fade_engine_out()
+
+
+func _end_walk() -> void:
+	await _play_and_wait(Story.WALK_END)
+	await _fade_to(1.0, 2.2)
+	_finish()
 
 
 func _finish() -> void:
@@ -709,13 +769,15 @@ func _finish() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		if phase <= Phase.ARRIVAL and not get_tree().paused:
+		if (phase <= Phase.ARRIVAL or phase == Phase.OUTSIDE) and not get_tree().paused:
 			look_yaw = clampf(look_yaw - event.relative.x * mouse_sensitivity, -2.4, 2.4)
 			look_pitch = clampf(look_pitch - event.relative.y * mouse_sensitivity, -1.25, 1.1)
 	elif event is InputEventKey and event.pressed and not event.echo and not get_tree().paused:
 		var k: int = event.physical_keycode
 		if k == KEY_E:
 			_interact()
+		elif k == KEY_F and phase == Phase.OUTSIDE and outside != null and outside.active:
+			outside.toggle_flashlight()
 		elif k == KEY_1:
 			ui.pick(0)
 		elif k == KEY_2:
@@ -767,16 +829,23 @@ func _on_restart() -> void:
 # --- Отладка: свойство debug_skip в инспекторе перескакивает к нужному месту -----------------------------------------------
 
 func _jump_to(where: String) -> void:
-	var final_ev: Dictionary = route.by_id["hospital"]
+	var final_ev: Dictionary = route.by_id[route.final_id]
 	var target_s: float = route.start_s
-	if where == "light":
-		target_s = float(route.by_id["light"]["s"]) - 180.0
-	elif where == "market":
-		target_s = float(route.by_id["market"]["s"]) - 150.0
-	elif where == "hospital":
+	if where == "spring" and route.by_id.has("spring"):
+		target_s = float(route.by_id["spring"]["s"]) - 150.0
+	elif where == "final":
 		target_s = float(final_ev["s"]) - 460.0
 	elif where == "arrival":
 		target_s = float(final_ev["s"]) - 40.0
+	elif where == "arrival_now":                       # сразу на конечной, автобус стоит с открытыми дверями
+		driver.s = float(final_ev["s"])
+		driver.v = 0.0
+		driver.index = route.events.find(final_ev)
+		driver.stopped = true
+		bus.door_open["front"] = 1.0
+		bus.door_open["middle"] = 1.0
+		_place_bus(0.0, false)
+		return
 	driver.s = target_s
 	driver.v = C.BUS_CRUISE * 0.6
 	driver.stopped = false
@@ -789,6 +858,3 @@ func _jump_to(where: String) -> void:
 	for p in Story.PROGRESS:
 		if float(p["at"]) < progress:
 			_fired["p" + str(p["at"])] = true
-	if target_s > float(route.by_id["light"]["s"]) - 200.0:
-		_light_cycle = true
-	city.set_light("green")
