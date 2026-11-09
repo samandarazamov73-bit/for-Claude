@@ -173,12 +173,25 @@ func _entrance() -> void:
 		await get_tree().process_frame
 		p = get_tree().current_scene
 	GameStateRef().set_fade(0.0)
+	# дождаться, пока начало поездки (заголовок, задание, первая реплика) отыграет, чтобы не мешало на кадрах
+	var waited := 0.0
+	while not str(p.ui._objective.text).contains("Поговори") and waited < 180.0:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+	await secs(1.0)
+	p._skip = true
+	await secs(1.0)
 	p.s = p.s_stop - 0.2
 	p.v = 0.0
 	p.phase = "arrive"
 	p._go_outside()
 	await secs(4.0)
+	p._skip = true
 	p._events = {"crow": true, "snap": true, "dark": true, "building": true}
+	# тест перескочил поездку: её заголовок и реплики ещё «идут» — на кадрах они не нужны
+	p.ui._title.visible = false
+	p.ui._subtitle2.visible = false
+	p._skip = true
 	p.set_day(0.86)
 	p.walk_s = p.forest_end_s - 0.5
 	p.hero.global_position = p._path_at(p.walk_s)
