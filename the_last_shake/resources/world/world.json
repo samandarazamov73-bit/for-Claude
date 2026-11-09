@@ -1,0 +1,35 @@
+{
+ "seed": 20261108,
+ "size": 2048.0,
+ "origin": -1024.0,
+ "resolution": 2049,
+ "height_min": -23.74933624267578,
+ "height_max": 24.0518741607666,
+ "heightmap": "res://resources/world/heightmap.f32.gz",
+ "normal_map": "res://resources/world/terrain_normal.png",
+ "control0": "res://resources/world/control0.png",
+ "control1": "res://resources/world/control1.png",
+ "road": "res://resources/world/road.json",
+ "road_length": 3639.7,
+ "instances": {
+  "trees": "res://resources/world/inst_trees.bin.gz",
+  "understory": "res://resources/world/inst_understory.bin.gz",
+  "bushes": "res://resources/world/inst_bushes.bin.gz",
+  "rocks": "res://resources/world/inst_rocks.bin.gz",
+  "props": "res://resources/world/inst_props.bin.gz",
+  "cover": "res://resources/world/inst_cover.bin.gz"
+ },
+ "counts": {
+  "trees": 117136,
+  "understory": 33595,
+  "bushes": 24661,
+  "rocks": 3169,
+  "props": 5266,
+  "cover": 345750
+ },
+ "spawn": [
+  -619.2663857963547,
+  -0.1987910828342793,
+  299.2473316887174
+ ]
+}

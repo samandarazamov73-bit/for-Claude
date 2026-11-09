@@ -1,0 +1,15 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://story/prologue.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/terrain/terrain.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/road/road.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/forest/forest.tscn" id="4"]
+
+[node name="Prologue" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Terrain" parent="." instance=ExtResource("2")]
+
+[node name="Road" parent="." instance=ExtResource("3")]
+
+[node name="Forest" parent="." instance=ExtResource("4")]

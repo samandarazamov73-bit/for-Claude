@@ -1,0 +1,21 @@
+[gd_resource type="ShaderMaterial" load_steps=5 format=3]
+
+[ext_resource type="Shader" path="res://shaders/terrain.gdshader" id="1"]
+[ext_resource type="Texture2D" path="res://resources/world/control0.png" id="2"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/terrain/terrain_albedo_h.webp" id="3"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/terrain/terrain_normal_r.webp" id="4"]
+
+[resource]
+resource_name = "terrain"
+shader = ExtResource("1")
+shader_parameter/control0 = ExtResource("2")
+shader_parameter/layer_albedo = ExtResource("3")
+shader_parameter/layer_normal = ExtResource("4")
+shader_parameter/layer_tiling = PackedFloat32Array(2.6, 2.4, 2.2, 2.3, 2.5, 1.7)
+shader_parameter/height_blend = 0.18
+shader_parameter/micro_relief = 0.08
+shader_parameter/detail_distance = 160.0
+shader_parameter/anti_tiling = true
+shader_parameter/normal_strength = 1.0
+shader_parameter/canopy_ao = 0.35
+shader_parameter/far_shade = 0.55

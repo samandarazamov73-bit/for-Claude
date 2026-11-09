@@ -1,0 +1,30 @@
+[remap]
+
+importer="2d_array_texture"
+type="CompressedTexture2DArray"
+uid="uid://cf4gk046pqcd0"
+path.s3tc="res://.godot/imported/asphalt_albedo_h.webp-5f24d62b33c626d3bc43eff654ca1147.s3tc.ctexarray"
+path.etc2="res://.godot/imported/asphalt_albedo_h.webp-5f24d62b33c626d3bc43eff654ca1147.etc2.ctexarray"
+metadata={
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://assets/textures/road/asphalt_albedo_h.webp"
+dest_files=["res://.godot/imported/asphalt_albedo_h.webp-5f24d62b33c626d3bc43eff654ca1147.s3tc.ctexarray", "res://.godot/imported/asphalt_albedo_h.webp-5f24d62b33c626d3bc43eff654ca1147.etc2.ctexarray"]
+
+[params]
+
+compress/mode=2
+compress/high_quality=false
+compress/lossy_quality=0.7
+compress/uastc_level=0
+compress/rdo_quality_loss=0.0
+compress/hdr_compression=1
+compress/channel_pack=0
+mipmaps/generate=true
+mipmaps/limit=-1
+slices/horizontal=1
+slices/vertical=2

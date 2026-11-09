@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://sanatorium/scripts/game.gd" id="1"]
+[ext_resource type="Script" path="res://story/director.gd" id="2"]
+
+[node name="Game" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Director" type="Node" parent="."]
+script = ExtResource("2")

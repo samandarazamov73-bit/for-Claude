@@ -1,0 +1,21 @@
+[gd_resource type="ShaderMaterial" load_steps=6 format=3]
+
+[ext_resource type="Shader" path="res://shaders/road.gdshader" id="1"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/road/asphalt_albedo_h.webp" id="2"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/road/asphalt_normal_r.webp" id="3"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/terrain/terrain_albedo_h.webp" id="4"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/terrain/terrain_normal_r.webp" id="5"]
+
+[resource]
+resource_name = "road"
+shader = ExtResource("1")
+shader_parameter/asphalt_albedo = ExtResource("2")
+shader_parameter/asphalt_normal = ExtResource("3")
+shader_parameter/ground_albedo = ExtResource("4")
+shader_parameter/ground_normal = ExtResource("5")
+shader_parameter/asphalt_tiling = 3.4
+shader_parameter/gravel_tiling = 1.6
+shader_parameter/marking_style = 0
+shader_parameter/paint_wear = 0.4
+shader_parameter/asphalt_brightness = 0.5
+shader_parameter/puddle_amount = 1.0

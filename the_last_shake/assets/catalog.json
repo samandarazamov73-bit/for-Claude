@@ -1,0 +1,2811 @@
+{
+ "variants": [
+  {
+   "name": "pine_a",
+   "group": "trees",
+   "file": "res://assets/trees/pine_a.glb",
+   "tris": [
+    11697,
+    1922,
+    246
+   ],
+   "aabb": [
+    [
+     -3.572000026702881,
+     -0.6159999966621399,
+     -3.1579999923706055
+    ],
+    [
+     4.038000106811523,
+     26.038999557495117,
+     3.7330000400543213
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "pine",
+   "height": 24.0,
+   "crown_radius": 4.32,
+   "clearance": 0.8,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "pine_b",
+   "group": "trees",
+   "file": "res://assets/trees/pine_b.glb",
+   "tris": [
+    9352,
+    1440,
+    208
+   ],
+   "aabb": [
+    [
+     -2.7980000972747803,
+     -0.6230000257492065,
+     -2.265000104904175
+    ],
+    [
+     2.76200008392334,
+     22.510000228881836,
+     4.5
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "pine",
+   "height": 21.0,
+   "crown_radius": 3.78,
+   "clearance": 0.73,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "pine_c",
+   "group": "trees",
+   "file": "res://assets/trees/pine_c.glb",
+   "tris": [
+    13012,
+    1888,
+    270
+   ],
+   "aabb": [
+    [
+     -2.2230000495910645,
+     -0.6110000014305115,
+     -2.944000005722046
+    ],
+    [
+     3.1530001163482666,
+     18.398000717163086,
+     2.2090001106262207
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "pine",
+   "height": 17.5,
+   "crown_radius": 3.15,
+   "clearance": 0.65,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "spruce_a",
+   "group": "trees",
+   "file": "res://assets/trees/spruce_a.glb",
+   "tris": [
+    14338,
+    2638,
+    144
+   ],
+   "aabb": [
+    [
+     -3.7179999351501465,
+     -0.6119999885559082,
+     -3.868000030517578
+    ],
+    [
+     3.8540000915527344,
+     28.124000549316406,
+     3.6670000553131104
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "spruce",
+   "height": 28.0,
+   "crown_radius": 3.5,
+   "clearance": 0.86,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "spruce_b",
+   "group": "trees",
+   "file": "res://assets/trees/spruce_b.glb",
+   "tris": [
+    10676,
+    2008,
+    120
+   ],
+   "aabb": [
+    [
+     -3.319000005722046,
+     -0.609000027179718,
+     -3.3269999027252197
+    ],
+    [
+     3.3299999237060547,
+     22.142000198364258,
+     3.5399999618530273
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "spruce",
+   "height": 22.0,
+   "crown_radius": 3.0,
+   "clearance": 0.75,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "spruce_c",
+   "group": "trees",
+   "file": "res://assets/trees/spruce_c.glb",
+   "tris": [
+    8316,
+    1640,
+    96
+   ],
+   "aabb": [
+    [
+     -2.9539999961853027,
+     -0.6079999804496765,
+     -2.944999933242798
+    ],
+    [
+     2.8540000915527344,
+     17.101999282836914,
+     2.6500000953674316
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "spruce",
+   "height": 17.0,
+   "crown_radius": 2.6,
+   "clearance": 0.65,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "fir_a",
+   "group": "trees",
+   "file": "res://assets/trees/fir_a.glb",
+   "tris": [
+    12372,
+    2468,
+    128
+   ],
+   "aabb": [
+    [
+     -3.305000066757202,
+     -0.6119999885559082,
+     -3.746000051498413
+    ],
+    [
+     3.5510001182556152,
+     25.107999801635742,
+     3.2230000495910645
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "fir",
+   "height": 25.0,
+   "crown_radius": 3.1,
+   "clearance": 0.8,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "fir_b",
+   "group": "trees",
+   "file": "res://assets/trees/fir_b.glb",
+   "tris": [
+    9610,
+    1920,
+    104
+   ],
+   "aabb": [
+    [
+     -3.1510000228881836,
+     -0.6079999804496765,
+     -2.9260001182556152
+    ],
+    [
+     2.9560000896453857,
+     19.12299919128418,
+     3.0369999408721924
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "fir",
+   "height": 19.0,
+   "crown_radius": 2.7,
+   "clearance": 0.7,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "birch_a",
+   "group": "trees",
+   "file": "res://assets/trees/birch_a.glb",
+   "tris": [
+    12080,
+    1511,
+    106
+   ],
+   "aabb": [
+    [
+     -3.569999933242798,
+     -0.6079999804496765,
+     -3.8550000190734863
+    ],
+    [
+     4.330999851226807,
+     22.124000549316406,
+     3.8299999237060547
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "birch",
+   "height": 21.0,
+   "crown_radius": 3.2,
+   "clearance": 0.57,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "birch_b",
+   "group": "trees",
+   "file": "res://assets/trees/birch_b.glb",
+   "tris": [
+    17272,
+    2061,
+    88
+   ],
+   "aabb": [
+    [
+     -3.4779999256134033,
+     -0.6069999933242798,
+     -3.4769999980926514
+    ],
+    [
+     3.5169999599456787,
+     17.98200035095215,
+     3.874000072479248
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "birch",
+   "height": 17.0,
+   "crown_radius": 2.8,
+   "clearance": 0.52,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "oak_a",
+   "group": "trees",
+   "file": "res://assets/trees/oak_a.glb",
+   "tris": [
+    10016,
+    2017,
+    186
+   ],
+   "aabb": [
+    [
+     -6.901000022888184,
+     -0.6230000257492065,
+     -7.2270002365112305
+    ],
+    [
+     7.708000183105469,
+     16.04199981689453,
+     5.705999851226807
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "oak",
+   "height": 20.0,
+   "crown_radius": 6.8,
+   "clearance": 1.0,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "oak_b",
+   "group": "trees",
+   "file": "res://assets/trees/oak_b.glb",
+   "tris": [
+    8320,
+    1823,
+    128
+   ],
+   "aabb": [
+    [
+     -4.511000156402588,
+     -0.6209999918937683,
+     -5.454999923706055
+    ],
+    [
+     5.709000110626221,
+     10.378999710083008,
+     5.145999908447266
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "oak",
+   "height": 16.0,
+   "crown_radius": 5.4,
+   "clearance": 0.86,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "alder_a",
+   "group": "trees",
+   "file": "res://assets/trees/alder_a.glb",
+   "tris": [
+    10888,
+    1261,
+    82
+   ],
+   "aabb": [
+    [
+     -4.005000114440918,
+     -0.609000027179718,
+     -3.868000030517578
+    ],
+    [
+     3.132999897003174,
+     15.541000366210938,
+     4.581999778747559
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "decid",
+   "height": 14.0,
+   "crown_radius": 3.2,
+   "clearance": 0.59,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "linden_a",
+   "group": "trees",
+   "file": "res://assets/trees/linden_a.glb",
+   "tris": [
+    11642,
+    1513,
+    106
+   ],
+   "aabb": [
+    [
+     -4.890999794006348,
+     -0.6110000014305115,
+     -5.252999782562256
+    ],
+    [
+     5.080999851226807,
+     20.452999114990234,
+     4.638000011444092
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "tree",
+   "kind": "decid",
+   "height": 18.0,
+   "crown_radius": 4.4,
+   "clearance": 0.7,
+   "lod": [
+    40.0,
+    120.0,
+    420.0
+   ]
+  },
+  {
+   "name": "young_spruce_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_spruce_a.glb",
+   "tris": [
+    9068,
+    1600,
+    48
+   ],
+   "aabb": [
+    [
+     -2.0869998931884766,
+     -1.0579999685287476,
+     -1.8350000381469727
+    ],
+    [
+     1.7960000038146973,
+     6.117000102996826,
+     1.7920000553131104
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "spruce",
+   "height": 6.0,
+   "crown_radius": 1.8,
+   "clearance": 0.43,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_spruce_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_spruce_b.glb",
+   "tris": [
+    3704,
+    666,
+    48
+   ],
+   "aabb": [
+    [
+     -1.3389999866485596,
+     -0.6010000109672546,
+     -1.3940000534057617
+    ],
+    [
+     1.437999963760376,
+     3.760999917984009,
+     1.3960000276565552
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "spruce",
+   "height": 3.6,
+   "crown_radius": 1.2,
+   "clearance": 0.37,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_fir",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_fir.glb",
+   "tris": [
+    5948,
+    1062,
+    48
+   ],
+   "aabb": [
+    [
+     -2.0369999408721924,
+     -0.6019999980926514,
+     -1.6729999780654907
+    ],
+    [
+     1.6369999647140503,
+     4.515999794006348,
+     1.5140000581741333
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "fir",
+   "height": 4.4,
+   "crown_radius": 1.5,
+   "clearance": 0.39,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_pine",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_pine.glb",
+   "tris": [
+    4800,
+    806,
+    158
+   ],
+   "aabb": [
+    [
+     -0.9039999842643738,
+     -0.6029999852180481,
+     -1.0529999732971191
+    ],
+    [
+     1.1549999713897705,
+     4.959000110626221,
+     0.906000018119812
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "pine",
+   "height": 4.6,
+   "crown_radius": 0.83,
+   "clearance": 0.39,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_birch_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_birch_a.glb",
+   "tris": [
+    6456,
+    513,
+    56
+   ],
+   "aabb": [
+    [
+     -1.9639999866485596,
+     -0.6019999980926514,
+     -2.0420000553131104
+    ],
+    [
+     2.0759999752044678,
+     8.35099983215332,
+     1.9559999704360962
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "birch",
+   "height": 7.5,
+   "crown_radius": 1.5,
+   "clearance": 0.37,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_birch_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_birch_b.glb",
+   "tris": [
+    5404,
+    415,
+    54
+   ],
+   "aabb": [
+    [
+     -1.8370000123977661,
+     -0.6019999980926514,
+     -1.4919999837875366
+    ],
+    [
+     1.378999948501587,
+     6.209000110626221,
+     1.4539999961853027
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "birch",
+   "height": 5.5,
+   "crown_radius": 1.2,
+   "clearance": 0.35,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "hazel",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/hazel.glb",
+   "tris": [
+    5412,
+    840,
+    16
+   ],
+   "aabb": [
+    [
+     -3.127000093460083,
+     -0.3269999921321869,
+     -2.9030001163482666
+    ],
+    [
+     2.568000078201294,
+     4.857999801635742,
+     3.4140000343322754
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "decid",
+   "height": 4.0,
+   "crown_radius": 2.0,
+   "clearance": 0.35,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "snag",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/snag.glb",
+   "tris": [
+    2064,
+    166,
+    32
+   ],
+   "aabb": [
+    [
+     -1.4019999504089355,
+     -0.6150000095367432,
+     -1.2230000495910645
+    ],
+    [
+     0.9129999876022339,
+     9.001999855041504,
+     1.305999994277954
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "snag",
+   "height": 9.0,
+   "crown_radius": 1.0,
+   "clearance": 0.65,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_alder",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_alder.glb",
+   "tris": [
+    4872,
+    437,
+    58
+   ],
+   "aabb": [
+    [
+     -2.390000104904175,
+     -0.6019999980926514,
+     -2.2039999961853027
+    ],
+    [
+     2.243000030517578,
+     8.199000358581543,
+     2.450000047683716
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "decid",
+   "height": 7.0,
+   "crown_radius": 1.8,
+   "clearance": 0.39,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "rowan",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/rowan.glb",
+   "tris": [
+    3822,
+    341,
+    58
+   ],
+   "aabb": [
+    [
+     -2.1429998874664307,
+     -0.6029999852180481,
+     -2.4140000343322754
+    ],
+    [
+     2.131999969482422,
+     7.8520002365112305,
+     2.4010000228881836
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "decid",
+   "height": 6.5,
+   "crown_radius": 1.9,
+   "clearance": 0.41,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "young_oak",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/young_oak.glb",
+   "tris": [
+    3446,
+    311,
+    60
+   ],
+   "aabb": [
+    [
+     -1.9390000104904175,
+     -0.6029999852180481,
+     -2.1570000648498535
+    ],
+    [
+     2.4660000801086426,
+     7.245999813079834,
+     2.546999931335449
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "understory",
+   "kind": "oak",
+   "height": 5.5,
+   "crown_radius": 2.1,
+   "clearance": 0.43,
+   "lod": [
+    25.0,
+    70.0,
+    230.0
+   ]
+  },
+  {
+   "name": "bush_broad_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bush_broad_a.glb",
+   "tris": [
+    3056,
+    324,
+    16
+   ],
+   "aabb": [
+    [
+     -1.7289999723434448,
+     -0.26100000739097595,
+     -1.0549999475479126
+    ],
+    [
+     1.180999994277954,
+     2.244999885559082,
+     1.562999963760376
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "decid",
+   "height": 1.6,
+   "crown_radius": 1.0,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "bush_broad_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bush_broad_b.glb",
+   "tris": [
+    2616,
+    288,
+    16
+   ],
+   "aabb": [
+    [
+     -1.3329999446868896,
+     -0.5979999899864197,
+     -1.4739999771118164
+    ],
+    [
+     1.1119999885559082,
+     1.7200000286102295,
+     0.9929999709129333
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "decid",
+   "height": 1.2,
+   "crown_radius": 0.9,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "bush_birch",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bush_birch.glb",
+   "tris": [
+    3160,
+    540,
+    16
+   ],
+   "aabb": [
+    [
+     -1.934999942779541,
+     -0.6489999890327454,
+     -2.0350000858306885
+    ],
+    [
+     2.5250000953674316,
+     2.246999979019165,
+     1.9639999866485596
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "birch",
+   "height": 2.2,
+   "crown_radius": 1.1,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "bush_oak",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bush_oak.glb",
+   "tris": [
+    3140,
+    360,
+    16
+   ],
+   "aabb": [
+    [
+     -1.1050000190734863,
+     -0.46000000834465027,
+     -1.3849999904632568
+    ],
+    [
+     1.6150000095367432,
+     2.0139999389648438,
+     1.8049999475479126
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "oak",
+   "height": 1.4,
+   "crown_radius": 1.0,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "sapling_fir",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/sapling_fir.glb",
+   "tris": [
+    1600,
+    296,
+    48
+   ],
+   "aabb": [
+    [
+     -0.9940000176429749,
+     -0.6010000109672546,
+     -0.9559999704360962
+    ],
+    [
+     0.9850000143051147,
+     1.7359999418258667,
+     0.8889999985694885
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "fir",
+   "height": 1.6,
+   "crown_radius": 0.65,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "sapling_spruce",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/sapling_spruce.glb",
+   "tris": [
+    1050,
+    196,
+    48
+   ],
+   "aabb": [
+    [
+     -0.8840000033378601,
+     -0.6010000109672546,
+     -0.8370000123977661
+    ],
+    [
+     0.8610000014305115,
+     1.5049999952316284,
+     0.8080000281333923
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "spruce",
+   "height": 1.1,
+   "crown_radius": 0.5,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "bush_hazel",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bush_hazel.glb",
+   "tris": [
+    4040,
+    720,
+    16
+   ],
+   "aabb": [
+    [
+     -1.9170000553131104,
+     -0.4860000014305115,
+     -2.4489998817443848
+    ],
+    [
+     2.0439999103546143,
+     3.2760000228881836,
+     2.6419999599456787
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "decid",
+   "height": 2.6,
+   "crown_radius": 1.3,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "bush_elder",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bush_elder.glb",
+   "tris": [
+    3264,
+    540,
+    16
+   ],
+   "aabb": [
+    [
+     -1.6820000410079956,
+     -0.3880000114440918,
+     -2.122999906539917
+    ],
+    [
+     1.5449999570846558,
+     2.688999891281128,
+     1.6449999809265137
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "decid",
+   "height": 2.0,
+   "crown_radius": 1.2,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "juniper",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/juniper.glb",
+   "tris": [
+    2968,
+    360,
+    16
+   ],
+   "aabb": [
+    [
+     -1.2109999656677246,
+     -0.20800000429153442,
+     -1.4329999685287476
+    ],
+    [
+     1.694000005722046,
+     2.0209999084472656,
+     1.590000033378601
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "fir",
+   "height": 1.5,
+   "crown_radius": 0.7,
+   "clearance": 0.5,
+   "lod": [
+    18.0,
+    45.0,
+    120.0
+   ]
+  },
+  {
+   "name": "bilberry_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bilberry_a.glb",
+   "tris": [
+    2672,
+    360,
+    16
+   ],
+   "aabb": [
+    [
+     -0.6759999990463257,
+     -0.4399999976158142,
+     -0.5419999957084656
+    ],
+    [
+     0.75,
+     0.460999995470047,
+     0.609000027179718
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "decid",
+   "height": 0.45,
+   "crown_radius": 0.55,
+   "clearance": 0.5,
+   "lod": [
+    10.0,
+    24.0,
+    55.0
+   ]
+  },
+  {
+   "name": "bilberry_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/bilberry_b.glb",
+   "tris": [
+    2778,
+    396,
+    16
+   ],
+   "aabb": [
+    [
+     -0.40400001406669617,
+     -0.3880000114440918,
+     -0.47699999809265137
+    ],
+    [
+     0.46799999475479126,
+     0.3580000102519989,
+     0.43700000643730164
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "bush",
+   "kind": "decid",
+   "height": 0.35,
+   "crown_radius": 0.45,
+   "clearance": 0.5,
+   "lod": [
+    10.0,
+    24.0,
+    55.0
+   ]
+  },
+  {
+   "name": "grass_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/grass_a.glb",
+   "tris": [
+    24
+   ],
+   "aabb": [
+    [
+     -0.7990000247955322,
+     -0.03700000047683716,
+     -0.6660000085830688
+    ],
+    [
+     0.414000004529953,
+     0.38600000739097595,
+     0.847000002861023
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "grass",
+   "height": 0.38999998569488525,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    48.0
+   ]
+  },
+  {
+   "name": "grass_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/grass_b.glb",
+   "tris": [
+    18
+   ],
+   "aabb": [
+    [
+     -0.5149999856948853,
+     -0.03500000014901161,
+     -0.4090000092983246
+    ],
+    [
+     0.7390000224113464,
+     0.26899999380111694,
+     0.3109999895095825
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "grass",
+   "height": 0.27000001072883606,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    48.0
+   ]
+  },
+  {
+   "name": "grass_c",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/grass_c.glb",
+   "tris": [
+    30
+   ],
+   "aabb": [
+    [
+     -0.6909999847412109,
+     -0.03799999877810478,
+     -0.7570000290870667
+    ],
+    [
+     0.9150000214576721,
+     0.46000000834465027,
+     0.9679999947547913
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "grass",
+   "height": 0.46000000834465027,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    48.0
+   ]
+  },
+  {
+   "name": "grass_d",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/grass_d.glb",
+   "tris": [
+    42
+   ],
+   "aabb": [
+    [
+     -0.8870000243186951,
+     -0.04100000113248825,
+     -0.9919999837875366
+    ],
+    [
+     1.0360000133514404,
+     0.6340000033378601,
+     0.9150000214576721
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "grass",
+   "height": 0.6299999952316284,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    48.0
+   ]
+  },
+  {
+   "name": "grass_e",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/grass_e.glb",
+   "tris": [
+    36
+   ],
+   "aabb": [
+    [
+     -0.47099998593330383,
+     -0.03700000047683716,
+     -0.527999997138977
+    ],
+    [
+     0.3709999918937683,
+     0.36899998784065247,
+     0.414000004529953
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "grass",
+   "height": 0.3700000047683716,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    48.0
+   ]
+  },
+  {
+   "name": "fern_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/fern_a.glb",
+   "tris": [
+    126
+   ],
+   "aabb": [
+    [
+     -0.8289999961853027,
+     -0.028999999165534973,
+     -0.8109999895095825
+    ],
+    [
+     0.7730000019073486,
+     0.2630000114440918,
+     0.7289999723434448
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "fern",
+   "height": 0.25999999046325684,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    65.0
+   ]
+  },
+  {
+   "name": "fern_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/fern_b.glb",
+   "tris": [
+    168
+   ],
+   "aabb": [
+    [
+     -0.9559999704360962,
+     -0.032999999821186066,
+     -0.777999997138977
+    ],
+    [
+     0.8700000047683716,
+     0.3449999988079071,
+     0.9390000104904175
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "fern",
+   "height": 0.3499999940395355,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    65.0
+   ]
+  },
+  {
+   "name": "fern_c",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/fern_c.glb",
+   "tris": [
+    98
+   ],
+   "aabb": [
+    [
+     -0.6470000147819519,
+     -0.019999999552965164,
+     -0.5600000023841858
+    ],
+    [
+     0.5410000085830688,
+     0.18299999833106995,
+     0.5839999914169312
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "fern",
+   "height": 0.18000000715255737,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    65.0
+   ]
+  },
+  {
+   "name": "fern_d",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/fern_d.glb",
+   "tris": [
+    224
+   ],
+   "aabb": [
+    [
+     -0.9580000042915344,
+     -0.04399999976158142,
+     -1.434000015258789
+    ],
+    [
+     1.2000000476837158,
+     0.3700000047683716,
+     1.2940000295639038
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "fern",
+   "height": 0.3700000047683716,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    65.0
+   ]
+  },
+  {
+   "name": "fern_e",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/fern_e.glb",
+   "tris": [
+    84
+   ],
+   "aabb": [
+    [
+     -0.4749999940395355,
+     -0.014999999664723873,
+     -0.3070000112056732
+    ],
+    [
+     0.41600000858306885,
+     0.15600000321865082,
+     0.3720000088214874
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "fern",
+   "height": 0.1599999964237213,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    65.0
+   ]
+  },
+  {
+   "name": "nettle_a",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/nettle_a.glb",
+   "tris": [
+    34
+   ],
+   "aabb": [
+    [
+     -0.21899999678134918,
+     -0.020999999716877937,
+     -0.22599999606609344
+    ],
+    [
+     0.19599999487400055,
+     0.5180000066757202,
+     0.1589999943971634
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "forb",
+   "height": 0.5199999809265137,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    40.0
+   ]
+  },
+  {
+   "name": "nettle_b",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/nettle_b.glb",
+   "tris": [
+    30
+   ],
+   "aabb": [
+    [
+     -0.1289999932050705,
+     -0.020999999716877937,
+     -0.15800000727176666
+    ],
+    [
+     0.1379999965429306,
+     0.35499998927116394,
+     0.0989999994635582
+    ]
+   ],
+   "surfaces": [
+    "bark",
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "forb",
+   "height": 0.36000001430511475,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    40.0
+   ]
+  },
+  {
+   "name": "cow_parsley",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/cow_parsley.glb",
+   "tris": [
+    42
+   ],
+   "aabb": [
+    [
+     -0.3580000102519989,
+     -0.00800000037997961,
+     -0.31700000166893005
+    ],
+    [
+     0.3659999966621399,
+     0.3179999887943268,
+     0.3330000042915344
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "forb",
+   "height": 0.3199999928474426,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    40.0
+   ]
+  },
+  {
+   "name": "sprouts",
+   "group": "vegetation",
+   "file": "res://assets/vegetation/sprouts.glb",
+   "tris": [
+    28
+   ],
+   "aabb": [
+    [
+     -0.25600001215934753,
+     -0.014000000432133675,
+     -0.33799999952316284
+    ],
+    [
+     0.25999999046325684,
+     0.10999999940395355,
+     0.3050000071525574
+    ]
+   ],
+   "surfaces": [
+    "foliage"
+   ],
+   "category": "cover",
+   "kind": "sprouts",
+   "height": 0.10999999940395355,
+   "crown_radius": 0.4,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    22.0
+   ]
+  },
+  {
+   "name": "mossrock_a_01",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_a_01.glb",
+   "tris": [
+    1999,
+    499,
+    119
+   ],
+   "aabb": [
+    [
+     -1.11899995803833,
+     -0.1770000010728836,
+     -1.6799999475479126
+    ],
+    [
+     1.11899995803833,
+     1.2960000038146973,
+     1.684000015258789
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.3,
+   "crown_radius": 1.68,
+   "clearance": 1.68,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_a_02",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_a_02.glb",
+   "tris": [
+    1999,
+    498,
+    95
+   ],
+   "aabb": [
+    [
+     -1.3200000524520874,
+     -0.1509999930858612,
+     -1.6319999694824219
+    ],
+    [
+     1.3279999494552612,
+     1.1109999418258667,
+     1.621999979019165
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.11,
+   "crown_radius": 1.63,
+   "clearance": 1.63,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_a_03",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_a_03.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -1.0540000200271606,
+     -0.13199999928474426,
+     -1.0399999618530273
+    ],
+    [
+     1.0540000200271606,
+     0.9679999947547913,
+     1.0399999618530273
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 0.97,
+   "crown_radius": 1.05,
+   "clearance": 1.05,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_a_04",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_a_04.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -1.0640000104904175,
+     -0.2070000022649765,
+     -0.9819999933242798
+    ],
+    [
+     1.0640000104904175,
+     1.555999994277954,
+     0.9800000190734863
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.56,
+   "crown_radius": 1.06,
+   "clearance": 1.06,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_a_05",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_a_05.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -0.906000018119812,
+     -0.13699999451637268,
+     -1.4980000257492065
+    ],
+    [
+     0.9079999923706055,
+     1.059999942779541,
+     1.4989999532699585
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.06,
+   "crown_radius": 1.5,
+   "clearance": 1.5,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_a_06",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_a_06.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -1.062999963760376,
+     -0.1509999930858612,
+     -1.375
+    ],
+    [
+     1.062999963760376,
+     1.1069999933242798,
+     1.378999948501587
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.11,
+   "crown_radius": 1.38,
+   "clearance": 1.38,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_b_09",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_b_09.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -0.8140000104904175,
+     -0.0729999989271164,
+     -0.5059999823570251
+    ],
+    [
+     0.8140000104904175,
+     0.5370000004768372,
+     0.5059999823570251
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 0.54,
+   "crown_radius": 0.81,
+   "clearance": 0.81,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_b_13",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_b_13.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -1.0460000038146973,
+     -0.1509999930858612,
+     -0.5690000057220459
+    ],
+    [
+     1.0460000038146973,
+     1.1059999465942383,
+     0.5690000057220459
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.11,
+   "crown_radius": 1.05,
+   "clearance": 1.05,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_b_10",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_b_10.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -1.1009999513626099,
+     -0.09200000017881393,
+     -0.7760000228881836
+    ],
+    [
+     1.0989999771118164,
+     0.6759999990463257,
+     0.7760000228881836
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 0.68,
+   "crown_radius": 1.1,
+   "clearance": 1.1,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "mossrock_b_11",
+   "group": "rocks",
+   "file": "res://assets/rocks/mossrock_b_11.glb",
+   "tris": [
+    2000,
+    500,
+    120
+   ],
+   "aabb": [
+    [
+     -0.9769999980926514,
+     -0.15700000524520874,
+     -0.7639999985694885
+    ],
+    [
+     0.9769999980926514,
+     1.149999976158142,
+     0.7620000243186951
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 1.15,
+   "crown_radius": 0.98,
+   "clearance": 0.98,
+   "lod": [
+    30.0,
+    85.0,
+    320.0
+   ]
+  },
+  {
+   "name": "boulder",
+   "group": "rocks",
+   "file": "res://assets/rocks/boulder.glb",
+   "tris": [
+    2375,
+    585,
+    91
+   ],
+   "aabb": [
+    [
+     -0.6349999904632568,
+     -0.0729999989271164,
+     -0.9089999794960022
+    ],
+    [
+     0.6359999775886536,
+     0.9039999842643738,
+     0.9100000262260437
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "rock",
+   "kind": "rock",
+   "height": 0.9,
+   "crown_radius": 0.91,
+   "clearance": 0.91,
+   "lod": [
+    35.0,
+    95.0,
+    340.0
+   ]
+  },
+  {
+   "name": "stone",
+   "group": "rocks",
+   "file": "res://assets/rocks/stone.glb",
+   "tris": [
+    160
+   ],
+   "aabb": [
+    [
+     -0.11699999868869781,
+     -0.010999999940395355,
+     -0.07100000232458115
+    ],
+    [
+     0.10899999737739563,
+     0.10199999809265137,
+     0.0689999982714653
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "cover",
+   "kind": "stone",
+   "height": 0.1,
+   "crown_radius": 0.12,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    38.0
+   ]
+  },
+  {
+   "name": "stump_a",
+   "group": "props",
+   "file": "res://assets/props/stump_a.glb",
+   "tris": [
+    1799,
+    448,
+    64
+   ],
+   "aabb": [
+    [
+     -0.7129999995231628,
+     -0.02800000086426735,
+     -0.7929999828338623
+    ],
+    [
+     0.7129999995231628,
+     0.5419999957084656,
+     0.7940000295639038
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "prop",
+   "kind": "stump",
+   "height": 0.54,
+   "crown_radius": 0.79,
+   "clearance": 0.79,
+   "lod": [
+    25.0,
+    65.0,
+    160.0
+   ]
+  },
+  {
+   "name": "stump_b",
+   "group": "props",
+   "file": "res://assets/props/stump_b.glb",
+   "tris": [
+    1796,
+    448,
+    95
+   ],
+   "aabb": [
+    [
+     -0.7590000033378601,
+     -0.02500000037252903,
+     -0.6949999928474426
+    ],
+    [
+     0.7609999775886536,
+     0.49399998784065247,
+     0.6959999799728394
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "prop",
+   "kind": "stump",
+   "height": 0.49,
+   "crown_radius": 0.76,
+   "clearance": 0.76,
+   "lod": [
+    25.0,
+    65.0,
+    160.0
+   ]
+  },
+  {
+   "name": "log_scan",
+   "group": "props",
+   "file": "res://assets/props/log_scan.glb",
+   "tris": [
+    2400,
+    597,
+    150
+   ],
+   "aabb": [
+    [
+     -1.5210000276565552,
+     0.0,
+     -0.13899999856948853
+    ],
+    [
+     1.5260000228881836,
+     0.2879999876022339,
+     0.13899999856948853
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "prop",
+   "kind": "log",
+   "height": 0.29,
+   "crown_radius": 1.52,
+   "clearance": 1.52,
+   "lod": [
+    28.0,
+    70.0,
+    180.0
+   ]
+  },
+  {
+   "name": "branches_c",
+   "group": "props",
+   "file": "res://assets/props/branches_c.glb",
+   "tris": [
+    358
+   ],
+   "aabb": [
+    [
+     -0.06199999898672104,
+     0.0010000000474974513,
+     -0.3869999945163727
+    ],
+    [
+     0.06199999898672104,
+     0.13899999856948853,
+     0.38199999928474426
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "cover",
+   "kind": "branches",
+   "height": 0.2,
+   "crown_radius": 0.6,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    42.0
+   ]
+  },
+  {
+   "name": "branches_b",
+   "group": "props",
+   "file": "res://assets/props/branches_b.glb",
+   "tris": [
+    403
+   ],
+   "aabb": [
+    [
+     -0.07100000232458115,
+     0.003000000026077032,
+     -0.5180000066757202
+    ],
+    [
+     0.07400000095367432,
+     0.14100000262260437,
+     0.49900001287460327
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "cover",
+   "kind": "branches",
+   "height": 0.2,
+   "crown_radius": 0.6,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    42.0
+   ]
+  },
+  {
+   "name": "branches_a",
+   "group": "props",
+   "file": "res://assets/props/branches_a.glb",
+   "tris": [
+    415
+   ],
+   "aabb": [
+    [
+     -0.1589999943971634,
+     0.0010000000474974513,
+     -0.6299999952316284
+    ],
+    [
+     0.14300000667572021,
+     0.3409999907016754,
+     0.6470000147819519
+    ]
+   ],
+   "surfaces": [
+    "surface"
+   ],
+   "category": "cover",
+   "kind": "branches",
+   "height": 0.2,
+   "crown_radius": 0.6,
+   "clearance": 0.0,
+   "lod": [
+    0.0,
+    0.0,
+    42.0
+   ]
+  },
+  {
+   "name": "log_pine",
+   "group": "props",
+   "file": "res://assets/props/log_pine.glb",
+   "tris": [
+    700,
+    85,
+    36
+   ],
+   "aabb": [
+    [
+     -5.517000198364258,
+     -0.0689999982714653,
+     -0.5720000267028809
+    ],
+    [
+     5.507999897003174,
+     0.7289999723434448,
+     0.6850000023841858
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "prop",
+   "kind": "log",
+   "height": 0.48,
+   "crown_radius": 5.5,
+   "clearance": 5.5,
+   "lod": [
+    30.0,
+    75.0,
+    200.0
+   ]
+  },
+  {
+   "name": "log_spruce",
+   "group": "props",
+   "file": "res://assets/props/log_spruce.glb",
+   "tris": [
+    516,
+    65,
+    28
+   ],
+   "aabb": [
+    [
+     -4.014999866485596,
+     -0.36500000953674316,
+     -0.5429999828338623
+    ],
+    [
+     4.000999927520752,
+     0.550000011920929,
+     0.36399999260902405
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "prop",
+   "kind": "log",
+   "height": 0.4,
+   "crown_radius": 4.0,
+   "clearance": 4.0,
+   "lod": [
+    30.0,
+    75.0,
+    200.0
+   ]
+  },
+  {
+   "name": "roots_a",
+   "group": "props",
+   "file": "res://assets/props/roots_a.glb",
+   "tris": [
+    1280,
+    384
+   ],
+   "aabb": [
+    [
+     -2.6640000343322754,
+     -0.6840000152587891,
+     -2.805999994277954
+    ],
+    [
+     2.819999933242798,
+     0.35100001096725464,
+     1.6820000410079956
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.35,
+   "crown_radius": 2.741959571838379,
+   "clearance": 2.741959571838379,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "roots_b",
+   "group": "props",
+   "file": "res://assets/props/roots_b.glb",
+   "tris": [
+    800,
+    240
+   ],
+   "aabb": [
+    [
+     -2.072999954223633,
+     -0.5,
+     -1.2580000162124634
+    ],
+    [
+     2.509999990463257,
+     0.6110000014305115,
+     2.440999984741211
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.61,
+   "crown_radius": 2.2911109924316406,
+   "clearance": 2.2911109924316406,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "roots_c",
+   "group": "props",
+   "file": "res://assets/props/roots_c.glb",
+   "tris": [
+    768,
+    144
+   ],
+   "aabb": [
+    [
+     -1.7359999418258667,
+     -0.9729999899864197,
+     -2.0190000534057617
+    ],
+    [
+     2.6700000762939453,
+     0.36899998784065247,
+     2.4709999561309814
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.37,
+   "crown_radius": 2.2449495792388916,
+   "clearance": 2.2449495792388916,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "branch_pile_a",
+   "group": "props",
+   "file": "res://assets/props/branch_pile_a.glb",
+   "tris": [
+    956,
+    180
+   ],
+   "aabb": [
+    [
+     -1.4559999704360962,
+     -0.2630000114440918,
+     -1.3980000019073486
+    ],
+    [
+     1.4520000219345093,
+     0.7929999828338623,
+     1.1180000305175781
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.79,
+   "crown_radius": 1.4539453983306885,
+   "clearance": 1.4539453983306885,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "branch_pile_b",
+   "group": "props",
+   "file": "res://assets/props/branch_pile_b.glb",
+   "tris": [
+    649,
+    120
+   ],
+   "aabb": [
+    [
+     -0.5170000195503235,
+     -0.2029999941587448,
+     -0.8379999995231628
+    ],
+    [
+     0.9520000219345093,
+     0.5170000195503235,
+     1.1119999885559082
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.52,
+   "crown_radius": 0.9747929573059082,
+   "clearance": 0.9747929573059082,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "fallen_spruce",
+   "group": "props",
+   "file": "res://assets/props/fallen_spruce.glb",
+   "tris": [
+    2071,
+    249,
+    44
+   ],
+   "aabb": [
+    [
+     -7.732999801635742,
+     -1.1380000114440918,
+     -1.2949999570846558
+    ],
+    [
+     7.008999824523926,
+     1.3350000381469727,
+     1.2130000591278076
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "log",
+   "height": 1.33,
+   "crown_radius": 7.370759010314941,
+   "clearance": 7.370759010314941,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "roots_d",
+   "group": "props",
+   "file": "res://assets/props/roots_d.glb",
+   "tris": [
+    1280,
+    384
+   ],
+   "aabb": [
+    [
+     -1.2890000343322754,
+     -0.7910000085830688,
+     -1.434000015258789
+    ],
+    [
+     2.183000087738037,
+     0.5099999904632568,
+     1.5920000076293945
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.51,
+   "crown_radius": 1.7364801168441772,
+   "clearance": 1.7364801168441772,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "branch_pile_c",
+   "group": "props",
+   "file": "res://assets/props/branch_pile_c.glb",
+   "tris": [
+    1172,
+    180
+   ],
+   "aabb": [
+    [
+     -1.687999963760376,
+     -0.7760000228881836,
+     -2.559000015258789
+    ],
+    [
+     1.4700000286102295,
+     0.6679999828338623,
+     2.131999969482422
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "detail",
+   "height": 0.67,
+   "crown_radius": 2.3456149101257324,
+   "clearance": 2.3456149101257324,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "fallen_birch",
+   "group": "props",
+   "file": "res://assets/props/fallen_birch.glb",
+   "tris": [
+    1537,
+    219,
+    36
+   ],
+   "aabb": [
+    [
+     -5.39900016784668,
+     -0.9279999732971191,
+     -1.0160000324249268
+    ],
+    [
+     5.039999961853027,
+     0.8240000009536743,
+     0.7900000214576721
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "log",
+   "height": 0.82,
+   "crown_radius": 5.219611644744873,
+   "clearance": 5.219611644744873,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  },
+  {
+   "name": "fallen_pine",
+   "group": "props",
+   "file": "res://assets/props/fallen_pine.glb",
+   "tris": [
+    1478,
+    209,
+    28
+   ],
+   "aabb": [
+    [
+     -4.909999847412109,
+     -1.0449999570846558,
+     -0.9319999814033508
+    ],
+    [
+     4.508999824523926,
+     1.1619999408721924,
+     1.3509999513626099
+    ]
+   ],
+   "surfaces": [
+    "bark"
+   ],
+   "category": "detail",
+   "kind": "log",
+   "height": 1.16,
+   "crown_radius": 4.709439277648926,
+   "clearance": 4.709439277648926,
+   "lod": [
+    22.0,
+    55.0,
+    140.0
+   ]
+  }
+ ],
+ "triangle_budget": {
+  "trees/tree": 187713,
+  "vegetation/understory": 62789,
+  "vegetation/bush": 34964,
+  "vegetation/cover": 984,
+  "rocks/rock": 29220,
+  "rocks/cover": 160,
+  "props/prop": 9227,
+  "props/cover": 1176,
+  "props/detail": 14408
+ },
+ "total_unique_triangles": 340641
+}

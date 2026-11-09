@@ -1,0 +1,107 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/world.gd" id="1_world"]
+[ext_resource type="PackedScene" path="res://scenes/terrain/terrain.tscn" id="2_terrain"]
+[ext_resource type="PackedScene" path="res://scenes/road/road.tscn" id="4_road"]
+[ext_resource type="PackedScene" path="res://scenes/forest/forest.tscn" id="6_forest"]
+[ext_resource type="Script" path="res://scripts/camera_rig.gd" id="7_rig"]
+[ext_resource type="Script" path="res://scripts/hud.gd" id="8_hud"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+sky_top_color = Color(0.34, 0.47, 0.64, 1)
+sky_horizon_color = Color(0.74, 0.78, 0.8, 1)
+sky_curve = 0.11
+ground_bottom_color = Color(0.16, 0.18, 0.15, 1)
+ground_horizon_color = Color(0.74, 0.78, 0.8, 1)
+ground_curve = 0.05
+sun_angle_max = 8.0
+sun_curve = 0.06
+energy_multiplier = 0.95
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMat")
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_energy = 1.0
+ambient_light_sky_contribution = 1.0
+reflected_light_source = 2
+tonemap_mode = 4
+tonemap_exposure = 1.05
+ssao_enabled = true
+ssao_radius = 1.4
+ssao_intensity = 1.7
+ssao_power = 1.4
+ssao_detail = 0.6
+ssao_horizon = 0.06
+ssao_light_affect = 0.0
+ssao_ao_channel_affect = 0.35
+ssil_enabled = true
+ssil_radius = 4.0
+ssil_intensity = 0.6
+ssil_normal_rejection = 1.0
+glow_enabled = true
+glow_intensity = 0.28
+glow_strength = 0.9
+glow_bloom = 0.025
+glow_blend_mode = 1
+glow_hdr_threshold = 1.15
+fog_enabled = true
+fog_mode = 0
+fog_light_color = Color(0.68, 0.73, 0.75, 1)
+fog_light_energy = 1.0
+fog_sun_scatter = 0.12
+fog_density = 0.0028
+fog_aerial_perspective = 0.55
+fog_sky_affect = 0.25
+fog_height = -4.0
+fog_height_density = 0.012
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.0028
+volumetric_fog_albedo = Color(0.92, 0.94, 0.95, 1)
+volumetric_fog_anisotropy = 0.62
+volumetric_fog_length = 110.0
+volumetric_fog_detail_spread = 1.6
+volumetric_fog_ambient_inject = 0.08
+volumetric_fog_sky_affect = 0.0
+volumetric_fog_temporal_reprojection_enabled = true
+adjustment_enabled = true
+adjustment_contrast = 1.05
+adjustment_saturation = 0.92
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_world")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation = Vector3(-0.63, 1.22, 0)
+light_color = Color(1, 0.95, 0.86, 1)
+light_energy = 2.4
+light_volumetric_fog_energy = 0.9
+shadow_enabled = true
+shadow_bias = 0.04
+shadow_normal_bias = 1.2
+shadow_blur = 1.0
+directional_shadow_split_1 = 0.07
+directional_shadow_split_2 = 0.2
+directional_shadow_split_3 = 0.45
+directional_shadow_blend_splits = true
+directional_shadow_fade_start = 0.85
+directional_shadow_max_distance = 130.0
+directional_shadow_pancake_size = 30.0
+
+[node name="Terrain" parent="." instance=ExtResource("2_terrain")]
+
+[node name="Road" parent="." instance=ExtResource("4_road")]
+
+[node name="Forest" parent="." instance=ExtResource("6_forest")]
+
+[node name="CameraRig" type="Node3D" parent="."]
+script = ExtResource("7_rig")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("8_hud")

@@ -1,0 +1,19 @@
+[gd_resource type="ShaderMaterial" load_steps=6 format=3]
+
+[ext_resource type="Shader" path="res://shaders/bark.gdshader" id="1"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/bark/bark_albedo_h.webp" id="2"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/bark/bark_normal_r.webp" id="3"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/terrain/terrain_albedo_h.webp" id="4"]
+[ext_resource type="Texture2DArray" path="res://assets/textures/terrain/terrain_normal_r.webp" id="5"]
+
+[resource]
+resource_name = "bark"
+shader = ExtResource("1")
+shader_parameter/bark_albedo = ExtResource("2")
+shader_parameter/bark_normal = ExtResource("3")
+shader_parameter/moss_albedo = ExtResource("4")
+shader_parameter/moss_normal = ExtResource("5")
+shader_parameter/normal_strength = 1.1
+shader_parameter/moss_amount = 0.85
+shader_parameter/pine_upper_tint = Color(0.78, 0.42, 0.24, 1)
+shader_parameter/far_shade = 0.25
