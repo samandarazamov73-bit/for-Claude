@@ -379,13 +379,15 @@ func _build_hero() -> void:
 	cam.make_current()
 	torch = SpotLight3D.new()
 	torch.light_color = Color(1.0, 0.9, 0.74)
-	torch.light_energy = 7.0
-	torch.spot_range = 26.0
-	torch.spot_angle = 26.0
-	torch.spot_attenuation = 1.1
-	torch.light_volumetric_fog_energy = 2.0
+	torch.light_energy = 28.0
+	torch.spot_range = 32.0
+	torch.spot_angle = 24.0
+	torch.spot_angle_attenuation = 0.8
+	torch.light_volumetric_fog_energy = 1.2
+	torch.light_specular = 0.4
 	torch.shadow_enabled = true
 	torch.shadow_bias = 0.05
+	torch.rotation.x = -0.14                     # чуть вниз — на тропинку
 	torch.visible = false
 	torch.position = Vector3(0.18, -0.25, -0.1)
 	cam.add_child(torch)

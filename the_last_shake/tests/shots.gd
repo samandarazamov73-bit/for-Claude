@@ -47,7 +47,7 @@ func _run() -> void:
 	match case_name:
 		"anim":
 			await _anim()
-		"bus", "bus_mom", "walk", "building":
+		"bus", "bus_mom", "walk", "building", "torch":
 			await _prologue()
 		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair":
 			await _sanatorium()
@@ -122,13 +122,22 @@ func _prologue() -> void:
 			p.talking = true
 			await secs(10.0)
 			await shot("bus_mom_talk")
-		"walk", "building":
+		"walk", "building", "torch":
 			p.s = p.s_stop - 0.2
 			p.v = 0.0
 			p.phase = "arrive"
 			p._go_outside()
 			await secs(4.0)
 			await shot("walk_start")
+			if case_name == "torch":
+				p.hero.global_position = p._path_at(40.0)
+				p.walk_s = 40.0
+				p.mom_s = 44.0
+				p.torch.visible = true
+				p.set_day(0.9)
+				await secs(3.0)
+				await shot("torch_night")
+				return
 			if case_name == "building":
 				p.walk_s = 95.0
 				p.hero.global_position = p._path_at(95.0)
