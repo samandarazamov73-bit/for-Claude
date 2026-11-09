@@ -294,6 +294,7 @@ func _clear() -> void:
 		root_set.queue_free()
 	root_set = Node3D.new()
 	root_set.name = "DreamSet"
+	root_set.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(root_set)
 	fall_walls.clear()
 	lamps.clear()

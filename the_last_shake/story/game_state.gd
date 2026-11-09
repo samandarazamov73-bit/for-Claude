@@ -22,6 +22,7 @@ var checkpoint := "start"       # где начать санаторий: start,
 var deaths := 0
 var _fade: ColorRect
 var _layer: CanvasLayer
+var _loading: Label
 var _busy := false
 
 
@@ -36,6 +37,16 @@ func _ready() -> void:
 	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_layer.add_child(_fade)
+	_loading = Label.new()
+	_loading.text = "Загрузка…"
+	_loading.add_theme_font_size_override("font_size", 26)
+	_loading.add_theme_color_override("font_color", Color(0.75, 0.72, 0.66))
+	_loading.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_loading.position = Vector2(-260, -70)
+	_loading.size = Vector2(220, 40)
+	_loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_loading.visible = false
+	_layer.add_child(_loading)
 
 
 ## Все действия игры. Свои клавиши можно поменять здесь (physical_keycode — место клавиши, раскладка не важна).
@@ -64,6 +75,14 @@ func setup_input() -> void:
 
 func set_fade(a: float) -> void:
 	_fade.color.a = clampf(a, 0.0, 1.0)
+	if a < 0.5:
+		_loading.visible = false
+
+
+## Надпись «Загрузка…» поверх чёрного экрана (сама пропадает, когда экран светлеет).
+func set_loading(on: bool, text := "Загрузка…") -> void:
+	_loading.text = text
+	_loading.visible = on
 
 
 func fade_target() -> float:
@@ -71,6 +90,8 @@ func fade_target() -> float:
 
 
 func fade_to(a: float, seconds: float) -> void:
+	if a < 0.5:
+		_loading.visible = false
 	var tw := create_tween()
 	tw.tween_property(_fade, "color:a", clampf(a, 0.0, 1.0), maxf(seconds, 0.01))
 	await tw.finished
@@ -84,6 +105,8 @@ func go(scene: String, cp := "") -> void:
 	if cp != "":
 		checkpoint = cp
 	await fade_to(1.0, 0.8)
+	set_loading(true)
+	await get_tree().process_frame
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	get_tree().change_scene_to_file(scene)

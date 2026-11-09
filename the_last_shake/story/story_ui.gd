@@ -32,6 +32,12 @@ var _sub_t := 0.0
 var _obj_flash := 0.0
 var _hint_t := 0.0
 var _damage_v := 0.0
+var marker_target: Variant = null      # Vector3, Node3D или null: куда ехать по заданию
+var marker_offset := Vector3(0, 1.0, 0)
+var _marker: Control
+var _marker_icon: Polygon2D
+var _marker_text: Label
+var _marker_t := 0.0
 
 const DAMAGE_SHADER := """
 shader_type canvas_item;
@@ -118,10 +124,24 @@ func _ready() -> void:
 	_hint.anchor_top = 1.0
 	_hint.anchor_bottom = 1.0
 	_hint.offset_left = 30
-	_hint.offset_top = -50
+	_hint.offset_top = -105
 	_hint.offset_right = 1200
-	_hint.offset_bottom = -20
+	_hint.offset_bottom = -75
 	root.add_child(_hint)
+	# маркер задания: ромбик и расстояние; за краем экрана — прижимается к краю
+	_marker = Control.new()
+	_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_marker.visible = false
+	root.add_child(_marker)
+	_marker_icon = Polygon2D.new()
+	_marker_icon.polygon = PackedVector2Array([Vector2(0, -11), Vector2(8, 0), Vector2(0, 11), Vector2(-8, 0)])
+	_marker_icon.color = Color(1.0, 0.92, 0.7, 0.85)
+	_marker.add_child(_marker_icon)
+	_marker_text = _label(16, Color(1.0, 0.94, 0.8))
+	_marker_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_marker_text.position = Vector2(-50, 12)
+	_marker_text.size = Vector2(100, 22)
+	_marker.add_child(_marker_text)
 	# крупные надписи
 	_title = _label(64, Color(0.95, 0.92, 0.85))
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -175,9 +195,17 @@ func line_visible() -> bool:
 	return _sub_box.visible
 
 
-func set_objective(text: String) -> void:
+func set_objective(text: String, target: Variant = null, offset := Vector3(0, 1.0, 0)) -> void:
 	_objective.text = ("Задание: " + text) if text != "" else ""
 	_obj_flash = 2.0 if text != "" else 0.0
+	set_marker(target, offset)
+
+
+## Маркер цели (ромбик с расстоянием): точка или узел (тогда следует за ним), null — убрать.
+func set_marker(target: Variant, offset := Vector3(0, 1.0, 0)) -> void:
+	marker_target = target
+	marker_offset = offset
+	_marker_t = 0.0
 
 
 func set_prompt(text: String) -> void:
@@ -237,7 +265,50 @@ func clear_title(fade := 1.0) -> void:
 	await tw.finished
 
 
+func _update_marker(dt: float) -> void:
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	var tp: Vector3
+	if marker_target is Node3D and is_instance_valid(marker_target):
+		tp = (marker_target as Node3D).global_position + marker_offset
+	elif marker_target is Vector3:
+		tp = (marker_target as Vector3) + marker_offset
+	else:
+		_marker.visible = false
+		return
+	if cam == null:
+		_marker.visible = false
+		return
+	_marker_t += dt
+	var dist: float = cam.global_position.distance_to(tp)
+	var vs: Vector2 = get_viewport().get_visible_rect().size
+	var p: Vector2
+	var behind: bool = cam.is_position_behind(tp)
+	if behind:
+		var local: Vector3 = cam.global_transform.affine_inverse() * tp
+		p = vs * 0.5 + Vector2(local.x, -local.y).normalized() * vs.length()
+	else:
+		p = cam.unproject_position(tp)
+	var margin := 40.0
+	var inside: bool = not behind and p.x > margin and p.x < vs.x - margin and p.y > margin and p.y < vs.y - margin
+	if not inside:
+		var c: Vector2 = vs * 0.5
+		var d: Vector2 = p - c
+		if d.length() < 0.001:
+			d = Vector2(0, 1)
+		var k: float = minf((c.x - margin) / maxf(absf(d.x), 0.001), (c.y - margin) / maxf(absf(d.y), 0.001))
+		p = c + d * minf(k, 1.0)
+	_marker.position = p
+	_marker_text.text = "%d м" % int(round(dist))
+	# близко — почти пропадает; только что выдано — мигает
+	var a: float = clampf((dist - 1.5) / 3.0, 0.15, 0.85)
+	if _marker_t < 2.0:
+		a = maxf(a, 0.5 + 0.5 * sin(_marker_t * 12.0))
+	_marker.modulate.a = a
+	_marker.visible = true
+
+
 func _process(dt: float) -> void:
+	_update_marker(dt)
 	if _sub_t > 0.0:
 		_sub_t -= dt
 		if _sub_t <= 0.0:

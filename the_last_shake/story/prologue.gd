@@ -11,6 +11,7 @@ const Audio = preload("res://intro/audio.gd")
 const StoryUI = preload("res://story/story_ui.gd")
 const Actor = preload("res://story/actor.gd")
 const Props = preload("res://story/props.gd")
+const ChairModel = preload("res://story/chair_model.gd")
 
 const RIDE_DISTANCE := 1900.0       # метров до остановки (~2,5 минуты)
 const CRUISE := 12.5                # м/с
@@ -26,9 +27,9 @@ const PATH_HALF := 1.6
 const EYE := Vector3(0.0, 1.19, 0.20)
 const MOUSE_SENS := 0.0022
 const RAIL := Vector3(-0.42, 2.58, 0.0)       # верхний поручень над задней площадкой (координаты кузова, z — где мама)
-const MOM_IN_BUS := Vector3(-0.45, 0.8, 3.5)    # Барно стоит слева от Самана, держится за поручень
-const HERO_IN_BUS := Vector3(0.2, 0.8, 4.2)     # задняя площадка, лицом к правому окну
-const PLATFORM := Rect2(-0.5, 3.95, 1.25, 0.45)  # x, z, ширина, длина (где может быть центр коляски)
+const MOM_IN_BUS := Vector3(-0.5, 0.8, 4.6)     # Барно стоит слева от Самана, держится за поручень
+const HERO_IN_BUS := Vector3(-0.6, 0.8, 3.85)   # задняя площадка, лицом к левому окну
+const PLATFORM := Rect2(-0.75, 3.72, 1.05, 0.3)  # x, z, ширина, длина (где может быть центр коляски)
 
 @onready var terrain: TerrainSystem = $Terrain
 @onready var road: RoadBuilder = $Road
@@ -67,15 +68,22 @@ var _bus_away := false
 var _bus_v := 0.0
 var _events := {}
 var _event_busy := false
+var bus_lamps: Array = []
+var chair_model
+var _drone: AudioStreamPlayer
+var _lamp_t := 6.0
 var _mom_hold := false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF    # всё здесь движется в _process
 	GameState.set_fade(1.0)
 	ui = StoryUI.new()
 	add_child(ui)
 	ui.line_skipped.connect(_on_skip)
+	GameState.set_loading(true, "Загрузка леса…")
+	await get_tree().process_frame
 	await get_tree().process_frame
 	_build_world()
 	_build_bus()
@@ -85,6 +93,14 @@ func _ready() -> void:
 	_build_building()
 	audio = Audio.new()
 	add_child(audio)
+	_drone = AudioStreamPlayer.new()
+	var ds: AudioStreamWAV = (load("res://story/sfx/drone_low.wav") as AudioStreamWAV).duplicate()
+	ds.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	ds.loop_end = int(ds.get_length() * ds.mix_rate)
+	_drone.stream = ds
+	_drone.volume_db = -60.0
+	add_child(_drone)
+	_drone.play()
 	_apply_graphics(GraphicsSettings.settings)
 	GraphicsSettings.changed.connect(_apply_graphics)
 	_update_globals()
@@ -116,68 +132,125 @@ func _build_world() -> void:
 	s_stop = float(site["stop"]["s"]) - 1.5
 	s_start = fposmod(s_stop - RIDE_DISTANCE, road.length)
 	s = s_start
-	# небо, туман, солнце
+	# небо, туман, солнце: основа — настройки леса forest_drive (main.tscn), но пасмурно, сырой туман
+	# предгорий, вечер переходит в ночь. Туман «по глубине» начинается в 10 м — в салоне воздух чистый.
 	sky_mat = ProceduralSkyMaterial.new()
+	sky_mat.sky_curve = 0.11
+	sky_mat.ground_curve = 0.05
+	sky_mat.sun_curve = 0.06
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_sky_contribution = 1.0
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
-	env.fog_enabled = true
-	env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	env.fog_sky_affect = 0.85
-	env.fog_aerial_perspective = 0.3
-	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.02
-	env.volumetric_fog_albedo = Color(0.85, 0.86, 0.86)
-	env.volumetric_fog_length = 90.0
-	env.volumetric_fog_anisotropy = 0.5
 	env.ssao_enabled = true
 	env.ssao_radius = 1.4
-	env.ssao_intensity = 1.6
+	env.ssao_intensity = 1.8
+	env.ssao_power = 1.4
+	env.ssao_detail = 0.6
+	env.ssao_horizon = 0.06
+	env.ssao_light_affect = 0.0
+	env.ssao_ao_channel_affect = 0.35
+	env.ssil_enabled = true
+	env.ssil_radius = 4.0
+	env.ssil_intensity = 0.5
 	env.glow_enabled = true
-	env.glow_intensity = 0.3
+	env.glow_intensity = 0.28
+	env.glow_strength = 0.9
+	env.glow_bloom = 0.03
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
+	env.glow_hdr_threshold = 1.1
+	env.fog_enabled = true
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_depth_curve = 1.5
+	env.fog_sky_affect = 1.0
+	env.fog_sun_scatter = 0.08
+	env.fog_aerial_perspective = 0.4
+	env.fog_height = -3.0
+	env.fog_height_density = 0.04
+	env.volumetric_fog_enabled = true
+	env.volumetric_fog_density = 0.008
+	env.volumetric_fog_albedo = Color(0.9, 0.92, 0.93)
+	env.volumetric_fog_anisotropy = 0.6
+	env.volumetric_fog_length = 90.0
+	env.volumetric_fog_detail_spread = 1.6
+	env.volumetric_fog_ambient_inject = 0.12
+	env.volumetric_fog_sky_affect = 0.0
+	env.volumetric_fog_temporal_reprojection_enabled = true
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 0.75
-	env.adjustment_contrast = 1.05
+	env.adjustment_contrast = 1.08
+	# цвет: тени — в холодный зелёно-серый, света — в старую бумагу (как плёнка 70-х)
+	var grade := Gradient.new()
+	grade.set_color(0, Color(0.0, 0.015, 0.02))
+	grade.set_color(1, Color(1.0, 0.97, 0.9))
+	grade.add_point(0.45, Color(0.42, 0.45, 0.44))
+	var lut := GradientTexture1D.new()
+	lut.gradient = grade
+	lut.width = 256
+	env.adjustment_color_correction = lut
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 1.2
+	sun.shadow_blur = 2.0
 	sun.directional_shadow_max_distance = 90.0
-	sun.light_volumetric_fog_energy = 0.6
+	sun.directional_shadow_blend_splits = true
+	sun.light_angular_distance = 2.5          # пасмурно: мягкие расплывчатые тени
+	sun.light_volumetric_fog_energy = 0.8
 	add_child(sun)
 	forest.lod_manager.sun_light = sun
 	set_day(0.0)
 
 
-## 0 — пасмурный серый день в тумане, 0.45 — вечер у остановки, 1 — ночь у санатория.
+# время: [t, высота солнца/луны °, цвет света, сила, верх неба, горизонт, туман, конец тумана м, рассеянный, насыщенность]
+const DAY_KEYS := [
+	[0.0, 17.0, Color(1.0, 0.95, 0.88), 1.15, Color(0.46, 0.51, 0.56), Color(0.70, 0.72, 0.72), Color(0.62, 0.65, 0.66), 175.0, 1.0, 0.72],
+	[0.38, 7.0, Color(1.0, 0.74, 0.5), 1.0, Color(0.4, 0.42, 0.5), Color(0.78, 0.63, 0.52), Color(0.6, 0.54, 0.5), 150.0, 1.05, 0.72],
+	[0.6, 2.0, Color(1.0, 0.52, 0.34), 0.45, Color(0.22, 0.24, 0.33), Color(0.55, 0.41, 0.37), Color(0.36, 0.31, 0.32), 115.0, 0.7, 0.64],
+	[0.8, 25.0, Color(0.55, 0.62, 0.8), 0.08, Color(0.05, 0.06, 0.1), Color(0.13, 0.12, 0.15), Color(0.09, 0.09, 0.11), 80.0, 0.24, 0.56],
+	[1.0, 32.0, Color(0.55, 0.62, 0.82), 0.12, Color(0.012, 0.015, 0.028), Color(0.03, 0.034, 0.05), Color(0.028, 0.03, 0.04), 60.0, 0.12, 0.5],
+]
+
+
+## 0 — пасмурный серый день в тумане, 0.38 — вечер у остановки, 1 — ночь у санатория (свет — луна).
 func set_day(t: float) -> void:
 	day = clampf(t, 0.0, 1.0)
-	var k1: float = smoothstep(0.35, 0.75, day)
-	var k2: float = smoothstep(0.7, 1.0, day)
-	var elev: float = lerpf(lerpf(24.0, 6.0, k1), -8.0, k2)
-	sun.rotation_degrees = Vector3(-elev, -40.0, 0.0)
-	sun.light_energy = lerpf(lerpf(0.9, 0.5, k1), 0.0, k2)
-	sun.light_color = Color(0.95, 0.95, 0.95).lerp(Color(1.0, 0.62, 0.4), k1)
-	sun.visible = sun.light_energy > 0.02
-	var top: Color = Color(0.55, 0.58, 0.6).lerp(Color(0.25, 0.25, 0.33), k1).lerp(Color(0.01, 0.012, 0.025), k2)
-	var hor: Color = Color(0.72, 0.73, 0.72).lerp(Color(0.6, 0.45, 0.38), k1).lerp(Color(0.03, 0.03, 0.045), k2)
+	var i: int = 1
+	while i < DAY_KEYS.size() - 1 and day > float(DAY_KEYS[i][0]):
+		i += 1
+	var a: Array = DAY_KEYS[i - 1]
+	var b: Array = DAY_KEYS[i]
+	var k: float = clampf((day - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.0001), 0.0, 1.0)
+	var moon: bool = day > 0.7
+	var az: float = 150.0 if moon else -40.0
+	sun.rotation_degrees = Vector3(-lerpf(float(a[1]), float(b[1]), k), az, 0.0)
+	sun.light_color = (a[2] as Color).lerp(b[2], k)
+	# солнце сменяется луной в сумерках, когда свет почти пропал (без скачка теней)
+	sun.light_energy = lerpf(float(a[3]), float(b[3]), k) * clampf(absf(day - 0.7) / 0.05, 0.0, 1.0)
+	sun.visible = sun.light_energy > 0.01
+	var top: Color = (a[4] as Color).lerp(b[4], k)
+	var hor: Color = (a[5] as Color).lerp(b[5], k)
 	sky_mat.sky_top_color = top
 	sky_mat.sky_horizon_color = hor
-	sky_mat.ground_horizon_color = hor.darkened(0.2)
+	sky_mat.ground_horizon_color = hor.darkened(0.15)
 	sky_mat.ground_bottom_color = hor.darkened(0.6)
-	sky_mat.sun_angle_max = 2.0
-	env.fog_light_color = hor.lerp(Color(0.6, 0.62, 0.62), 0.3 * (1.0 - k2))
-	env.fog_density = lerpf(lerpf(0.016, 0.011, k1), 0.02, k2)
-	env.volumetric_fog_density = lerpf(0.024, 0.012, k2)
-	env.volumetric_fog_albedo = Color(0.85, 0.86, 0.86).lerp(Color(0.25, 0.25, 0.3), k2)
-	env.ambient_light_energy = lerpf(lerpf(1.0, 0.55, k1), 0.06, k2)
+	sky_mat.sun_angle_max = 35.0 if not moon else 3.0
+	sky_mat.energy_multiplier = 1.0
+	env.fog_light_color = (a[6] as Color).lerp(b[6], k)
+	env.fog_depth_begin = 10.0
+	env.fog_depth_end = lerpf(float(a[7]), float(b[7]), k)
+	env.fog_density = 0.94
+	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
+	env.adjustment_saturation = lerpf(float(a[9]), float(b[9]), k)
+	env.volumetric_fog_albedo = Color(0.9, 0.92, 0.93).lerp(Color(0.3, 0.32, 0.38), smoothstep(0.5, 1.0, day))
 
 
 func _apply_graphics(st: Dictionary) -> void:
@@ -203,7 +276,7 @@ func _apply_graphics(st: Dictionary) -> void:
 func _update_globals() -> void:
 	RenderingServer.global_shader_parameter_set("main_camera_pos", cam.global_position)
 	RenderingServer.global_shader_parameter_set("wind", Vector4(0.8, 0.6, 0.45, 1.0))
-	RenderingServer.global_shader_parameter_set("wetness", 0.6)
+	RenderingServer.global_shader_parameter_set("wetness", 0.35)
 
 
 # ================================================================================ автобус, люди
@@ -217,6 +290,35 @@ func _build_bus() -> void:
 	bus.set_led("107  Санаторий «Оромгох»")
 	if bus.stop_button:
 		bus.stop_button.visible = false
+	# в салоне нет тумана (объёмный туман вычитается коробкой по размеру кузова)
+	var clear := FogVolume.new()
+	clear.size = Vector3(2.5, 2.6, 10.6)
+	clear.shape = RenderingServer.FOG_VOLUME_SHAPE_BOX
+	var fm := FogMaterial.new()
+	fm.density = -1.0
+	clear.material = fm
+	bus.body.add_child(clear)
+	clear.position = Vector3(0, 1.9, 0)
+	# свет в салоне свой: рассеянный — тусклый, холодный (не как на улице), без отражений неба
+	var probe := ReflectionProbe.new()
+	probe.size = Vector3(2.5, 2.7, 10.6)
+	probe.interior = true
+	probe.box_projection = true
+	probe.ambient_mode = ReflectionProbe.AMBIENT_COLOR
+	probe.ambient_color = Color(0.55, 0.6, 0.66)
+	probe.ambient_color_energy = 0.32
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	bus.body.add_child(probe)
+	probe.position = Vector3(0, 1.9, 0)
+	# плафоны: днём тусклые, холодные, старые — изредка мигают
+	for l in bus.body.get_children():
+		if l is OmniLight3D:
+			var ol: OmniLight3D = l
+			ol.light_color = Color(0.86, 0.93, 1.0)
+			ol.light_energy = 0.35
+			ol.omni_range = 5.5
+			ol.light_volumetric_fog_energy = 0.0
+			bus_lamps.append(ol)
 	_place_bus(0.0)
 	for pair in [["driver", "anchor_driver"], ["grandma_scarf", "seat_13_w_r"], ["man_newspaper", "seat_11_a"],
 			["mother_baby", "seat_19_s"]]:
@@ -262,15 +364,10 @@ func _build_hero() -> void:
 	hero.name = "Hero"
 	bus.body.add_child(hero)
 	hero.position = HERO_IN_BUS
-	hero.rotation.y = -PI * 0.5                      # лицом к окну (за окном туман), мама — слева
-	var res: Resource = load("res://intro/assets/models/wheelchair.glb")
-	if res is PackedScene:
-		var fix := Node3D.new()
-		hero.add_child(fix)
-		fix.position.y = 0.552
-		fix.rotation.y = PI
-		fix.scale = Vector3.ONE * 1.2
-		fix.add_child((res as PackedScene).instantiate())
+	hero.rotation.y = PI * 0.5                       # лицом к окну (за окном туман), мама — слева
+	# своя коляска (джойстик наклоняется при езде); тени не отбрасывает — иначе рука закрывает луч фонаря
+	chair_model = ChairModel.new()
+	chair_model.build(hero)
 	head = Node3D.new()
 	head.position = EYE
 	hero.add_child(head)
@@ -282,10 +379,13 @@ func _build_hero() -> void:
 	cam.make_current()
 	torch = SpotLight3D.new()
 	torch.light_color = Color(1.0, 0.9, 0.74)
-	torch.light_energy = 5.0
-	torch.spot_range = 22.0
-	torch.spot_angle = 28.0
+	torch.light_energy = 7.0
+	torch.spot_range = 26.0
+	torch.spot_angle = 26.0
+	torch.spot_attenuation = 1.1
+	torch.light_volumetric_fog_energy = 2.0
 	torch.shadow_enabled = true
+	torch.shadow_bias = 0.05
 	torch.visible = false
 	torch.position = Vector3(0.18, -0.25, -0.1)
 	cam.add_child(torch)
@@ -297,7 +397,7 @@ func _build_mom() -> void:
 	bus.body.add_child(mom)
 	mom.setup("res://characters/mom.glb")
 	mom.position = MOM_IN_BUS
-	mom.set_yaw(-PI * 0.5)                            # тоже смотрит в окно
+	mom.set_yaw(PI * 0.5)                             # тоже смотрит в окно
 	mom.play("idle_loop")
 
 
@@ -583,6 +683,14 @@ func _update_ride(dt: float) -> void:
 	_place_bus(dt)
 	audio.update(v, acc, true)
 	audio.set_forest(1.0, 0.0)
+	_lamp_t -= dt
+	if _lamp_t <= 0.0 and not bus_lamps.is_empty():
+		_lamp_t = randf_range(0.04, 0.12) if randf() < 0.7 else randf_range(6.0, 16.0)
+		var l: OmniLight3D = bus_lamps[randi() % bus_lamps.size()]
+		l.light_energy = 0.35 if l.light_energy < 0.1 else randf_range(0.0, 0.08)
+	elif _lamp_t > 5.0:
+		for l in bus_lamps:
+			(l as OmniLight3D).light_energy = 0.35
 	set_day(lerpf(0.0, 0.38, 1.0 - left / RIDE_DISTANCE))
 	if phase == "ride" and left < 0.6 and v < 0.05:
 		v = 0.0
@@ -596,15 +704,16 @@ func _update_ride(dt: float) -> void:
 	np.x = clampf(np.x, PLATFORM.position.x, PLATFORM.position.x + PLATFORM.size.x)
 	np.z = clampf(np.z, PLATFORM.position.y, PLATFORM.position.y + PLATFORM.size.y)
 	hero.position = np
+	chair_model.set_input(drive, -turn, dt)
 	audio.set_motor(absf(drive) * 0.7 + absf(turn) * 0.3)
 	# мама держится за поручень: в окно — а в разговоре смотрит на сына
-	mom.set_arm(bus.body.to_global(Vector3(RAIL.x, RAIL.y, MOM_IN_BUS.z + 0.18)))
+	mom.set_arm(bus.body.to_global(Vector3(RAIL.x, RAIL.y, MOM_IN_BUS.z - 0.18)))
 	if talking:
 		mom.set_look(head.global_position)
 	else:
 		var base: Vector3 = mom.position
 		var drift := Vector3(sin(time * 0.13) * 0.6, sin(time * 0.21) * 0.25, cos(time * 0.17) * 0.8)
-		mom.set_look(bus.body.to_global(base + Vector3(3.8, 1.4, 0.4) + drift))
+		mom.set_look(bus.body.to_global(base + Vector3(-3.8, 1.4, -0.4) + drift))
 	# навести взгляд на маму → E
 	var to: Vector3 = mom.head_pos() - cam.global_position
 	var aimed: bool = to.length() < 2.8 and (-cam.global_transform.basis.z).dot(to.normalized()) > 0.96
@@ -631,11 +740,13 @@ func _update_walk(dt: float) -> void:
 	p = Vector3(q.x + off.x, 0.0, q.z + off.z)
 	p.y = lerpf(q.y, terrain.height_at(p.x, p.z), clampf(off.length() / PATH_HALF, 0.0, 1.0))
 	hero.global_position = p
+	chair_model.set_input(drive, -turn, dt)
 	audio.set_motor(absf(drive) * 0.8 + absf(turn) * 0.3)
 	# темнеет по мере продвижения (и просто со временем)
 	set_day(maxf(day, lerpf(0.45, 0.88, walk_s / maxf(path_cum[-1], 1.0))))
 	set_day(day + dt * 0.0006)
 	audio.set_forest(0.0, day)
+	_drone.volume_db = lerpf(-40.0, -15.0, smoothstep(0.45, 0.9, day))
 	# мама идёт на ~3 м впереди и ждёт, если отстал
 	var want: float = minf(walk_s + 3.2, path_cum[-1] + 1.0)
 	if _mom_hold:

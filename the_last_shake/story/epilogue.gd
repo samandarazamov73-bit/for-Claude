@@ -18,6 +18,7 @@ var _blur: ColorRect
 
 
 func _ready() -> void:
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	GameState.set_fade(1.0)
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	ui = StoryUI.new()
@@ -132,13 +133,13 @@ func _build_room() -> void:
 	doctor = Actor.new()
 	add_child(doctor)
 	doctor.setup("res://characters/psycho.glb")
-	doctor.global_position = Vector3(0.75, 0.0, 0.15)
+	doctor.global_position = Vector3(0.15, 0.0, 1.35)
 	# камера: Анвар лежит на подушке и смотрит вперёд-вверх
 	cam = Camera3D.new()
 	cam.fov = 62.0
 	add_child(cam)
 	cam.position = Vector3(-0.6, 1.05, -0.55)
-	cam.look_at(Vector3(-0.4, 1.35, 2.0), Vector3.UP)
+	cam.look_at(Vector3(-0.15, 1.35, 2.0), Vector3.UP)
 	cam.make_current()
 	doctor.face(cam.global_position, true)
 
@@ -185,7 +186,7 @@ func _run() -> void:
 	tw.tween_property(_blur, "modulate:a", 0.0, 3.5).set_ease(Tween.EASE_OUT)
 	await wait(1.5)
 	doctor.set_look(cam.global_position)
-	await doctor.go_and_wait([Vector3(0.35, 0.0, 0.1)], 0.6)
+	await doctor.go_and_wait([Vector3(0.05, 0.0, 0.95)], 0.6)
 	doctor.face(cam.global_position)
 	doctor.play("talk_loop")
 	await _line("doctor", "Тише, Анвар-ака, успокойтесь. Вы в больнице.")

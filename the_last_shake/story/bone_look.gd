@@ -22,8 +22,12 @@ var _last_us := 0
 
 func find_bones(sk: Skeleton3D) -> void:
 	for i in sk.get_bone_count():
-		var n: String = sk.get_bone_name(i)
-		var short: String = n.get_slice(":", n.get_slice_count(":") - 1) if n.contains(":") else n
+		# Godot при импорте меняет «mixamorig:Neck» на «mixamorig_Neck» — отрезаем приставку в любом виде
+		var short: String = sk.get_bone_name(i)
+		for prefix in ["mixamorig:", "mixamorig_", "mixamorig"]:
+			if short.begins_with(prefix):
+				short = short.substr(prefix.length())
+				break
 		match short:
 			"Neck": _neck = i
 			"Head": _head = i

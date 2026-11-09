@@ -23,9 +23,13 @@ var _move_anim := ""
 var _moving := false
 var _face_dir: Variant = null          # Vector3 или null
 var _yaw := 0.0
+var step_volume := -8.0                 # громкость шагов (дБ); псих топает громче
+var _step_left := 0.0
+var _steps: AudioStreamPlayer3D
 
 
 func setup(path: String, scale_k := 1.0) -> void:
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF     # ходит в _process, а не в физике
 	var res: Resource = load(path)
 	if not (res is PackedScene):
 		push_warning("нет модели " + path)
@@ -47,30 +51,55 @@ func setup(path: String, scale_k := 1.0) -> void:
 		(mi as MeshInstance3D).extra_cull_margin = 1.5     # анимация уводит руки за рамки покоя — не пропадать
 	_yaw = rotation.y
 	play(idle_anim)
+	_steps = AudioStreamPlayer3D.new()
+	_steps.stream = load("res://story/sfx/footstep_slow.wav")
+	_steps.unit_size = 2.5
+	_steps.max_distance = 30.0
+	_steps.bus = "World" if AudioServer.get_bus_index("World") >= 0 else "Master"
+	add_child(_steps)
+
+
+## Имя анимации в плеере. Godot при импорте отрезает окончание «_loop» (walk_loop → walk) и делает такую
+## анимацию циклической, поэтому ищем оба варианта.
+func anim_name(n: String) -> String:
+	if anim == null:
+		return ""
+	if anim.has_animation(n):
+		return n
+	var base: String = n.trim_suffix("_loop")
+	if anim.has_animation(base):
+		return base
+	if anim.has_animation(n + "_loop"):
+		return n + "_loop"
+	return ""
 
 
 func has_anim(n: String) -> bool:
-	return anim != null and anim.has_animation(n)
+	return anim_name(n) != ""
 
 
 func play(n: String, blend := 0.25, spd := 1.0) -> void:
-	if anim == null or not anim.has_animation(n):
+	var real: String = anim_name(n)
+	if real == "":
 		return
 	anim.speed_scale = spd
 	if current == n and anim.is_playing():
 		return
 	current = n
-	anim.play(n, blend)
+	anim.play(real, blend)
 
 
 ## Проиграть один раз и дождаться конца (или часть: until — секунда, на которой вернуть управление).
 func play_once(n: String, blend := 0.15, spd := 1.0, until := -1.0) -> void:
-	if anim == null or not anim.has_animation(n):
+	var real: String = anim_name(n)
+	if real == "":
 		return
 	current = n
 	anim.speed_scale = spd
-	anim.play(n, blend)
-	var length: float = anim.get_animation(n).length
+	anim.play(real, blend)
+	if anim.current_animation == real:
+		anim.seek(0.0, true)
+	var length: float = anim.get_animation(real).length
 	var t: float = (until if until > 0.0 else length) / maxf(spd, 0.05)
 	await get_tree().create_timer(t, false).timeout
 
@@ -134,6 +163,25 @@ func face(p: Vector3, instant := false) -> void:
 		_face_dir = d.normalized()
 
 
+## Шаги: примерно через каждые 0,7 м (на бегу — чаще и громче).
+func _footstep(dist: float) -> void:
+	if _steps == null or not visible:
+		return
+	_step_left -= dist
+	if _step_left > 0.0:
+		return
+	var running: bool = _speed > 2.0
+	_step_left = 1.1 if running else 0.68
+	_steps.volume_db = step_volume + (4.0 if running else 0.0) + randf_range(-2.0, 1.0)
+	_steps.pitch_scale = randf_range(0.85, 1.1) * (1.15 if running else 1.0)
+	_steps.play()
+
+
+## Шаги, когда персонаж двигается не сам (по команде извне, например в погоне).
+func step_moved(dist: float) -> void:
+	_footstep(dist)
+
+
 func set_yaw(y: float) -> void:
 	_yaw = y
 	rotation.y = y
@@ -157,6 +205,7 @@ func _process(dt: float) -> void:
 			global_position += to.normalized() * step
 			if flat.length() > 0.05:
 				_face_dir = flat.normalized()
+		_footstep(step)
 	if _face_dir != null:
 		var fd: Vector3 = _face_dir
 		var want: float = atan2(-fd.x, -fd.z)

@@ -23,7 +23,9 @@ const YAW_STOP := 11.0
 const RADIUS := 0.36
 const FRONT := 0.75         # from the chair's centre to the front of the footrest
 const EYE := 1.18
-const HEAD_POS := Vector3(0, EYE, 0.06)
+const HEAD_POS := Vector3(0, 1.19, 0.20)     # как в прологе: глаза героя над моделью коляски
+const ChairModel = preload("res://story/chair_model.gd")   # та же коляска с героем, что в автобусе
+var chair_model
 const MOUSE_SENS := 0.0024
 const REACH := 1.5          # doors, switches, buttons: from the eyes, about an arm's length past the knees
 const SEE_RANGE := 6.0      # farther than REACH: "too far" when you try
@@ -182,6 +184,16 @@ func _plaid() -> StandardMaterial3D:
 func _build_chair() -> void:
 	chair = Node3D.new()
 	add_child(chair)
+	chair_model = ChairModel.new()
+	if chair_model.build(chair):
+		stick = Node3D.new()       # джойстик — часть модели (chair_model.stick)
+		chair.add_child(stick)
+		return
+	chair_model = null
+	_build_chair_procedural()
+
+
+func _build_chair_procedural() -> void:
 	var leather := _mat(Color(0.06, 0.055, 0.05), 0.55)
 	var steel := _mat(Color(0.18, 0.19, 0.2), 0.4, 0.8)
 	var rubber := _mat(Color(0.03, 0.03, 0.03), 0.9)
@@ -397,7 +409,10 @@ func _update_view(dt: float) -> void:
 	var vib: float = clamp(abs(v) / SPEEDS[-1], 0.0, 1.0)
 	shake = move_toward(shake, 0.0, 0.12 * dt)
 	chair.rotation.z = sin(t * 17.0) * 0.002 * vib
-	stick.rotation = Vector3(-joystick().x * 0.35, 0, -joystick().y * 0.35)
+	if chair_model:
+		chair_model.set_input(joystick().x, joystick().y, dt)
+	else:
+		stick.rotation = Vector3(-joystick().x * 0.35, 0, -joystick().y * 0.35)
 
 
 ## Torch (F): an old hand torch held at chest height on the right. A warm beam with a hot centre, a ring

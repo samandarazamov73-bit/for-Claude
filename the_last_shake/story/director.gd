@@ -13,8 +13,8 @@ const Props = preload("res://story/props.gd")
 const Interactable = preload("res://story/interactable.gd")
 
 # --- точки здания (метры, координаты Godot) ---
-const SPAWN := Vector3(32.6, 1.2, 10.8)
-const MOM_START := Vector3(33.5, 1.2, 9.4)
+const SPAWN := Vector3(32.5, 1.2, 8.7)         # в холле перед креслами (не между ними)
+const MOM_START := Vector3(33.4, 1.2, 8.1)
 const STAIR_FOOT := Vector3(30.9, 1.2, -5.8)
 ## мама поднимается по главной лестнице №1: 1-й марш вдоль +X, площадка, 2-й марш обратно, 2-й этаж
 const STAIRS_UP := [Vector3(31.45, 1.2, -5.8), Vector3(34.4, 2.7, -5.8), Vector3(35.0, 2.85, -5.3),
@@ -27,6 +27,10 @@ const DOOR_SCREAM := 74          # процедурный кабинет 139 (L0
 const DOOR_ADMIN := 56           # администрация 134 (L0.F14), дверь с матовым стеклом
 const DOOR_GURNEY := 72          # кабинет 136 (L0.R15): оттуда выкатывается каталка
 const DOOR_HALL_STAIRS := 18
+const LIFT_CALL := Vector3(37.5, 1.2, -6.9)        # перед дверями лифта, 1-й этаж (на других — +3,3 м по высоте)
+const SCREAM_DOOR := Vector3(52.5, 1.2, -9.9)      # дверь процедурного кабинета 139
+const ADMIN_DOOR := Vector3(43.5, 1.2, -6.3)       # дверь кабинета 134 «Администрация»
+const ROOM213_DOOR := Vector3(31.5, 4.5, -9.9)
 const NIGHTSTAND_POS := Vector3(42.36, 1.2, -4.6)
 const GURNEY_FROM := Vector3(46.5, 1.2, -11.3)
 const GURNEY_TO := Vector3(46.5, 1.2, -7.45)
@@ -72,6 +76,7 @@ var _rumble: AudioStreamPlayer
 var _drone: AudioStreamPlayer
 var _moan_t := 0.0
 var _scream_door_open := false
+var _flick_t := 1.0
 var _psycho_speed := PSYCHO_SPEED
 
 
@@ -93,6 +98,7 @@ func begin(g) -> void:
 	grandpa.natural = {"walk_loop": 0.26, "run_loop": 2.45}
 	psycho = _actor("res://characters/psycho.glb", "Псих")
 	psycho.natural = {"walk_loop": 1.3, "run_loop": 3.6, "sprint_loop": 2.13}
+	psycho.step_volume = 2.0
 	for a in [grandpa, psycho]:
 		a.visible = false
 	lift.locked = true
@@ -101,6 +107,11 @@ func begin(g) -> void:
 	lift.park_closed(0)
 	lift.arrived.connect(_on_lift_arrived)
 	lift.departed.connect(_on_lift_departed)
+	# сюжетные двери 1-го этажа — закрыты (в здании часть дверей случайно приоткрыта)
+	for id in [DOOR_SCREAM, DOOR_ADMIN, DOOR_GURNEY]:
+		var sd = door(id)
+		if sd:
+			sd.set_angle(0.0)
 	fist = Props.fist_arm()
 	player.cam.add_child(fist)
 	fist.position = Vector3(0.2, -0.24, 0.05)
@@ -215,8 +226,9 @@ func say(who: String, text: String, sec := 0.0) -> void:
 	ui.hide_line()
 
 
-func objective(text: String) -> void:
-	ui.set_objective(text)
+## Задание наверху слева; target — куда показывает маркер (точка или персонаж), null — без маркера.
+func objective(text: String, target: Variant = null, offset := Vector3(0, 1.0, 0)) -> void:
+	ui.set_objective(text, target, offset)
 	if text != "":
 		snd("monitor_beep", null, -16.0, 0.6)
 
@@ -296,7 +308,7 @@ func _act1() -> void:
 	mom.set_look(player.head.global_position)
 	await say("mom", "Дедушка где-то наверху. Пойдём к лестнице.")
 	mom.set_look(null)
-	objective("Следуй за мамой к лестнице")
+	objective("Следуй за мамой к лестнице", mom, Vector3(0, 1.9, 0))
 	ui.hint("W / S — ехать, A / D — поворот, мышь — смотреть, F — фонарик, E — действие", 8.0)
 	await mom.go_and_wait(HALL_TO_STAIRS.slice(0, 2), 1.15)
 	var d = door(DOOR_HALL_STAIRS)
@@ -324,7 +336,7 @@ func _act1() -> void:
 	mom.face(ppos())
 	if not near(STAIR_FOOT, 5.0):
 		await say("mom", "Саман? Ты где? Подъедь сюда!")
-		objective("Вернись к маме, к лестнице")
+		objective("Вернись к маме, к лестнице", mom, Vector3(0, 1.9, 0))
 		await until(func(): return near(STAIR_FOOT, 4.5))
 	mom.face(ppos())
 	mom.set_look(player.head.global_position)
@@ -352,13 +364,12 @@ func _setup_after_scream() -> void:
 func _act2_scream() -> void:
 	act = "scream"
 	snd("scream_pain", SCREAM_ROOM, 6.0, 1.0, 70.0)
+	game.lights.set_room("L0.R17", true)           # в кабинете загорается и мигает свет — видно из коридора
 	snd("stinger", null, -10.0)
 	await wait(1.5)
 	await say("thought", "Что это было?!")
-	objective("Проверь, что это было")
+	objective("Проверь, что это было — крик из процедурного кабинета 139 (в конце коридора, справа)", SCREAM_DOOR)
 	var d = door(DOOR_SCREAM)
-	if d:
-		d.set_angle(0.0)
 	_moan_t = 10.0
 	# пока не откроет дверь — изредка из комнаты слышен стон
 	await until(func(): return (d != null and d.angle > 18.0) or room_id() == "L0.R17")
@@ -369,13 +380,13 @@ func _act2_scream() -> void:
 	snd("crash_heavy", CRASH_POS, 8.0, 1.0, 40.0)
 	shake(1.0, 0.7)
 	game.critters.scare(CRASH_POS, 10.0)
-	objective("Вернись к лестнице")
+	objective("Вернись к лестнице", STAIR_FOOT + Vector3(0, 0, 2.0))
 	await wait(5.0)
 	snd("psycho_shout", SCREAM_ROOM, 6.0, 1.0, 50.0)
 	await say("psycho", "Кто зашёл в мою комнату?!?! Если я найду тебя — я тебя не прощу!!")
 	await until(func(): return ppos().x < 40.5 and ppos().z < -0.5 and ppos().z > -10.0)
 	await say("thought", "Там был лифт… Нужно подняться на нём на второй этаж.")
-	objective("Поднимись на лифте на 2-й этаж")
+	objective("Поднимись на лифте на 2-й этаж — лифт рядом с лестницей, вызови его кнопкой (E)", LIFT_CALL)
 	act = "need_key"
 
 
@@ -390,11 +401,14 @@ func _on_lift_locked() -> void:
 func _act2_key() -> void:
 	act = "find_admin"
 	await say("thought", "Заперт… Ключ от лифта должен быть у администратора.")
-	objective("Найди комнату Администратора")
+	objective("Найди комнату Администратора — кабинет 134, по коридору направо от лифта", ADMIN_DOOR)
 	_build_nightstand()
 	# каталка: выкатывается из тёмного кабинета прямо перед коляской
 	await until(func(): return ppos().x > 40.6 and ppos().z < -6.6 and ppos().z > -9.6 and ppos().y < 2.5)
 	_gurney_scare()
+	await until(func(): return room_id() == "L0.F14" or has_lift_key)
+	if not has_lift_key:
+		objective("Обыщи тумбочку у левой стены (E)", NIGHTSTAND_POS, Vector3(0, 0.8, 0))
 
 
 func _build_nightstand() -> void:
@@ -419,6 +433,7 @@ func _build_nightstand() -> void:
 func _gurney_scare() -> void:
 	var d = door(DOOR_GURNEY)
 	gurney = Props.gurney()
+	gurney.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	game.add_child(gurney)
 	gurney.global_position = GURNEY_FROM
 	var body := AnimatableBody3D.new()
@@ -499,7 +514,7 @@ func _take_lift_key(play_scene: bool) -> void:
 func _act2_return() -> void:
 	act = "lift_key"
 	GameState.checkpoint = "chase"
-	objective("Вернись к лифту и поднимись на 2-й этаж")
+	objective("Вернись к лифту и поднимись на 2-й этаж", LIFT_CALL)
 	chase = "off"
 	await until(func(): return lift.state in ["opening", "open"] and lift.floor_idx == 0 and near(Vector3(37.5, 1.2, -7.0), 7.0))
 	_start_chase()
@@ -514,7 +529,7 @@ func _start_chase() -> void:
 	snd("psycho_roar", PSYCHO_SPAWN + Vector3(0, 1.6, 0), 8.0, 1.0, 60.0)
 	snd("stinger", null, -2.0)
 	_drone.volume_db = -14.0
-	objective("Быстрее в лифт! Нажми кнопку «2»")
+	objective("Быстрее в лифт! Развернись к кнопкам и нажми «2» (E)", Vector3(38.3, 1.2, -6.2), Vector3(0, 1.3, 0))
 	ui.say("psycho", "Ты зашёл в мою комнату, сука!!!!", 3.0)
 	await wait(0.5)
 	_psycho_speed = PSYCHO_SPEED - 0.2 * mini(GameState.deaths, 3)
@@ -538,8 +553,10 @@ func _update_chase(dt: float) -> void:
 	var to: Vector3 = target - psycho.global_position
 	to.y = 0.0
 	var step: float = _psycho_speed * dt
+	_heartbeat(dt, clampf(1.0 - psycho.global_position.distance_to(ppos()) / 25.0, 0.0, 1.0))
 	if to.length() > step:
 		psycho.global_position += to.normalized() * step
+		psycho.step_moved(step)
 		psycho.face(target if safe else ppos())
 		if chase == "safe":
 			chase = "run"
@@ -559,6 +576,19 @@ func _update_chase(dt: float) -> void:
 	if not safe and Vector2(ppos().x - psycho.global_position.x, ppos().z - psycho.global_position.z).length() < 1.15:
 		chase = "caught"
 		_caught()
+
+
+var _hb_t := 0.0
+
+
+## Сердцебиение Самана: чем ближе опасность (0..1), тем чаще и громче.
+func _heartbeat(dt: float, fear: float) -> void:
+	if fear <= 0.05:
+		return
+	_hb_t -= dt
+	if _hb_t <= 0.0:
+		_hb_t = lerpf(0.95, 0.42, fear)
+		snd("heartbeat", null, lerpf(-14.0, 0.0, fear), 1.0)
 
 
 ## Псих догнал: бьёт (как в анимации), Саман отлетает, падает на пол, темнота — заново у кабинета с ключом.
@@ -642,7 +672,7 @@ func _act3() -> void:
 		await GameState.fade_to(0.0, 1.5)
 	await wait(1.2)
 	await say("thought", "Что это?.. Где все комнаты?.. Там одна дверь…")
-	objective("Найди комнату деда")
+	objective("Найди комнату деда — дверь с лампой вдалеке", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	await until(func(): return room_id() == "L1.F2")
 	await wait(2.0)
 	var radio_pos := ROOM204_DOOR + Vector3(-1.4, 0.7, 5.6)
@@ -666,7 +696,7 @@ func _act3() -> void:
 	tw.tween_property(hiss, "volume_db", -40.0, 4.0)
 	tw.tween_callback(hiss.queue_free)
 	await say("thought", "Здесь никого нет… Мама говорила про третий этаж.")
-	objective("Поднимись на лифте на 3-й этаж и найди маму")
+	objective("Поднимись на лифте на 3-й этаж и найди маму", Vector3(37.5, 4.5, -6.9))
 	lift.locked = false
 	lift.forced_floor = 2
 	act = "void_done"
@@ -693,7 +723,7 @@ func _act4() -> void:
 	game.add_child(man)
 	man.global_position = MAN_POS
 	snd("metal_creak", MAN_POS + Vector3(0, 0.6, 0), 4.0, 1.0, 40.0)
-	objective("Проверь коридор у лифта")
+	objective("Проверь коридор у лифта", MAN_POS, Vector3(0, 1.4, 0))
 	var talk_area: Area3D = Interactable.new()
 	man.add_child(talk_area)
 	talk_area.position = Vector3(0, 0.8, 0)
@@ -708,7 +738,7 @@ func _act4() -> void:
 	await say("man", "Она только что по лестнице вниз пошла. Я всё тебе сказал, теперь не беспокой меня, уходи.")
 	await say("hero", "Хорошо, спасибо.")
 	freeze(false)
-	objective("Вернись в лифт")
+	objective("Вернись в лифт", Vector3(37.5, 7.8, -5.2))
 	lift.locked = false
 	lift.forced_floor = 1
 	act = "floor3_leave"
@@ -716,6 +746,7 @@ func _act4() -> void:
 	await until(func(): return lift.player_in_cabin() and lift.state == "closing")
 	man.visible = false
 	var pair := Props.glb("res://characters/mom_confused_static.glb", 2.1, 0.384)
+	pair.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	game.add_child(pair)
 	pair.global_position = MAN_POS + Vector3(0.42, 0, 0)
 	pair.rotation.y = -PI * 0.5
@@ -750,14 +781,14 @@ func _act5() -> void:
 	_drone.volume_db = -12.0
 	await wait(1.0)
 	await say("hero", "Что происходит?.. Я что, умер?")
-	objective("Найди комнату деда (Палата №204)")
+	objective("Найди комнату деда (Палата №204)", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	_place_ward_key()
 	await until(func(): return near(ROOM204_DOOR + Vector3(0, 0, -1.0), 2.2) or has_ward_key)
 	if not has_ward_key:
 		await say("thought", "Заперто… Нужен ключ. Может, в процедурном кабинете?")
-		objective("Найди ключ от комнаты")
+		objective("Найди ключ от палаты — процедурный кабинет 213", ROOM213_DOOR)
 		await until(func(): return has_ward_key)
-	objective("Открой палату №204")
+	objective("Открой палату №204 и заезжай", ROOM204_DOOR + Vector3(0, 0, 0.6))
 	await until(func(): return room_id() == "L1.F2" and ppos().z > -5.3)
 	await _grandpa_at_door()
 
@@ -793,6 +824,12 @@ func _take_ward_key(holder: Node3D) -> void:
 func _grandpa_at_door() -> void:
 	act = "grandpa"
 	freeze(true)
+	game.lights.set_room("L1.F2", true)            # в палате тусклый свет (мигает в драке)
+	game.lights.set_room("L1.F2b", true)
+	objective("")
+	var d0 = door(Sets.DOOR_204)
+	if d0 and d0.angle < 60.0:
+		d0.swing_to(95.0, 0.3)
 	# Саман резко поворачивается назад: в коридоре за дверью стоит дед
 	grandpa.visible = true
 	grandpa.global_position = Vector3(8.85, 4.5, -7.6)
@@ -860,6 +897,12 @@ func _start_fight() -> void:
 
 func _update_fight(dt: float) -> void:
 	_fight_t += dt
+	# свет в палате мигает от ударов в дверь
+	_flick_t -= dt
+	if _flick_t <= 0.0:
+		var off: bool = game.lights.is_on("L1.F2") and randf() < 0.5
+		game.lights.set_room("L1.F2", not off)
+		_flick_t = randf_range(0.05, 0.18) if off else randf_range(0.6, 2.4)
 	_mom_cd -= dt
 	_punch_cd -= dt
 	_bang_t -= dt
@@ -982,6 +1025,7 @@ func _rescue() -> void:
 			tw.parallel().tween_property(body, "rotation:x", -PI * 0.5, 0.45)
 	player.view_offset = Transform3D.IDENTITY
 	ui.set_damage(0.45)
+	game.lights.set_room("L1.F2", true)
 	grandpa.visible = true
 	grandpa.global_position = Vector3(8.85, 4.5, -7.0)
 	grandpa.set_look(null)
@@ -1029,7 +1073,7 @@ func _act6() -> void:
 		sd.swing_to(95.0, 0.6)
 	player.speed_level = 4
 	game.hud.set_speed(4, 5)
-	objective("Беги за дедом!")
+	objective("Беги за дедом!", grandpa, Vector3(0, 2.0, 0))
 	ui.hint("Коляска — на полной скорости", 4.0)
 	grandpa.set_look(null)
 	var path: Array = GRANDPA_RUN.duplicate()
@@ -1039,7 +1083,9 @@ func _act6() -> void:
 		grandpa.go([next], 2.6, "run_loop")
 		while grandpa.is_moving():
 			await get_tree().process_frame
-			if grandpa.global_position.distance_to(ppos()) > 7.5:
+			var goal: Vector3 = GRANDPA_RUN[-1]
+			var lagging: bool = ppos().distance_to(goal) > grandpa.global_position.distance_to(goal) + 1.0
+			if lagging and grandpa.global_position.distance_to(ppos()) > 7.5:
 				grandpa.stop("talk_loop")
 				grandpa.face(ppos())
 				if not shouted:
@@ -1065,6 +1111,7 @@ func _finale() -> void:
 	right = right.normalized()
 	var gp: Vector3 = grandpa.global_position
 	var beam := Props.beam(4.2)
+	beam.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	game.add_child(beam)
 	beam.global_position = gp - right * 3.6 + Vector3(0, 2.4, 0)
 	beam.look_at(gp + Vector3(0, 1.2, 0), Vector3.UP)
@@ -1096,6 +1143,7 @@ func _finale() -> void:
 	bm.size = Vector3(2.2, 0.45, 2.2)
 	slab.mesh = bm
 	slab.material_override = Props.concrete()
+	slab.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	game.add_child(slab)
 	slab.global_position = top
 	slab.rotation = Vector3(0.2, 0.5, 0.15)
@@ -1124,6 +1172,11 @@ func _process(dt: float) -> void:
 	if game == null:
 		return
 	if act == "scream" and not _scream_door_open:
+		_flick_t -= dt
+		if _flick_t <= 0.0:
+			var on: bool = not game.lights.is_on("L0.R17")
+			game.lights.set_room("L0.R17", on)
+			_flick_t = randf_range(0.6, 2.5) if on else randf_range(0.05, 0.25)
 		_moan_t -= dt
 		if _moan_t <= 0.0:
 			_moan_t = randf_range(9.0, 15.0)
@@ -1143,6 +1196,7 @@ func _drop_debris() -> void:
 	var fwd: Vector3 = -player.global_transform.basis.z
 	var p: Vector3 = ppos() + fwd * randf_range(1.5, 6.0) + Vector3(randf_range(-1.5, 1.5), 0, randf_range(-1.5, 1.5))
 	var c := Props.chunk(randf_range(0.15, 0.45))
+	c.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	game.add_child(c)
 	c.global_position = Vector3(p.x, ppos().y + 3.0, p.z)
 	var tw := create_tween()

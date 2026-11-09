@@ -184,7 +184,22 @@ stop_c = rxz[STOP_S] + right * 8.0
 CLEAR_PATH = {"trees": 3.2, "understory": 2.4, "bushes": 2.4, "rocks": 2.2, "props": 2.4, "cover": 1.25}
 
 
+# обочины: ветки елей и кусты не должны залезать в автобус (он идёт по правой полосе, у остановки — у самого края)
+from scipy.spatial import cKDTree
+_rt = np.roll(rxz, -1, 0) - np.roll(rxz, 1, 0)
+_rt /= np.linalg.norm(_rt, axis=1, keepdims=True)
+_rright = np.stack([-_rt[:, 1], _rt[:, 0]], 1)
+_rtree = cKDTree(rxz)
+ROAD_CLEAR = {"trees": (-8.0, 10.5), "understory": (-7.0, 9.0), "bushes": (-6.5, 8.0), "rocks": (-6.5, 7.5),
+              "props": (-6.5, 7.5), "cover": (-5.6, 6.0)}
+
+
 def keep_mask(x, z, set_name):
+    pts_ = np.stack([x, z], -1)
+    _, ri = _rtree.query(pts_)
+    lat = ((pts_ - rxz[ri]) * _rright[ri]).sum(1)
+    lo, hi = ROAD_CLEAR[set_name]
+    by_road = (lat > lo) & (lat < hi)
     lxx, lzz = to_l(x, z, org)
     in_site = (lxx > FP[0] + 1) & (lxx < FP[1] - 1) & (lzz > FP[2] + 1) & (lzz < FP[3] - 1)
     if set_name == "cover":   # трава остаётся на откосах, но не на мощении
@@ -196,7 +211,7 @@ def keep_mask(x, z, set_name):
     along = rel @ s_dir
     lat = rel @ right
     at_stop = (np.abs(along) < 16) & (lat > -3.5) & (lat < 7)
-    return ~(in_site | near_path | at_stop)
+    return ~(in_site | near_path | at_stop | by_road)
 
 
 for set_name in ["trees", "understory", "bushes", "rocks", "props", "cover"]:
