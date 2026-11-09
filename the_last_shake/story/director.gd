@@ -13,8 +13,13 @@ const Props = preload("res://story/props.gd")
 const Interactable = preload("res://story/interactable.gd")
 
 # --- точки здания (метры, координаты Godot) ---
-const SPAWN := Vector3(32.5, 1.2, 8.7)         # в холле перед креслами (не между ними)
-const MOM_START := Vector3(33.4, 1.2, 8.1)
+const SPAWN := Vector3(28.75, 1.2, 4.27)        # тамбур: сюда заезжаем с улицы (пролог кончается здесь же)
+const SPAWN_YAW := -PI * 0.5                     # лицом в здание (+X)
+const MOM_START := Vector3(28.2, 1.2, 3.25)      # мама зашла следом, слева сзади
+const DOOR_VEST := 1                             # стеклянная дверь тамбур → вестибюль напротив входа
+const MOM_AT_VEST_DOOR := [Vector3(29.0, 1.2, 3.2), Vector3(29.6, 1.2, 3.25)]     # слева от коляски, у двери
+const VEST_TO_HALL := [Vector3(29.8, 1.2, 3.75), Vector3(30.6, 1.2, 4.27), Vector3(31.3, 1.2, 4.27),
+	Vector3(32.9, 1.2, 2.4)]
 const STAIR_FOOT := Vector3(30.9, 1.2, -5.8)
 ## мама поднимается по главной лестнице №1: 1-й марш вдоль +X, площадка, 2-й марш обратно, 2-й этаж
 const STAIRS_UP := [Vector3(31.45, 1.2, -5.8), Vector3(34.4, 2.7, -5.8), Vector3(35.0, 2.85, -5.3),
@@ -217,6 +222,12 @@ func until(cond: Callable, timeout := -1.0) -> void:
 ## Реплика с подписью; ждёт, пока её прочитают (Enter / пробел — дальше).
 func say(who: String, text: String, sec := 0.0) -> void:
 	_skip = false
+	# кто стоит и говорит — жестикулирует только во время своей реплики, потом снова спокойно стоит
+	var speaker = mom if who == "mom" else (grandpa if who == "grandpa" else null)
+	var gestures: bool = speaker != null and speaker.visible and not speaker.is_moving() \
+			and (speaker.current == "idle_loop" or speaker.current == "talk_loop")
+	if gestures and speaker.current != "talk_loop":
+		speaker.play("talk_loop", 0.35)
 	var t: float = ui.say(who, text, sec)
 	while t > 0.0 and not _skip:
 		await get_tree().process_frame
@@ -224,6 +235,8 @@ func say(who: String, text: String, sec := 0.0) -> void:
 			t -= get_process_delta_time()
 	_skip = false
 	ui.hide_line()
+	if gestures and speaker.current == "talk_loop" and not speaker.is_moving():
+		speaker.play("idle_loop", 0.45)
 
 
 ## Задание наверху слева; target — куда показывает маркер (точка или персонаж), null — без маркера.
@@ -297,20 +310,37 @@ func _jump_to_lift(f: int, with_void := true) -> void:
 # ================================================================================ АКТ 1: вход, лестница, мама уходит
 func _act1() -> void:
 	act = "act1"
-	place_player(SPAWN, 0.0)
-	mom.global_position = MOM_START
-	mom.set_yaw(0.0)
+	# с улицы (пролог) — то же место и поворот, что были в тамбуре; из меню глав — середина тамбура
+	var e: Dictionary = GameState.entry
+	GameState.entry = {}
+	place_player(e.get("pos", SPAWN) as Vector3, float(e.get("yaw", SPAWN_YAW)))
+	mom.global_position = e.get("mom", MOM_START) as Vector3
+	mom.face(ppos(), true)
 	mom.visible = true
+	for id in [DOOR_VEST, 2]:
+		var vd = door(id)
+		if vd:
+			vd.set_angle(0.0)
 	freeze(true)
-	await GameState.fade_to(0.0, 2.0)
-	await ui.title("Санаторий «Оромгох»", "1975 год", 2.0, 54)
+	await GameState.fade_to(0.0, 1.2)
+	ui.title("Санаторий «Оромгох»", "1975 год", 2.0, 54)
+	await wait(1.0)
 	freeze(false)
 	mom.set_look(player.head.global_position)
 	await say("mom", "Дедушка где-то наверху. Пойдём к лестнице.")
 	mom.set_look(null)
 	objective("Следуй за мамой к лестнице", mom, Vector3(0, 1.9, 0))
 	ui.hint("W / S — ехать, A / D — поворот, мышь — смотреть, F — фонарик, E — действие", 8.0)
-	await mom.go_and_wait(HALL_TO_STAIRS.slice(0, 2), 1.15)
+	# мама толкает стеклянную дверь из тамбура от себя, в вестибюль: тамбур тесный, створки не задевают коляску
+	await mom.go_and_wait(MOM_AT_VEST_DOOR, 1.0)
+	var vest = door(DOOR_VEST)
+	if vest:
+		mom.face(vest.center)
+		await wait(0.3)
+		game.play_at("door_open_wood", vest.center, -3.0, 0.9, 25.0)
+		vest.swing_to(-92.0, 1.1)
+		await wait(0.8)
+	await mom.go_and_wait(VEST_TO_HALL + HALL_TO_STAIRS.slice(1, 2), 1.15)
 	var d = door(DOOR_HALL_STAIRS)
 	if d:
 		snd("door_creak_slow", d.center, -6.0)

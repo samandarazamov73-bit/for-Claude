@@ -6,6 +6,8 @@
 Запуск: python3 merge_chars.py out.glb base.glb src1.glb:Имя_в_файле:новое_имя [src2.glb:...:...]
        («Имя_в_файле» можно оставить пустым — тогда первая анимация файла).
        новое_имя с окончанием «+root» сохраняет корневое движение (например fall+root).
+       новое_имя с окончанием «@секунда» — спокойная стойка: поза из этого кадра замирает, остаётся только
+       дыхание (грудь чуть поднимается, 4 с на вдох-выдох) и еле заметное покачивание (например idle_loop@0).
 """
 import io, json, struct, sys
 import numpy as np
@@ -14,6 +16,36 @@ from PIL import Image
 COMP = {5126: (np.float32, 4), 5123: (np.uint16, 2), 5125: (np.uint32, 4), 5121: (np.uint8, 1)}
 NCOMP = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
 TEX_SIZE = 1024
+STAND_LEN = 8.0          # длина спокойной стойки (с): 2 вдоха и 1 покачивание — без шва на стыке
+STAND_STEP = 0.1
+# (кость, ось в своих координатах, амплитуда в градусах, период в секундах)
+BREATH = [("mixamorig:Spine", (1, 0, 0), 0.35, 4.0), ("mixamorig:Spine1", (1, 0, 0), 0.5, 4.0),
+          ("mixamorig:Spine2", (1, 0, 0), 0.7, 4.0), ("mixamorig:Spine", (0, 0, 1), 0.45, 8.0)]
+# в стойке шея и голова — прямо (как в позе покоя модели); куда смотреть, решает игра (bone_look.gd)
+STRAIGHT = ("mixamorig:Neck", "mixamorig:Head")
+
+
+def qmul(a, b):
+    x1, y1, z1, w1 = a
+    x2, y2, z2, w2 = b
+    return np.array([w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2, w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                     w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2, w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2], dtype=np.float32)
+
+
+def sample(t, v, at, rot):
+    """Значение канала в момент at (линейно; для поворотов — нормированная интерполяция по короткой дуге)."""
+    t = t[:, 0]
+    if at <= t[0]:
+        return v[0].copy()
+    if at >= t[-1]:
+        return v[-1].copy()
+    i = int(np.searchsorted(t, at)) - 1
+    k = (at - t[i]) / max(t[i + 1] - t[i], 1e-6)
+    a, b = v[i], v[i + 1]
+    if rot and float(np.dot(a, b)) < 0.0:
+        b = -b
+    r = a * (1 - k) + b * k
+    return r / np.linalg.norm(r) if rot else r
 
 
 def load(path):
@@ -126,6 +158,10 @@ def main():
     anims = []
     for spec in specs:
         path, src_name, new_name = spec.split(":")
+        freeze = None
+        if "@" in new_name:
+            new_name, at = new_name.split("@")
+            freeze = float(at)
         keep_root = new_name.endswith("+root")
         new_name = new_name.replace("+root", "")
         sjs, sbin = (js, bin_) if path == base else load(path)
@@ -152,6 +188,22 @@ def main():
                 else:
                     v[:, 0] = hips_rest[0]
                     v[:, 2] = hips_rest[2]
+            if freeze is not None:
+                rot = p == "rotation"
+                base_v = sample(t, v, freeze, rot)
+                if rot and nm in STRAIGHT:
+                    base_v = np.array(js["nodes"][names[nm]].get("rotation", [0, 0, 0, 1]), dtype=np.float32)
+                t = np.arange(0.0, STAND_LEN + 1e-6, STAND_STEP, dtype=np.float32).reshape(-1, 1)
+                v = np.repeat(base_v.reshape(1, -1), len(t), axis=0)
+                if rot:
+                    for bone, axis, deg, period in BREATH:
+                        if bone != nm:
+                            continue
+                        for j, tt in enumerate(t[:, 0]):
+                            ang = np.radians(deg) * np.sin(2 * np.pi * tt / period)
+                            d = np.array([*(np.array(axis) * np.sin(ang / 2)), np.cos(ang / 2)], dtype=np.float32)
+                            v[j] = qmul(v[j], d)
+                length = STAND_LEN
             ti = w.add_acc(t, "SCALAR", minmax=True)
             vi = w.add_acc(v, {3: "VEC3", 4: "VEC4"}[v.shape[1]])
             samplers.append({"input": ti, "output": vi, "interpolation": s.get("interpolation", "LINEAR")})

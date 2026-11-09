@@ -1,7 +1,7 @@
 extends Node
 ## Проверка без игрока: загружает сцену, проматывает сюжет и сохраняет скриншоты.
 ## Запуск: godot --path . res://tests/shots.tscn -- --case=<имя> --out=<папка> [--quality=medium]
-## Случаи: bus, bus_mom, walk, building, sanatorium, chase, void, floor3, maze, fight, epilogue, menu, anim
+## Случаи: bus, bus_mom, walk, building, entrance, sanatorium, chase, void, floor3, maze, fight, epilogue, menu, anim
 
 var out := "user://shots"
 var case_name := "bus"
@@ -49,6 +49,10 @@ func _run() -> void:
 			await _anim()
 		"bus", "bus_mom", "walk", "building", "torch":
 			await _prologue()
+		"entrance":
+			await _entrance()
+		"skytest":
+			await _skytest()
 		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair":
 			await _sanatorium()
 		"epilogue":
@@ -122,6 +126,10 @@ func _prologue() -> void:
 			p.talking = true
 			await secs(10.0)
 			await shot("bus_mom_talk")
+			p.talking = false
+			p.say("mom", "Знает. Он нас ждёт… давно ждёт.", 8.0)
+			await secs(2.5)
+			await shot("bus_mom_speaking")
 		"walk", "building", "torch":
 			p.s = p.s_stop - 0.2
 			p.v = 0.0
@@ -154,6 +162,124 @@ func _prologue() -> void:
 				p.set_day(0.85)
 				await secs(1.0)
 				await shot("walk_dark_torch")
+
+
+## Пандус, дверь, въезд в тамбур и переход в санаторий (кадры от первого лица и со стороны).
+func _entrance() -> void:
+	get_tree().change_scene_to_file("res://story/prologue.tscn")
+	await secs(1.0)
+	var p: Node = get_tree().current_scene
+	while p == null or p.get("phase") == "load":
+		await get_tree().process_frame
+		p = get_tree().current_scene
+	GameStateRef().set_fade(0.0)
+	p.s = p.s_stop - 0.2
+	p.v = 0.0
+	p.phase = "arrive"
+	p._go_outside()
+	await secs(4.0)
+	p._events = {"crow": true, "snap": true, "dark": true, "building": true}
+	p.set_day(0.86)
+	p.walk_s = p.forest_end_s - 0.5
+	p.hero.global_position = p._path_at(p.walk_s)
+	p.mom_s = p.walk_s + 3.0
+	Input.action_press("drive_forward")
+	await secs(1.5)
+	print("ENT guided=", p.guided, " walk_s=", p.walk_s, " forest_end=", p.forest_end_s, " door_stop=", p.door_stop_s, " end=", p.path_cum[-1])
+	for spot in [["ent_ramp_foot", 18.5], ["ent_ramp_lower", 24.0], ["ent_ramp_turn", 30.6], ["ent_ramp_upper", 38.0]]:
+		p.walk_s = p.forest_end_s + float(spot[1]) - 1.2
+		p.mom_s = minf(p.walk_s + 3.2, p.mom_stop_s)
+		p._g_off = Vector3.ZERO
+		await secs(1.4)
+		await shot(spot[0])
+		if spot[0] == "ent_ramp_turn" or spot[0] == "ent_ramp_lower":
+			var keep: Vector3 = p.cam.position
+			p.cam.position = Vector3(1.2, 1.0, 3.2)
+			p.cam.rotation = Vector3(-0.25, 0.3, 0.0)
+			await secs(0.2)
+			await shot(spot[0] + "_tp")
+			p.cam.position = keep
+			p.cam.rotation = Vector3.ZERO
+	p.walk_s = p.door_stop_s - 1.5
+	p.mom_s = p.mom_stop_s
+	await secs(4.0)
+	Input.action_release("drive_forward")
+	await secs(3.0)
+	print("ENT at door: walk_s=", p.walk_s, " mom_aside=", p._mom_aside, " door_open=", p.door_open)
+	await shot("ent_door")
+	var keep2: Vector3 = p.cam.position
+	p.cam.position = Vector3(-1.4, 0.6, 2.6)
+	p.cam.rotation = Vector3(-0.12, -0.45, 0.0)
+	await secs(0.2)
+	await shot("ent_door_tp")
+	p.cam.position = keep2
+	p.cam.rotation = Vector3.ZERO
+	p._open_entrance()
+	await secs(1.0)
+	await shot("ent_door_opening")
+	await secs(1.5)
+	await shot("ent_door_open")
+	Input.action_press("drive_forward")
+	await secs(1.5)
+	await shot("ent_threshold")
+	while is_instance_valid(p) and p.phase != "end":
+		await get_tree().process_frame
+	Input.action_release("drive_forward")
+	await secs(2.6)
+	if is_instance_valid(p):
+		await shot("ent_lookback")
+	var t := 0.0
+	while t < 30.0 and (get_tree().current_scene == null or not get_tree().current_scene.has_node("Director")):
+		await get_tree().process_frame
+		t += get_process_delta_time()
+	print("ENT scene ", get_tree().current_scene.name if get_tree().current_scene else "null", " after ", t)
+	await secs(2.5)
+	await shot("ent_sanatorium")
+	var g: Node = get_tree().current_scene
+	if g and g.has_node("Director"):
+		var dd: Node = g.get_node("Director")
+		print("ENT player ", dd.player.global_position, " yaw ", dd.player.rotation.y, " mom ", dd.mom.global_position)
+		await secs(9.0)
+		await shot("ent_mom_vest_door")
+		await secs(5.0)
+		await shot("ent_mom_hall")
+		print("ENT mom now ", dd.mom.global_position, " act ", dd.act)
+
+
+## Что делает небо тёмным: один и тот же вид у санатория с разными выключенными эффектами.
+func _skytest() -> void:
+	get_tree().change_scene_to_file("res://story/prologue.tscn")
+	await secs(1.0)
+	var p: Node = get_tree().current_scene
+	while p == null or p.get("phase") == "load":
+		await get_tree().process_frame
+		p = get_tree().current_scene
+	GameStateRef().set_fade(0.0)
+	p.s = p.s_stop - 0.2
+	p.v = 0.0
+	p.phase = "arrive"
+	p._go_outside()
+	await secs(5.0)
+	p.walk_s = 95.0
+	p.hero.global_position = p._path_at(95.0)
+	p.mom_s = 98.0
+	p.look_pitch = 0.25
+	await secs(3.0)
+	var env: Environment = p.env
+	print("SKY day=", p.day, " fog=", env.fog_light_color, " top=", p.sky_mat.sky_top_color, " amb=", env.ambient_light_energy, " sun=", p.sun.light_energy)
+	await shot("sky_a_base")
+	env.volumetric_fog_enabled = false
+	await secs(1.0)
+	await shot("sky_b_novol")
+	env.fog_enabled = false
+	await secs(1.0)
+	await shot("sky_c_nofog")
+	env.adjustment_enabled = false
+	await secs(1.0)
+	await shot("sky_d_noadj")
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	await secs(1.0)
+	await shot("sky_e_linear")
 
 
 func GameStateRef() -> Node:
@@ -376,13 +502,34 @@ func _prologue_play() -> void:
 	await wait_for_p(func(): return p.phase == "walk", 120, "walk", p)
 	print("STEP walk  bus_away=", p._bus_away)
 	var dist := 0.0
-	while is_instance_valid(p) and p.phase == "walk" and dist < p.path_cum[-1] + 2.0:
-		dist += 2.0
+	while is_instance_valid(p) and p.phase == "walk" and dist < p.forest_end_s - 1.0:
+		dist = minf(minf(dist + 2.0, p.forest_end_s - 1.0), maxf(p.mom_s - 1.5, dist))    # за мамой
 		p.hero.global_position = p._path_at(dist)
 		await secs(0.3)
+	print("STEP forest end  walk_s=", p.walk_s, " of ", p.forest_end_s)
+	Input.action_press("drive_forward")
+	await wait_for_p(func(): return p.walk_s >= p.door_stop_s - 0.05, 200, "door", p)
+	print("STEP at door  guided=", p.guided, " mom_aside=", p._mom_aside)
+	await secs(1.0)
+	p._open_entrance()
+	await wait_for_p(func(): return p.door_open, 30, "door open", p)
+	print("STEP door open")
+	await wait_for_p(func(): return not is_instance_valid(p) or p.phase == "end", 60, "inside", p)
+	Input.action_release("drive_forward")
 	print("STEP end of path  phase=", p.phase if is_instance_valid(p) else "freed")
+	for i in 6:
+		await secs(0.12)
+		if is_instance_valid(p):
+			print("STEP look back  look_yaw=%.2f door=%.2f mom=%s" % [p.look_yaw, p.entrance.amount if p.entrance else -1.0, p.site_xf.affine_inverse() * p.mom.global_position])
 	await secs(8.0)
 	print("STEP scene now ", get_tree().current_scene.name if get_tree().current_scene else "null")
+	var sc: Node = get_tree().current_scene
+	if sc and sc.has_node("Director"):
+		var dd: Node = sc.get_node("Director")
+		print("STEP sanatorium player ", dd.player.global_position, " act ", dd.act)
+		for i in 8:
+			await secs(1.0)
+			print("STEP mom ", dd.mom.global_position, " anim ", dd.mom.current, " door1 ", dd.door(1).angle if dd.door(1) else -1.0, " line ", dd.ui.line_visible() if dd.ui.has_method("line_visible") else "")
 	Engine.time_scale = 1.0
 
 

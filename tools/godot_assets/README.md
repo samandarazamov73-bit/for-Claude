@@ -30,3 +30,16 @@
 ## Превью леса
 `preview/forest_scene.py` + `preview/forest.html` + `preview/forest_shot.js` — та же дорога, деревья и свет,
 что в игре, но в браузере (three.js). Нужны для снимков, игре не нужны.
+
+## «The Last Shake»: персонажи и вход в санаторий
+- `merge_chars.py` склеивает анимации персонажа в один GLB. Окончание имени `@секунда` (например
+  `mom_injection.glb::idle_loop@0`) делает **спокойную стойку**: поза из этого кадра замирает, голова прямо,
+  остаётся только еле заметное дыхание (цикл 8 с без шва). Команды, которыми собраны `characters/*.glb`:
+  ```
+  python3 merge_chars.py mom.glb mom_walk.glb mom_walk.glb::walk_loop mom_injection.glb::inject "mom_fall.glb::fall+root" "mom_injection.glb::idle_loop@0" grandpa_talk.glb::talk_loop psycho_hit.glb::attack psycho_run.glb:Running:run_loop
+  python3 merge_chars.py psycho.glb psycho_run.glb psycho_run.glb:Running:run_loop psycho_run.glb:Walking:walk_loop psycho_hit.glb::hit psycho_run.glb:run_fast_10:sprint_loop "grandpa_stand.glb::idle_loop@2.4" grandpa_talk.glb::talk_loop
+  python3 merge_chars.py grandpa.glb grandpa_stand.glb "grandpa_stand.glb::idle_loop@2.4" grandpa_talk.glb::talk_loop grandpa_run.glb::run_loop grandpa_push.glb::push grandpa_walk_slow.glb::walk_loop psycho_hit.glb::hit "mom_fall.glb::fall+root"
+  ```
+- `make_entrance_route.py <the_last_shake>` — маршрут коляски от конца тропинки вверх по пандусу (с разворотом)
+  к входной двери и в тамбур, высоты — с поверхности пандуса из `sanatorium.glb`
+  (→ `resources/world/entrance_route.json`).

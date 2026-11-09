@@ -20,6 +20,7 @@ const CHAPTERS := [
 
 var checkpoint := "start"       # где начать санаторий: start, key, chase, void, floor3, maze
 var deaths := 0
+var entry := {}                  # откуда заехали в здание (пролог → санаторий): pos, yaw, mom — координаты здания
 var _fade: ColorRect
 var _layer: CanvasLayer
 var _loading: Label
@@ -98,7 +99,8 @@ func fade_to(a: float, seconds: float) -> void:
 
 
 ## Сменить сцену: затемнить, загрузить, (новая сцена сама решает, когда светлеть — fade_to(0, ...)).
-func go(scene: String, cp := "") -> void:
+## threaded — сцена уже грузится в фоне (ResourceLoader.load_threaded_request): забрать её оттуда.
+func go(scene: String, cp := "", threaded := false) -> void:
 	if _busy:
 		return
 	_busy = true
@@ -109,7 +111,11 @@ func go(scene: String, cp := "") -> void:
 	await get_tree().process_frame
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	get_tree().change_scene_to_file(scene)
+	var packed: Resource = ResourceLoader.load_threaded_get(scene) if threaded else null
+	if packed is PackedScene:
+		get_tree().change_scene_to_packed(packed)
+	else:
+		get_tree().change_scene_to_file(scene)
 	_busy = false
 
 
