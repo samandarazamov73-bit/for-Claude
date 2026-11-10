@@ -1,11 +1,9 @@
 extends Node3D
-## Второй этаж «во сне»: настоящий этаж прячется, вместо него строятся декорации.
-##   void — огромная пустая тёмная комната, посреди — одна дверь: палата деда №204 (акт 3);
-##   maze — тот же этаж, перестроенный в лабиринт: палата 204, процедурная 213 (ключ), лифт, лестница (акт 4–6).
-## Стены лабиринта — по осям настоящих стен здания (данные — story/maze_data.gd), поэтому оставленные комнаты
-## встают в него ровно. Стены у сохранённых комнат стоят снаружи их стен (без мерцания плоскостей).
-
-const Maze = preload("res://story/maze_data.gd")
+## Второй этаж в разные моменты сюжета:
+##   void — «сон»: настоящий этаж прячется, вместо него огромная пустая тёмная комната с одной дверью —
+##          палатой деда №204 (акт 3);
+##   real — снова настоящий 2-й этаж здания (после 3-го этажа, акты 5–6): все комнаты на месте, но свет почти
+##          везде погас, в коридоре скачет напряжение; палата 204 заперта, ключ — в процедурной 213.
 
 const Y0 := 4.5          # пол 2-го этажа
 const Y1 := 7.6          # под перекрытием 3-го
@@ -32,7 +30,8 @@ const DOOR_STAIR1_HALL_F2 := 232
 var game
 var mode := "normal"
 var root_set: Node3D
-var fall_walls: Array = []          # {body, x0, z0, x1, z1}
+var _surge_t := 3.0                 # «real»: когда в коридоре снова мигнёт свет
+var quaking := false
 var stair_panel: StaticBody3D
 var lamps: Array = []               # OmniLight3D
 var door_map := {}
@@ -296,7 +295,6 @@ func _clear() -> void:
 	root_set.name = "DreamSet"
 	root_set.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(root_set)
-	fall_walls.clear()
 	lamps.clear()
 	stair_panel = null
 
@@ -325,66 +323,72 @@ func build_void() -> void:
 		d.set_angle(0.0)
 
 
-# ------------------------------------------------------------------------------ акт 4–6: лабиринт
-func build_maze() -> void:
-	mode = "maze"
-	var keep: Array = KEEP_ALWAYS.duplicate()
-	keep.append("Room_213_Treatmentroom")
-	hide_floor2(keep, [DOOR_204, DOOR_204_BATH, DOOR_213, DOOR_STAIR1_F2, DOOR_STAIR1_HALL_F2], ["L1.F2", "L1.F2b", "L1.R10"])
-	_set_active(game.node("Room_213_Treatmentroom"), true)
+# ------------------------------------------------------------------------------ акт 5–6: настоящий 2-й этаж
+## Вернуть 2-й этаж как в здании (после «пустой комнаты» акта 3).
+func restore_floor2() -> void:
+	var f2: Node = game.node("Floor2")
+	if f2:
+		for c in f2.get_children():
+			_set_active(c, true)
+	for id in door_map:
+		var dg = door_map[id]
+		if dg.center.y > 4.0 and dg.center.y < 7.0:
+			set_door_active(id, true)
+	var fc: Node = game.get_node_or_null("FurnitureColliders")
+	if fc:
+		var specs: Array = game.level["boxes"] + game.level["rot_boxes"]
+		var shapes: Array = fc.get_children()
+		for i in mini(shapes.size(), specs.size()):
+			if str(specs[i].get("room", "")).begins_with("L1."):
+				(shapes[i] as CollisionShape3D).disabled = false
+	for c in game.get_children():
+		if c is Area3D and "room" in c and str(c.room).begins_with("L1."):
+			(c as Area3D).collision_layer = game.L_INTERACT
+
+
+func build_real2() -> void:
+	mode = "real"
 	_clear()
-	var x_max := 45.0
-	var blocks: Array = [B_STAIR2, B_204, B_STAIR1, B_213]
-	_slabs(root_set, x_max, blocks)
-	for w in Maze.MAZE_WALLS:
-		var holes: Array = []
-		if absf(w[1] - w[3]) < 0.001:          # вдоль X
-			var z: float = w[1]
-			if absf(z + 6.6) < 0.01:
-				holes = [HOLE_204, HOLE_LIFT, HOLE_STAIR]
-			elif absf(z + 9.6) < 0.01:
-				holes = [HOLE_213]
-		var bodies: Array = _wall(root_set, w[0], w[1], w[2], w[3], int(w[4]), holes)
-		if int(w[5]) == 1:
-			for b in bodies:
-				fall_walls.append({"body": b, "x0": w[0], "z0": w[1], "x1": w[2], "z1": w[3]})
-	_stair_door_panel(root_set)
-	# редкие тусклые лампочки на проводах, часть мигает
-	for p in [Vector3(1.6, 6.6, -8.1), Vector3(13.5, 6.6, -4.9), Vector3(19.5, 6.6, -11.2), Vector3(25.5, 6.6, -1.9),
-			Vector3(28.5, 6.6, -14.2), Vector3(40.5, 6.6, -8.1), Vector3(43.5, 6.6, -1.9), Vector3(16.5, 6.6, -14.2)]:
-		lamp(root_set, p, 0.55, 5.0, Color(0.95, 0.9, 0.7))
-	game.lights.set_room("L1.F2", false)
-	game.lights.set_room("L1.R10", true)
+	restore_floor2()
+	# свет: в комнатах темно, в коридоре горит, но то и дело гаснет; в процедурной 213 горит (там ключ)
+	for room in game.lights.groups.keys():
+		var rs: String = str(room)
+		if rs.begins_with("L1."):
+			game.lights.set_room(rs, rs == "L1.C" or rs == "L1.R10")
+	_surge_t = 4.0
 	var d = door(DOOR_204)
 	if d:
 		d.set_angle(0.0)
 		d.locked = true
 		d.locked_text = "Заперто. Нужен ключ от палаты"
+	var k = door(DOOR_213)
+	if k:
+		k.locked = false
+		k.set_angle(0.0)
+	var st = door(DOOR_STAIR1_F2)                # на лестницу — заклинило (откроет землетрясение)
+	if st:
+		st.set_angle(0.0)
+		st.locked = true
+		st.locked_text = "Дверь на лестницу заклинило"
 
 
-## Землетрясение: стены вдоль прямого пути от 204 к лестнице падают, проём на лестницу открывается.
+## Землетрясение на настоящем этаже: свет в коридоре скачет, двери палат бьются и распахиваются.
 func quake_open_route() -> void:
-	var items: Array = fall_walls.duplicate()
-	if stair_panel:
-		items.append({"body": stair_panel, "x0": HOLE_STAIR[0], "z0": -6.6, "x1": HOLE_STAIR[1], "z1": -6.6})
+	quaking = true
 	var k := 0
-	for it in items:
-		var body: StaticBody3D = it["body"]
-		if not is_instance_valid(body):
+	for id in door_map:
+		var dg = door_map[id]
+		if dg.center.y < 4.0 or dg.center.y > 7.0 or id in [DOOR_204, DOOR_204_BATH]:
 			continue
-		body.collision_layer = 0
-		var along_x: bool = absf(float(it["z1"]) - float(it["z0"])) < 0.001
-		var dir: float = 1.0 if k % 2 == 0 else -1.0
-		var pivot := Node3D.new()
-		root_set.add_child(pivot)
-		pivot.global_position = Vector3(body.global_position.x, Y0, body.global_position.z)
-		body.reparent(pivot, true)
-		var rot := Vector3(dir * deg_to_rad(88.0), 0, 0) if along_x else Vector3(0, 0, dir * deg_to_rad(88.0))
-		var tw := create_tween()
-		tw.tween_interval(0.25 * k)
-		tw.tween_property(pivot, "rotation", rot, 0.7).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-		tw.tween_property(pivot, "position:y", Y0 + 0.06, 0.05)
-		k += 1
+		if dg.center.z > -11.0 and dg.center.z < -5.0 and randf() < 0.5:
+			dg.locked = false
+			var tw := create_tween()
+			tw.tween_interval(0.15 * k + randf_range(0.0, 0.4))
+			tw.tween_callback(func(): dg.swing_to(randf_range(40.0, 95.0), 0.35))
+			k += 1
+	var st = door(DOOR_STAIR1_F2)
+	if st:
+		st.locked = false
 
 
 func set_lamps(f: float) -> void:
@@ -394,6 +398,20 @@ func set_lamps(f: float) -> void:
 
 
 func _process(dt: float) -> void:
+	if mode == "real":
+		# скачет напряжение: коридор гаснет на миг (иногда — на пару секунд), в землетрясение — постоянно
+		_surge_t -= dt
+		if _surge_t <= 0.0:
+			var on: bool = not game.lights.is_on("L1.C")
+			game.lights.set_room("L1.C", on)
+			if not on and not quaking and game.player and game.player.global_position.y > 4.0:
+				game.play_at("flicker", game.player.global_position + Vector3(0, 2.6, 0), -10.0, randf_range(0.8, 1.2), 15.0)
+			if quaking:
+				_surge_t = randf_range(0.05, 0.35)
+			elif on:
+				_surge_t = randf_range(3.0, 9.0)
+			else:
+				_surge_t = randf_range(1.6, 3.0) if randf() < 0.25 else randf_range(0.06, 0.35)
 	if lamps.is_empty():
 		return
 	_lamp_t -= dt

@@ -2,6 +2,9 @@ extends Node
 ## «The Last Shake»: общее для всей игры (автозагрузка GameState).
 ## Управление (все клавиши задаются здесь), глава/контрольная точка, переходы между сценами с затемнением.
 
+## Номер сборки — виден в главном меню слева внизу (чтобы сразу видно, какая версия запущена).
+const VERSION := "версия 4 · 10 ноября 2026"
+
 const MENU := "res://story/menu.tscn"
 const PROLOGUE := "res://story/prologue.tscn"
 const SANATORIUM := "res://sanatorium/main.tscn"

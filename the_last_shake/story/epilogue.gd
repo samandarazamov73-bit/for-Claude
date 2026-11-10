@@ -189,9 +189,9 @@ func _run() -> void:
 	await doctor.go_and_wait([Vector3(0.05, 0.0, 0.95)], 0.6)
 	doctor.face(cam.global_position)
 	doctor.play("talk_loop")
-	await _line("doctor", "Тише, Анвар-ака, успокойтесь. Вы в больнице.")
+	await _line("doctor", "Тише, тише, Анвар-ака. Не вставайте. Вы в больнице.")
 	beep_rate = 0.6
-	await _line("doctor", "Вы пробыли в коме ровно 5 лет после той страшной катастрофы 1975 года…", 6.0)
+	await _line("doctor", "Вы пять лет пролежали в коме. С того самого землетрясения, в семьдесят пятом…", 6.0)
 	doctor.play("idle_loop")
 	beep_rate = 0.8
 	await wait(2.0)

@@ -2,7 +2,7 @@ extends Node
 ## Сюжет «The Last Shake» внутри санатория (акты 1–6). Висит в sanatorium/main.tscn узлом Director;
 ## game.gd вызывает begin(game), когда здание построено. Глава (откуда начать) — GameState.checkpoint:
 ##   start — вход с мамой и лестница; key — после крика: ключ администратора; chase — с ключом у лифта;
-##   void — 2-й этаж (пустая комната); floor3 — 3-й этаж; maze — лабиринт и палата 204.
+##   void — 2-й этаж (пустая комната); floor3 — 3-й этаж; maze — снова настоящий 2-й этаж и палата 204.
 ## Все реплики — здесь (поменять текст — правь строки в кавычках).
 
 const StoryUI = preload("res://story/story_ui.gd")
@@ -40,8 +40,10 @@ const NIGHTSTAND_POS := Vector3(42.36, 1.2, -4.6)
 const GURNEY_FROM := Vector3(46.5, 1.2, -11.3)
 const GURNEY_TO := Vector3(46.5, 1.2, -7.45)
 const PSYCHO_SPAWN := Vector3(72.0, 1.2, -8.1)
+const PSYCHO_FAR := Vector3(52.0, 1.2, -8.1)       # погоня: стоит в коридоре (~14 м), когда загорается свет
+const PSYCHO_NEAR := Vector3(45.5, 1.2, -8.1)      # …свет гаснет на миг — он уже в 8 м
 const CHASE_RESTART := Vector3(43.5, 1.2, -7.7)
-const PSYCHO_SPEED := 3.8         # м/с; после каждой поимки чуть медленнее
+const PSYCHO_SPEED := 4.0         # м/с; после каждой поимки чуть медленнее
 const MAN_POS := Vector3(37.0, 7.8, -8.5)          # человек в коляске у лифта на 3-м этаже
 const KEY204_POS := Vector3(30.3, 5.43, -14.65)    # ключ от палаты — на инструментальном столике в 213
 const ROOM204_DOOR := Vector3(8.83, 4.5, -6.5)
@@ -137,6 +139,7 @@ func begin(g) -> void:
 			_act2_key()
 		"chase":
 			_setup_after_scream()
+			place_player(CHASE_RESTART, PI * 0.5)       # у кабинета администратора, ключ уже взят
 			_take_lift_key(false)
 			_act2_return()
 		"void":
@@ -148,7 +151,7 @@ func begin(g) -> void:
 			_act4()
 		"maze":
 			_jump_to_lift(1, false)
-			sets.build_maze()
+			sets.build_real2()
 			_act5()
 		_:
 			_act1()
@@ -327,7 +330,7 @@ func _act1() -> void:
 	await wait(1.0)
 	freeze(false)
 	mom.set_look(player.head.global_position)
-	await say("mom", "Дедушка где-то наверху. Пойдём к лестнице.")
+	await say("mom", "Его палата на втором. Сначала к лестнице.")
 	mom.set_look(null)
 	objective("Следуй за мамой к лестнице", mom, Vector3(0, 1.9, 0))
 	ui.hint("W / S — ехать, A / D — поворот, мышь — смотреть, F — фонарик, E — действие", 8.0)
@@ -352,11 +355,12 @@ func _act1() -> void:
 	mom.face(ppos())
 	mom.set_look(player.head.global_position)
 	mom.play("talk_loop")
-	await say("mom", "Я сейчас спущу его сюда. Подожди здесь.")
+	await say("mom", "Жди здесь. Я поднимусь за ним и приведу его.")
 	mom.set_look(null)
 	objective("Подожди маму у лестницы")
 	await mom.go_and_wait(STAIRS_UP, 1.0)
 	mom.visible = false
+	_wait_scares_stairs()
 	await wait(40.0)                                   # «через 30–60 секунд она возвращается»
 	mom.visible = true
 	var down: Array = STAIRS_UP.duplicate()
@@ -365,22 +369,96 @@ func _act1() -> void:
 	await mom.go_and_wait(down, 1.0)
 	mom.face(ppos())
 	if not near(STAIR_FOOT, 5.0):
-		await say("mom", "Саман? Ты где? Подъедь сюда!")
+		await say("mom", "Саман! Ты где? Подъезжай сюда.")
 		objective("Вернись к маме, к лестнице", mom, Vector3(0, 1.9, 0))
 		await until(func(): return near(STAIR_FOOT, 4.5))
 	mom.face(ppos())
 	mom.set_look(player.head.global_position)
 	mom.play("talk_loop")
-	await say("mom", "Странно, твоего дедушки наверху нет. Я сейчас другие этажи посмотрю, может, он на 3-м этаже.")
-	await say("mom", "Подожди здесь, я быстро найду его.")
-	await say("hero", "Хорошо, но найди его побыстрее, а то здесь что-то не так.")
+	await say("mom", "Его там нет. В палате пусто… Может, его перевели на третий.")
+	await say("mom", "Стой здесь. Никуда не уезжай, слышишь?")
+	await say("hero", "Только быстрее, ладно? Мне здесь не по себе.")
 	mom.set_look(null)
 	await mom.go_and_wait(STAIRS_UP, 1.1)
 	mom.visible = false
 	objective("Осмотри первый этаж")
 	_drone.volume_db = -26.0
+	_wait_scares_floor1()
 	await wait(60.0)                                   # «через 1 минуту … раздаётся пронзительный крик»
 	_act2_scream()
+
+
+## Пока ждёшь маму у лестницы: кто-то ходит наверху, свет в коридоре скачет, далеко хлопает дверь.
+func _wait_scares_stairs() -> void:
+	await wait(9.0)
+	if act != "act1":
+		return
+	snd("barefoot_steps", STAIR_FOOT + Vector3(3.0, 3.6, 1.0), -2.0, 0.85, 25.0)
+	await wait(12.0)
+	if act != "act1":
+		return
+	await _corridor_flicker(4)
+	await wait(10.0)
+	if act != "act1":
+		return
+	game.play_at("door_slam_far", Vector3(70.0, 2.0, -8.1), 2.0, 0.9, 70.0)
+
+
+## Пока бродишь по первому этажу: стук из-за двери рядом, а потом — фигура в конце коридора, пока мигает свет.
+func _wait_scares_floor1() -> void:
+	await wait(14.0)
+	if act != "act1":
+		return
+	var side := Vector3(0, 0, 1.6) if randf() < 0.5 else Vector3(0, 0, -1.6)
+	snd("knock", ppos() + side + Vector3(0, 1.2, 0), 2.0, 0.9, 12.0)
+	# фигура: только если смотришь вдоль коридора и до конца далеко
+	var t := 0.0
+	while t < 30.0 and act == "act1":
+		await wait(0.5)
+		t += 0.5
+		if t < 10.0 or room_id() != "L0.C":
+			continue
+		var fwd: Vector3 = -player.cam.global_transform.basis.z
+		var end_x: float = 73.6 if fwd.x > 0.0 else 1.3
+		if absf(fwd.x) > 0.85 and absf(end_x - ppos().x) > 16.0:
+			await _figure_at_corridor_end(Vector3(end_x, 1.2, -8.1))
+			return
+
+
+func _figure_at_corridor_end(p: Vector3) -> void:
+	game.lights.set_room("L0.C", false)
+	game.play_at("flicker", ppos() + Vector3(0, 2.8, 0), -4.0, 0.8, 20.0)
+	psycho.visible = true
+	psycho.global_position = p
+	psycho.face(ppos(), true)
+	psycho.play("idle_loop", 0.0)
+	psycho.set_look(player.head.global_position)
+	await wait(0.25)
+	game.lights.set_room("L0.C", true)
+	await wait(0.9)
+	game.lights.set_room("L0.C", false)
+	await wait(0.3)
+	psycho.visible = false
+	psycho.set_look(null)
+	game.lights.set_room("L0.C", true)
+	_heartbeat_burst(4)
+
+
+## Свет в коридоре 1-го этажа мигает n раз (с треском).
+func _corridor_flicker(n: int) -> void:
+	for i in n:
+		game.lights.set_room("L0.C", false)
+		if i == 0:
+			game.play_at("flicker", ppos() + Vector3(0, 2.8, 0), -6.0, randf_range(0.8, 1.1), 20.0)
+		await wait(randf_range(0.06, 0.2))
+		game.lights.set_room("L0.C", true)
+		await wait(randf_range(0.08, 0.35))
+
+
+func _heartbeat_burst(n: int) -> void:
+	for i in n:
+		snd("heartbeat", null, -4.0, 1.0)
+		await wait(0.5)
 
 
 # ================================================================================ АКТ 2: крик, «моя комната», лифт без ключа
@@ -397,7 +475,7 @@ func _act2_scream() -> void:
 	game.lights.set_room("L0.R17", true)           # в кабинете загорается и мигает свет — видно из коридора
 	snd("stinger", null, -10.0)
 	await wait(1.5)
-	await say("thought", "Что это было?!")
+	await say("thought", "Кто это кричал?..")
 	objective("Проверь, что это было — крик из процедурного кабинета 139 (в конце коридора, справа)", SCREAM_DOOR)
 	var d = door(DOOR_SCREAM)
 	_moan_t = 10.0
@@ -405,7 +483,7 @@ func _act2_scream() -> void:
 	await until(func(): return (d != null and d.angle > 18.0) or room_id() == "L0.R17")
 	_scream_door_open = true
 	await wait(0.6)
-	await say("hero", "Дедушка?.. Есть тут кто?")
+	await say("hero", "Дедушка?.. Здесь есть кто-нибудь?")
 	await wait(5.0)
 	snd("crash_heavy", CRASH_POS, 8.0, 1.0, 40.0)
 	shake(1.0, 0.7)
@@ -413,9 +491,9 @@ func _act2_scream() -> void:
 	objective("Вернись к лестнице", STAIR_FOOT + Vector3(0, 0, 2.0))
 	await wait(5.0)
 	snd("psycho_shout", SCREAM_ROOM, 6.0, 1.0, 50.0)
-	await say("psycho", "Кто зашёл в мою комнату?!?! Если я найду тебя — я тебя не прощу!!")
+	await say("psycho", "Кто заходил в мою комнату?! Я тебя найду, слышишь?! Найду!")
 	await until(func(): return ppos().x < 40.5 and ppos().z < -0.5 and ppos().z > -10.0)
-	await say("thought", "Там был лифт… Нужно подняться на нём на второй этаж.")
+	await say("thought", "Лифт… Надо уехать отсюда наверх, к маме.")
 	objective("Поднимись на лифте на 2-й этаж — лифт рядом с лестницей, вызови его кнопкой (E)", LIFT_CALL)
 	act = "need_key"
 
@@ -425,12 +503,12 @@ func _on_lift_locked() -> void:
 		act = "find_admin"
 		_act2_key()
 	elif act == "floor3_search":
-		say("thought", "Сначала найду маму.")
+		say("thought", "Нет. Сначала мама.")
 
 
 func _act2_key() -> void:
 	act = "find_admin"
-	await say("thought", "Заперт… Ключ от лифта должен быть у администратора.")
+	await say("thought", "Заперт. Ключи обычно у администратора…")
 	objective("Найди комнату Администратора — кабинет 134, по коридору направо от лифта", ADMIN_DOOR)
 	_build_nightstand()
 	# каталка: выкатывается из тёмного кабинета прямо перед коляской
@@ -537,7 +615,7 @@ func _take_lift_key(play_scene: bool) -> void:
 	psycho.stop()
 	if is_instance_valid(run):
 		run.queue_free()
-	await say("hero", "Кто… кто это был?!")
+	await say("hero", "Кто это?.. Что ему от меня надо?..")
 	_act2_return()
 
 
@@ -546,25 +624,70 @@ func _act2_return() -> void:
 	GameState.checkpoint = "chase"
 	objective("Вернись к лифту и поднимись на 2-й этаж", LIFT_CALL)
 	chase = "off"
-	await until(func(): return lift.state in ["opening", "open"] and lift.floor_idx == 0 and near(Vector3(37.5, 1.2, -7.0), 7.0))
+	# подъехал к лифту по коридору (из кабинета администратора и с места, где очнулся, — ещё нет)
+	await until(func(): return ppos().y < 2.5 and ((ppos().x < 41.0 and near(LIFT_CALL, 5.0)) or
+		(lift.state in ["opening", "open"] and lift.floor_idx == 0 and near(Vector3(37.5, 1.2, -7.0), 7.0))))
 	_start_chase()
 
 
 # ================================================================================ погоня у лифта
+## Погоня: свет в коридоре гаснет — когда загорается, в конце коридора стоит он и смотрит. Ещё раз темнота —
+## он уже ближе. Крик — и бежит; свет мигает, всё громче шаги и сердце. Успей вызвать лифт, заехать и нажать «2».
 func _start_chase() -> void:
 	act = "chase"
-	psycho.visible = true
-	psycho.global_position = PSYCHO_SPAWN
-	psycho.face(ppos(), true)
-	snd("psycho_roar", PSYCHO_SPAWN + Vector3(0, 1.6, 0), 8.0, 1.0, 60.0)
-	snd("stinger", null, -2.0)
+	var retry: bool = GameState.deaths > 0
+	_psycho_speed = PSYCHO_SPEED - 0.3 * mini(GameState.deaths, 3)
 	_drone.volume_db = -14.0
-	objective("Быстрее в лифт! Развернись к кнопкам и нажми «2» (E)", Vector3(38.3, 1.2, -6.2), Vector3(0, 1.3, 0))
-	ui.say("psycho", "Ты зашёл в мою комнату, сука!!!!", 3.0)
-	await wait(0.5)
-	_psycho_speed = PSYCHO_SPEED - 0.2 * mini(GameState.deaths, 3)
-	psycho.play("run_loop", 0.2, _psycho_speed / 3.6)
+	objective("Вызови лифт (E), заезжай и нажми «2»!", LIFT_CALL, Vector3(0, 1.3, 0))
+	await _corridor_flicker(3 if not retry else 1)
+	game.lights.set_room("L0.C", false)
+	game.play_at("flicker", Vector3(50.0, 3.6, -8.1), 0.0, 0.7, 60.0)
+	psycho.visible = true
+	psycho.global_position = PSYCHO_FAR
+	psycho.face(ppos(), true)
+	psycho.play("idle_loop", 0.0)
+	psycho.set_look(player.head.global_position)
+	await wait(0.9 if not retry else 0.5)
+	game.lights.set_room("L0.C", true)
+	if _chase_over():
+		return
+	if not retry:
+		look_at_point(psycho.head_pos(), 0.6)          # первый раз — сам поворачиваешься на дыхание
+	snd("stinger", null, -4.0, 0.8)
+	snd("breathing", PSYCHO_FAR + Vector3(0, 1.6, 0), 6.0, 0.75, 45.0)
+	_heartbeat_burst(3)
+	await wait(1.5 if not retry else 0.9)
+	if _chase_over():
+		return
+	game.lights.set_room("L0.C", false)
+	await wait(0.45 if not retry else 0.3)
+	psycho.global_position = PSYCHO_NEAR
+	psycho.face(ppos(), true)
+	game.lights.set_room("L0.C", true)
+	snd("stinger", null, -8.0, 1.2)
+	await wait(0.75 if not retry else 0.5)
+	if _chase_over():
+		return
+	psycho.set_look(null)
+	snd("psycho_roar", psycho.head_pos(), 9.0, 1.0, 60.0)
+	ui.say("psycho", "Это ты был в моей комнате?! Стой!!", 2.6)
+	psycho.play("run_loop", 0.15, _psycho_speed / 3.4)
+	_strobe_t = 0.2
 	chase = "run"
+
+
+## Уже уехал на лифте, пока он показывался, — дальше не бежит (на 2-м этаже его нет).
+func _chase_over() -> bool:
+	if act == "chase" and not (lift.player_in_cabin() and lift.state == "moving"):
+		return false
+	psycho.set_look(null)
+	if act != "chase":
+		psycho.visible = false
+		psycho.stop()
+	else:
+		chase = "safe"                 # двери уже закрылись: бьёт в них, пока лифт уходит
+	game.lights.set_room("L0.C", true)
+	return true
 
 
 func _chase_target() -> Vector3:
@@ -583,7 +706,17 @@ func _update_chase(dt: float) -> void:
 	var to: Vector3 = target - psycho.global_position
 	to.y = 0.0
 	var step: float = _psycho_speed * dt
-	_heartbeat(dt, clampf(1.0 - psycho.global_position.distance_to(ppos()) / 25.0, 0.0, 1.0))
+	var dist: float = psycho.global_position.distance_to(ppos())
+	_heartbeat(dt, clampf(1.0 - dist / 25.0, 0.0, 1.0))
+	# свет в коридоре дёргается, пока он бежит; чем ближе — тем сильнее трясёт картинку
+	_strobe_t -= dt
+	if _strobe_t <= 0.0 and not safe:
+		var on: bool = not game.lights.is_on("L0.C")
+		game.lights.set_room("L0.C", on)
+		_strobe_t = randf_range(0.25, 0.9) if on else randf_range(0.05, 0.16)
+	var k: float = clampf(1.0 - dist / 9.0, 0.0, 1.0) * (0.0 if safe else 1.0)
+	player.view_offset = Transform3D(Basis.from_euler(Vector3(randf_range(-1, 1) * 0.008, randf_range(-1, 1) * 0.006,
+		randf_range(-1, 1) * 0.01) * k), Vector3.ZERO)
 	if to.length() > step:
 		psycho.global_position += to.normalized() * step
 		psycho.step_moved(step)
@@ -597,6 +730,10 @@ func _update_chase(dt: float) -> void:
 			chase = "safe"
 			psycho.face(Vector3(37.5, 1.2, -5.0), true)
 			_psycho_bang_t = 0.0
+			game.lights.set_room("L0.C", true)
+			player.view_offset = Transform3D.IDENTITY
+			snd("psycho_shout", Vector3(37.5, 2.2, -6.8), 6.0, 0.95, 30.0)
+			ui.say("psycho", "Открой!! Открой, я сказал!!", 2.2)
 		_psycho_bang_t -= dt
 		if _psycho_bang_t <= 0.0:
 			_psycho_bang_t = 0.75
@@ -605,10 +742,12 @@ func _update_chase(dt: float) -> void:
 		return
 	if not safe and Vector2(ppos().x - psycho.global_position.x, ppos().z - psycho.global_position.z).length() < 1.15:
 		chase = "caught"
+		game.lights.set_room("L0.C", true)
 		_caught()
 
 
 var _hb_t := 0.0
+var _strobe_t := 0.0
 
 
 ## Сердцебиение Самана: чем ближе опасность (0..1), тем чаще и громче.
@@ -677,6 +816,8 @@ func _on_lift_departed(f: int) -> void:
 		chase = "off"
 		psycho.visible = false
 		psycho.stop()
+		game.lights.set_room("L0.C", true)
+		player.view_offset = Transform3D.IDENTITY
 	elif act == "floor3_leave" and f == 2:
 		_on_leave_floor3()
 
@@ -701,7 +842,7 @@ func _act3() -> void:
 	if GameState.fade_target() > 0.5:
 		await GameState.fade_to(0.0, 1.5)
 	await wait(1.2)
-	await say("thought", "Что это?.. Где все комнаты?.. Там одна дверь…")
+	await say("thought", "Где… где всё? Тут же были палаты… Осталась одна дверь.")
 	objective("Найди комнату деда — дверь с лампой вдалеке", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	await until(func(): return room_id() == "L1.F2")
 	await wait(2.0)
@@ -725,7 +866,7 @@ func _act3() -> void:
 	var tw := create_tween()
 	tw.tween_property(hiss, "volume_db", -40.0, 4.0)
 	tw.tween_callback(hiss.queue_free)
-	await say("thought", "Здесь никого нет… Мама говорила про третий этаж.")
+	await say("thought", "Никого. Мама говорила — третий этаж.")
 	objective("Поднимись на лифте на 3-й этаж и найди маму", Vector3(37.5, 4.5, -6.9))
 	lift.locked = false
 	lift.forced_floor = 2
@@ -763,10 +904,10 @@ func _act4() -> void:
 	talk_area.queue_free()
 	freeze(true)
 	await look_at_point(MAN_POS + Vector3(0, 1.2, 0), 0.6)
-	await say("hero", "Извините, я хотел спросить: вы не видели здесь женщину в коричневом платье?")
+	await say("hero", "Извините… Вы не видели здесь женщину? В коричневом платье.")
 	await wait(6.5)                                    # пауза 5–8 секунд
-	await say("man", "Она только что по лестнице вниз пошла. Я всё тебе сказал, теперь не беспокой меня, уходи.")
-	await say("hero", "Хорошо, спасибо.")
+	await say("man", "Только что спустилась по лестнице. Всё. Больше не спрашивай. Уезжай отсюда.")
+	await say("hero", "Спасибо…")
 	freeze(false)
 	objective("Вернись в лифт", Vector3(37.5, 7.8, -5.2))
 	lift.locked = false
@@ -794,10 +935,10 @@ func _set_flag(flag: Array) -> void:
 
 func _on_leave_floor3() -> void:
 	act = "floor3_down"
-	sets.build_maze()
+	sets.build_real2()
 
 
-# ================================================================================ АКТ 5: лабиринт, палата 204, дед, драка
+# ================================================================================ АКТ 5: настоящий 2-й этаж, палата 204, дед, драка
 func _act5() -> void:
 	act = "maze"
 	GameState.checkpoint = "maze"
@@ -810,12 +951,12 @@ func _act5() -> void:
 	lift.lock_text = "Лифт больше не работает"
 	_drone.volume_db = -12.0
 	await wait(1.0)
-	await say("hero", "Что происходит?.. Я что, умер?")
+	await say("thought", "Второй этаж… Тут же только что была пустота. Как?..")
 	objective("Найди комнату деда (Палата №204)", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	_place_ward_key()
 	await until(func(): return near(ROOM204_DOOR + Vector3(0, 0, -1.0), 2.2) or has_ward_key)
 	if not has_ward_key:
-		await say("thought", "Заперто… Нужен ключ. Может, в процедурном кабинете?")
+		await say("thought", "Заперто. Ключ… может, в процедурной?")
 		objective("Найди ключ от палаты — процедурный кабинет 213", ROOM213_DOOR)
 		await until(func(): return has_ward_key)
 	objective("Открой палату №204 и заезжай", ROOM204_DOOR + Vector3(0, 0, 0.6))
@@ -873,9 +1014,9 @@ func _grandpa_at_door() -> void:
 	await look_at_point(grandpa.head_pos(), 0.4)
 	grandpa.set_look(player.head.global_position)
 	grandpa.play("talk_loop")
-	await say("grandpa", "Внучок, привет… Как ты?")
+	await say("grandpa", "Внучок… Приехал. Как ты?")
 	grandpa.play("idle_loop")
-	await say("hero", "Г-где моя мама?..")
+	await say("hero", "Д-дедушка?.. А где мама?")
 	await wait(1.2)
 	# дед молча делает шаг вперёд, Саман пятится, дверь захлопывается перед лицом деда
 	grandpa.go([Vector3(8.85, 4.5, -6.9)], 0.35, "walk_loop")
@@ -905,10 +1046,10 @@ func _grandpa_at_door() -> void:
 	mom.face(ppos())
 	await look_at_point(mom.head_pos(), 0.5)
 	mom.set_look(player.head.global_position)
-	await say("hero", "Мама!.. Мама, это я! Я твой сын!")
+	await say("hero", "Мама!.. Мам, это я! Это же я!")
 	snd("mom_scream", mom.head_pos(), 4.0)
 	mom.play("talk_loop", 0.1, 1.5)
-	await say("mom", "Ты не мой сын!! Убирайся, или я убью тебя и твоё мясо отдам собакам! Иди сюда!!!", 4.5)
+	await say("mom", "Ты не мой сын!! Не подходи! Убирайся, или я тебя убью!", 4.0)
 	_start_fight()
 
 
@@ -943,7 +1084,7 @@ func _update_fight(dt: float) -> void:
 		if d:
 			d.rattle(2.5)
 		if randf() < 0.3:
-			ui.say("grandpa", ["Открой!!", "Барно, не трогай его!", "Внучок!!"][randi() % 3], 1.6)
+			ui.say("grandpa", ["Открой!!", "Барно, не трогай его!", "Внучок, держись!!"][randi() % 3], 1.6)
 	if fight != "on":
 		return
 	var to: Vector3 = ppos() - mom.global_position
@@ -1082,7 +1223,7 @@ func _rescue() -> void:
 	grandpa.play("talk_loop")
 	ui.set_damage(0.25)
 	freeze(false)
-	await say("grandpa", "Уходим, пока не поздно! Давай быстрее за мной!")
+	await say("grandpa", "Вставай! Сейчас всё рухнет — за мной, быстро!")
 	_act6()
 
 
@@ -1120,7 +1261,7 @@ func _act6() -> void:
 				grandpa.face(ppos())
 				if not shouted:
 					shouted = true
-					ui.say("grandpa", "Быстрее, внучок!", 2.0)
+					ui.say("grandpa", "Не отставай, внучок!", 2.0)
 				await until(func(): return grandpa.global_position.distance_to(ppos()) < 4.5, 20.0)
 				grandpa.go([next], 2.6, "run_loop")
 	grandpa.stop("idle_loop")
@@ -1128,9 +1269,9 @@ func _act6() -> void:
 	await until(func(): return ppos().y > 4.0 and ppos().z > -6.4 and ppos().x > 29.9 and ppos().x < 36.0, 60.0)
 	freeze(true)
 	await look_at_point(grandpa.head_pos(), 0.5)
-	await say("hero", "Дедушка, там лифт есть!")
+	await say("hero", "Дедушка, тут лифт есть!")
 	grandpa.play("talk_loop")
-	await say("grandpa", "В первый раз слышу такое слово! Давай быстрее!", 2.6)
+	await say("grandpa", "Лифт? Первый раз такое слово слышу! Быстрее!", 2.6)
 	await _finale()
 
 

@@ -1,7 +1,7 @@
 extends Node3D
 ## Пролог «The Last Shake» (акт 1, начало): старый ЛиАЗ едет по лесной дороге в густом сером тумане предгорий.
-## Саман сам управляет электроколяской на задней площадке (W A S D, мышь); навести взгляд на маму (Барно) и
-## нажать E — разговор. Остановка «Санаторий «Оромгох»» → темнота → остановка снаружи, автобус уезжает →
+## Коляска Самана стоит на задней площадке (в автобусе её не двигать), свет в салоне выключен; мышью смотришь
+## по сторонам, навести взгляд на маму (Барно) и нажать E — разговор. Остановка «Санаторий «Оромгох»» → темнота → остановка снаружи, автобус уезжает →
 ## по лесной тропинке за мамой в сумерках (F — фонарик) → вверх по пандусу (коляска едет по маршруту
 ## resources/world/entrance_route.json, W/S) → E — открыть входную дверь → заехать в тамбур → дверь закрывается
 ## за мамой → санаторий (main.tscn) продолжается с того же места в тамбуре.
@@ -24,14 +24,12 @@ const LAT_ACC := 1.4                # боковое ускорение в по�
 const LANE := 1.85                  # правая полоса (в forest_drive «плюс» — вправо по ходу)
 const STOP_LANE := 2.85             # у остановки прижимается к обочине
 const FAST := 6.0                   # Tab — перемотка поездки
-const CHAIR_SPEED := 0.55           # по салону
 const WALK_SPEED := 1.6             # по тропинке (Shift — 2.4)
 const PATH_HALF := 1.6
 const EYE := Vector3(0.0, 1.19, 0.20)
 const MOUSE_SENS := 0.0022
 const MOM_IN_BUS := Vector3(-0.5, 0.8, 4.6)     # Барно спокойно стоит слева от Самана (руки опущены)
 const HERO_IN_BUS := Vector3(-0.6, 0.8, 3.85)   # задняя площадка, лицом к левому окну
-const PLATFORM := Rect2(-0.75, 3.72, 1.05, 0.3)  # x, z, ширина, длина (где может быть центр коляски)
 # вход в санаторий (координаты здания, как в sanatorium/assets/level.json)
 const RAMP_SPEED := 1.05                        # м/с по пандусу (W — вверх, S — назад)
 const DOOR_STOP_X := 26.75                      # пока дверь закрыта, центр коляски — не дальше
@@ -82,10 +80,8 @@ var _bus_away := false
 var _bus_v := 0.0
 var _events := {}
 var _event_busy := false
-var bus_lamps: Array = []
 var chair_model
 var _drone: AudioStreamPlayer
-var _lamp_t := 6.0
 var _mom_hold := false
 var site_xf: Transform3D          # координаты здания → мир
 var forest_count := 0             # сколько точек в лесной тропинке (дальше — маршрут к двери)
@@ -361,20 +357,15 @@ func _build_bus() -> void:
 	probe.interior = true
 	probe.box_projection = true
 	probe.ambient_mode = ReflectionProbe.AMBIENT_COLOR
-	probe.ambient_color = Color(0.55, 0.6, 0.66)
-	probe.ambient_color_energy = 0.32
+	probe.ambient_color = Color(0.6, 0.64, 0.68)
+	probe.ambient_color_energy = 0.42             # свет только из окон: салон чуть темнее улицы
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	bus.body.add_child(probe)
 	probe.position = Vector3(0, 1.9, 0)
-	# плафоны: днём тусклые, холодные, старые — изредка мигают
+	# плафоны выключены: днём в салоне светло только от окон, туман за окном виден лучше
 	for l in bus.body.get_children():
 		if l is OmniLight3D:
-			var ol: OmniLight3D = l
-			ol.light_color = Color(0.86, 0.93, 1.0)
-			ol.light_energy = 0.35
-			ol.omni_range = 5.5
-			ol.light_volumetric_fog_energy = 0.0
-			bus_lamps.append(ol)
+			(l as OmniLight3D).visible = false
 	_place_bus(0.0)
 	for pair in [["driver", "anchor_driver"], ["grandma_scarf", "seat_13_w_r"], ["man_newspaper", "seat_11_a"],
 			["mother_baby", "seat_19_s"]]:
@@ -597,9 +588,9 @@ func _ride_story() -> void:
 	await GameState.fade_to(0.0, 2.5)
 	await ui.title("THE LAST SHAKE", "Последний Скачок · Soʻnggi Silkiniş", 2.5, 72)
 	ui.set_objective("Поговори с мамой — наведи на неё взгляд и нажми E")
-	ui.hint("Мышь — осмотреться   ·   W A S D — коляска   ·   E — поговорить   ·   Tab — ускорить поездку   ·   Esc — меню", 9.0)
+	ui.hint("Мышь — осмотреться   ·   E — поговорить (посмотри на маму)   ·   Tab — ускорить поездку   ·   Esc — меню", 9.0)
 	await wait(1.5)
-	await say("hero", "(про себя) Снова туман… Как будто едем в никуда.")
+	await say("thought", "Опять этот туман. Даже дороги не видно.")
 
 
 func _talk() -> void:
@@ -608,22 +599,26 @@ func _talk() -> void:
 	talked = true
 	ui.set_objective("")
 	ui.set_prompt("")
-	await say("hero", "Мам, а дедушка знает, что мы едем?")
-	await say("mom", "Знает. Он нас ждёт… давно ждёт.")
-	await say("hero", "Почему его положили так далеко? В лесу, в горах…")
-	await say("mom", "Там тихо. Там ему лучше.")
+	await say("hero", "Мам… А дедушка вообще знает, что мы едем?")
+	await say("mom", "Знает.")
+	await say("hero", "Ты ему звонила? Он же не любит, когда без предупреждения.")
+	await wait(1.2)
+	await say("mom", "Он нас ждёт, Саман.")
+	await say("hero", "Почему его увезли так далеко? Тут же на сто километров никого.")
+	await say("mom", "Врачи так решили. Там тихо.")
 	await wait(1.5)
-	await say("hero", "Ты какая-то странная сегодня.")
-	await say("mom", "Не задавай лишних вопросов, Саман. Смотри в окно. Скоро наша остановка.")
+	await say("hero", "Ты с утра на меня даже не смотришь. Что-то случилось?")
+	await say("mom", "Хватит. Смотри в окно. Скоро выходим.")
 	ui.set_objective("Едем к деду в санаторий «Оромгох»")
 
 
 func _arrival() -> void:
 	phase = "arrive"
 	ui.set_prompt("")
-	await say("driver", "«Санаторий «Оромгох»»! Конечная для вас… Туда давно никто не ездит.")
+	await say("driver", "«Оромгох»… Вам точно сюда? Там же давно никого нет.")
+	await say("mom", "Нам сюда.")
 	if not talked:
-		await say("mom", "Саман, мы приехали. Выходим.")
+		await say("mom", "Саман, выходим.")
 	bus.door_open["middle"] = 0.0
 	audio.play_sfx("hiss", 0.8)
 	var tw := create_tween()
@@ -664,7 +659,7 @@ func _go_outside() -> void:
 	await wait(0.6)
 	await GameState.fade_to(0.0, 1.5)
 	_depart_bus()
-	await say("mom", "Тут недалеко. Держись за мной.")
+	await say("mom", "Тут недалеко. Не отставай.")
 	ui.set_objective("Езжай за мамой по тропинке к санаторию")
 	ui.hint("W / S — ехать   ·   A / D — повернуть   ·   Shift — быстрее   ·   F — фонарик", 7.0)
 
@@ -721,34 +716,35 @@ func _walk_event() -> void:
 	if walk_s > 25.0 and not _events.has("crow"):
 		_events["crow"] = true
 		audio.play_sfx("crow", 0.7)
-		await say("hero", "Тут так тихо… Даже птицы не поют.")
-		await say("mom", "Не отставай.")
+		await say("hero", "Как тихо… Даже птиц не слышно.")
+		await say("mom", "Не останавливайся.")
 	elif walk_s > 55.0 and not _events.has("snap"):
 		_events["snap"] = true
 		audio.play_sfx("snap", 0.9)
 		_mom_hold = true
 		mom.face(path[0])
 		mom.set_look(path[0] + Vector3(0, 1.5, 0))
-		await say("mom", "…Ты слышал?")
-		await wait(1.2)
+		await say("mom", "Тихо.")
+		await wait(1.4)
 		await say("hero", "Что? Там кто-то есть?")
+		await wait(0.8)
 		mom.set_look(null)
-		await say("mom", "Показалось. Пойдём.")
+		await say("mom", "Зверь, наверное. Пошли.")
 		_mom_hold = false
 	elif walk_s > 70.0 and not _events.has("dark"):
 		_events["dark"] = true
 		if not torch.visible:
-			await say("mom", "Темнеет. Включи фонарик, он у тебя на коляске.")
+			await say("mom", "Темнеет. Включи фонарь, он у тебя на коляске.")
 			ui.hint("F — фонарик", 5.0)
 	elif walk_s > 92.0 and not _events.has("building"):
 		_events["building"] = true
-		await say("mom", "Вот он. «Оромгох».")
-		await say("hero", "Это… санаторий? Он же заброшенный.")
-		await say("mom", "Заезжай по пандусу. Дедушка ждёт.")
+		await say("mom", "Вот он.")
+		await say("hero", "Мам… Тут окна выбиты. Здесь вообще кто-нибудь лечится?")
+		await say("mom", "Поднимайся по пандусу. Дедушка ждёт.")
 	elif guided and _mom_aside and walk_s > door_stop_s - 3.5 and not _events.has("door"):
 		_events["door"] = true
 		mom.set_look(head.global_position)
-		await say("mom", "Открывай, не бойся. Я за тобой.")
+		await say("mom", "Открывай. Я за тобой.")
 		mom.set_look(null)
 
 
@@ -791,29 +787,12 @@ func _update_ride(dt: float) -> void:
 	_place_bus(dt)
 	audio.update(v, acc, true)
 	audio.set_forest(1.0, 0.0)
-	_lamp_t -= dt
-	if _lamp_t <= 0.0 and not bus_lamps.is_empty():
-		_lamp_t = randf_range(0.04, 0.12) if randf() < 0.7 else randf_range(6.0, 16.0)
-		var l: OmniLight3D = bus_lamps[randi() % bus_lamps.size()]
-		l.light_energy = 0.35 if l.light_energy < 0.1 else randf_range(0.0, 0.08)
-	elif _lamp_t > 5.0:
-		for l in bus_lamps:
-			(l as OmniLight3D).light_energy = 0.35
 	set_day(lerpf(0.0, 0.38, 1.0 - left / RIDE_DISTANCE))
 	if phase == "ride" and left < 0.6 and v < 0.05:
 		v = 0.0
 		_arrival()
-	# коляска по задней площадке
-	var drive: float = Input.get_action_strength("drive_forward") - Input.get_action_strength("drive_back")
-	var turn: float = Input.get_action_strength("turn_left") - Input.get_action_strength("turn_right")
-	hero.rotation.y += turn * 1.4 * dt
-	var fwd: Vector3 = -hero.transform.basis.z
-	var np: Vector3 = hero.position + fwd * drive * CHAIR_SPEED * dt
-	np.x = clampf(np.x, PLATFORM.position.x, PLATFORM.position.x + PLATFORM.size.x)
-	np.z = clampf(np.z, PLATFORM.position.y, PLATFORM.position.y + PLATFORM.size.y)
-	hero.position = np
-	chair_model.set_input(drive, -turn, dt)
-	audio.set_motor(absf(drive) * 0.7 + absf(turn) * 0.3)
+	# коляска стоит на месте (на тормозе) — в автобусе не ездим, только смотрим
+	chair_model.set_input(0.0, 0.0, dt)
 	# мама стоит рядом: смотрит в окно — а в разговоре на сына
 	if talking:
 		mom.set_look(head.global_position)

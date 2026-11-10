@@ -49,6 +49,12 @@ func _ready() -> void:
 	foot.position = Vector2(-350, -60)
 	foot.size = Vector2(700, 30)
 	add_child(foot)
+	var ver := _label(GameState.VERSION, 18, Color(0.62, 0.58, 0.5))
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	ver.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	ver.position = Vector2(24, -46)
+	ver.size = Vector2(420, 30)
+	add_child(ver)
 	_drone = AudioStreamPlayer.new()
 	var s: AudioStream = load("res://story/sfx/drone_low.wav")
 	if s is AudioStreamWAV:

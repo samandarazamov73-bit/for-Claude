@@ -53,7 +53,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair":
+		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -127,7 +127,7 @@ func _prologue() -> void:
 			await secs(10.0)
 			await shot("bus_mom_talk")
 			p.talking = false
-			p.say("mom", "Знает. Он нас ждёт… давно ждёт.", 8.0)
+			p.say("mom", "Он нас ждёт, Саман.", 8.0)
 			await secs(2.5)
 			await shot("bus_mom_speaking")
 		"walk", "building", "torch":
@@ -303,6 +303,8 @@ func _sanatorium() -> void:
 	var cp: String = case_name
 	if case_name == "sanatorium" or case_name == "chair":
 		cp = "start"
+	elif case_name == "chase2":
+		cp = "chase"
 	elif case_name == "fight":
 		cp = "maze"
 	GameStateRef().checkpoint = cp
@@ -348,6 +350,34 @@ func _sanatorium() -> void:
 			await get_tree().process_frame
 		await secs(3.0)
 		await shot("quake")
+	elif case_name == "chase2":
+		# погоня по этапам: стоит в конце коридора → ближе → бежит
+		d.player.global_position = Vector3(38.2, 1.25, -7.5)
+		d.player.rotation.y = -PI * 0.5
+		d.player.look_yaw = 0.0
+		d.player.look_pitch = 0.02
+		var ps: Node3D = d.psycho
+		var w := 0.0
+		while not (ps.visible and d.game.lights.is_on("L0.C")) and w < 120.0:
+			await get_tree().process_frame
+			w += get_process_delta_time()
+		await frames(2)
+		await shot("chase2_far")
+		while ps.global_position.distance_to(d.PSYCHO_NEAR) > 0.1 and d.chase != "run" and w < 240.0:
+			await get_tree().process_frame
+			w += get_process_delta_time()
+		while not d.game.lights.is_on("L0.C") and w < 300.0:
+			await get_tree().process_frame
+			w += get_process_delta_time()
+		await frames(2)
+		await shot("chase2_near")
+		while d.chase != "run" and w < 400.0:
+			await get_tree().process_frame
+			w += get_process_delta_time()
+		while ps.global_position.x > 44.0 and d.chase == "run":
+			await get_tree().process_frame
+		await shot("chase2_run")
+		print("CHASE2 psycho at ", ps.global_position, " chase ", d.chase)
 	elif case_name == "chair":
 		d.player.look_pitch = -1.0
 		d.player.look_yaw = -0.3
