@@ -115,3 +115,26 @@ def test_export_option_validation():
         parse_export_public({"output.size.scale": "0"})
     o = parse_export_public({"output.file_format": "pdf", "output.size.unit": "mm", "output.size.width": "100"})
     assert o.file_format == "pdf" and o.size_width == 100
+
+
+def test_png_has_no_conflation_seams():
+    """Two light shapes sharing a diagonal border inside a dark parent: the
+    composited renderer lets the parent shine through the shared edge, the
+    seamless renderer must not."""
+    import dataclasses
+
+    from export_engine import build_drawing
+    from export_engine.png import rasterize_composited, rasterize_seamless
+    from synthetic import Scene, png_bytes
+    from vectorization_engine import ProcessingOptions, vectorize
+
+    s = Scene(200, 200, (10, 40, 20, 255))
+    s.polygon([(20, 20), (180, 20), (20, 180)], (200, 230, 190, 255))
+    s.polygon([(180, 20), (180, 180), (20, 180)], (150, 200, 240, 255))
+    g = vectorize(png_bytes(s.image()), ProcessingOptions(shapes_enabled=False, gradients=False)).graph
+    d = build_drawing(g, dataclasses.replace(ExportOptions(), shape_stacking="stacked"))
+    seam = [(100 + t, 99 - t) for t in range(-60, 61, 3)]  # pixels the shared diagonal cuts in half
+    darkest = lambda img: min(int(img[y, x, :3].astype(int).sum()) for x, y in seam)  # noqa: E731
+    light = min(200 + 230 + 190, 150 + 200 + 240)
+    assert darkest(rasterize_seamless(d, 1.0)) >= light - 12
+    assert darkest(rasterize_composited(d, 1.0)) < darkest(rasterize_seamless(d, 1.0))

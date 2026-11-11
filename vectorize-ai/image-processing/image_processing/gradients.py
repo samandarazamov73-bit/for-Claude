@@ -82,6 +82,17 @@ class _Stats:
         self.n = self.G[:, 0, 0].copy()
 
 
+_SMOOTH: dict[int, np.ndarray] = {}
+
+
+def _smooth_matrix(K: int) -> np.ndarray:
+    m = _SMOOTH.get(K)
+    if m is None:
+        D = np.diff(np.eye(K), axis=0)
+        m = _SMOOTH[K] = D.T @ D
+    return m
+
+
 def _pl_fit(t: np.ndarray, cols: np.ndarray, knots: int) -> tuple[np.ndarray, float]:
     """Least-squares piecewise-linear profile c(t), t in [0, 1], with uniform
     knots (hat basis). Returns (knot colours (K, 3), SSE)."""
@@ -98,8 +109,7 @@ def _pl_fit(t: np.ndarray, cols: np.ndarray, knots: int) -> tuple[np.ndarray, fl
     ata[np.arange(1, K), np.arange(K - 1)] = off
     # light smoothness prior keeps empty knots well defined
     lam = 1e-3 * max(t.shape[0] / K, 1.0)
-    D = np.diff(np.eye(K), axis=0)
-    ata += lam * D.T @ D
+    ata += lam * _smooth_matrix(K)
     atb = np.stack([np.bincount(j, weights=w0 * cols[:, k], minlength=K) + np.bincount(j + 1, weights=w1 * cols[:, k], minlength=K) for k in range(3)], 1)
     x = np.linalg.solve(ata, atb)
     pred = x[j] * w0[:, None] + x[j + 1] * w1[:, None]
@@ -198,20 +208,30 @@ def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_ra
                 cands.append(qn * S + np.asarray(c0))
         except np.linalg.LinAlgError:
             pass
-        sub = slice(None) if m <= 4000 else rng.choice(m, 4000, replace=False)
+        sub = slice(None) if m <= 2500 else rng.choice(m, 2500, replace=False)
         spx, spy, scol = px[sub], py[sub], cols[sub]
+        sq_total = float((scol ** 2).sum())
         I2 = np.eye(2)
+        KB = 10
 
         def obj(q):
-            rho = _radial_metric(spx, spy, q, I2)
+            # residual of a ring-wise constant profile (cheap proxy for the
+            # piecewise-linear fit, used only to locate the centre)
+            rho = np.sqrt((spx - q[0]) ** 2 + (spy - q[1]) ** 2)
             rmax = rho.max()
             if rmax < 1e-6:
                 return 1e18
-            return _pl_fit(rho / rmax, scol, 8)[1]
+            b = np.minimum((rho * (KB / rmax)).astype(np.int64), KB - 1)
+            cnt = np.bincount(b, minlength=KB)
+            acc = 0.0
+            for k in range(3):
+                sums = np.bincount(b, weights=scol[:, k], minlength=KB)
+                acc += float((sums[cnt > 0] ** 2 / cnt[cnt > 0]).sum())
+            return sq_total - acc
 
         start = min(cands, key=obj)
         span = max(np.ptp(px), np.ptp(py), 1.0)
-        res = minimize(obj, start, method="Nelder-Mead", options={"xatol": 0.5, "fatol": 1e-3 * max(obj(start), 1.0), "maxiter": 80, "initial_simplex": [start, start + [span * 0.1, 0], start + [0, span * 0.1]]})
+        res = minimize(obj, start, method="Nelder-Mead", options={"xatol": 0.75, "fatol": 1e-3 * max(obj(start), 1.0), "maxiter": 45, "initial_simplex": [start, start + [span * 0.1, 0], start + [0, span * 0.1]]})
         paint, sse = _fit_radial_px(px, py, cols, res.x, I2)
         if paint is not None and sse < best_sse * 0.9:
             best, best_sse = paint, sse
@@ -421,7 +441,8 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
             attempts += 1
             sel = np.concatenate([pix[A], pix[B]])
             try:
-                paint, _ = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[A] + G[B], Rm[A] + Rm[B], Q[A] + Q[B], n[A] + n[B], S, c0, tau_fin, min_range, allow_radial=True, rng=rng)
+                radial_parts = any(paints.get(x) is not None and paints[x].kind == "radial" for x in (A, B))
+                paint, _ = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[A] + G[B], Rm[A] + Rm[B], Q[A] + Q[B], n[A] + n[B], S, c0, tau_fin, min_range, allow_radial=radial_parts, rng=rng)
             except np.linalg.LinAlgError:
                 paint = None
             if paint is None:

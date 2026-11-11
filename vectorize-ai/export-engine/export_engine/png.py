@@ -44,18 +44,88 @@ def _coverage(polys, x0: int, y0: int, bw: int, bh: int, antialias: bool) -> np.
     return cov
 
 
-def rasterize_drawing(d: Drawing, scale: float, antialias: bool = True, background=None) -> np.ndarray:
+def _opaque(item) -> bool:
+    if item.color[3] < 255:
+        return False
+    paint = getattr(item, "paint", None)
+    return paint is None or all(c[3] >= 255 for _, c in paint.stops)
+
+
+def rasterize_seamless(d: Drawing, scale: float, antialias: bool = True, tile: int = 256) -> np.ndarray:
+    """Conflation-free rasterisation for opaque artwork.
+
+    Every subsample belongs to exactly one shape (the topmost in stacking
+    order) via an ID buffer; colours are averaged afterwards. Unlike
+    compositing anti-aliased shapes one after another, neighbouring shapes
+    cannot leave a faint seam of whatever lies beneath them."""
     w = max(1, int(round(d.width * scale)))
     h = max(1, int(round(d.height * scale)))
     if w * h > MAX_PIXELS:
         raise RasterTooLarge(f"Requested PNG of {w}x{h} exceeds {MAX_PIXELS:,} pixels.")
-    canvas = np.zeros((h, w, 4), dtype=np.float32)  # premultiplied, 0..1
-    if background is not None:
-        bg = np.asarray(background, dtype=np.float32) / 255.0
-        canvas[..., :3] = bg[:3] * bg[3]
-        canvas[..., 3] = bg[3]
+    ss = 4 if antialias else 1
     tol = 0.04 / max(scale, 1e-6)
-    for item in list(d.items) + list(d.overlay):
+    items = list(d.items)
+    polys, boxes = [], []
+    for it in items:
+        pts = [path_flatten(lp, tol) * scale for lp in it.loops]
+        pts = [p for p in pts if p.shape[0] >= 3]
+        polys.append(pts)
+        if pts:
+            allp = np.concatenate(pts)
+            boxes.append((allp[:, 0].min(), allp[:, 1].min(), allp[:, 0].max(), allp[:, 1].max()))
+        else:
+            boxes.append((1, 1, 0, 0))
+    boxes = np.array(boxes, dtype=np.float64).reshape(-1, 4)
+    flat = np.array([[c / 255.0 for c in it.color] for it in items], dtype=np.float64).reshape(-1, 4)
+    paints = {i: it.paint.transformed(Affine.scale(scale)) for i, it in enumerate(items) if getattr(it, "paint", None) is not None}
+    out = np.zeros((h, w, 4), dtype=np.float64)
+    for ty in range(0, h, tile):
+        for tx in range(0, w, tile):
+            th, tw = min(tile, h - ty), min(tile, w - tx)
+            hit = np.nonzero((boxes[:, 2] >= tx - 1) & (boxes[:, 0] <= tx + tw + 1) & (boxes[:, 3] >= ty - 1) & (boxes[:, 1] <= ty + th + 1))[0]
+            if hit.size == 0:
+                continue
+            ids = np.full((th * ss, tw * ss), -1, dtype=np.int32)
+            for i in hit:
+                pts = [(((p - [tx, ty]) * ss - 0.5) * (1 << SHIFT)).round().astype(np.int32) for p in polys[i]]
+                cv2.fillPoly(ids, pts, int(i), lineType=cv2.LINE_8, shift=SHIFT)
+            col = np.zeros((th * ss, tw * ss, 4), dtype=np.float64)
+            covered = ids >= 0
+            col[covered] = flat[ids[covered]]
+            present = np.unique(ids[covered])
+            grad_ids = [int(i) for i in present if int(i) in paints]
+            if grad_ids:
+                ys, xs = np.nonzero(np.isin(ids, grad_ids))
+                sid = ids[ys, xs]
+                order = np.argsort(sid, kind="stable")
+                sid_s = sid[order]
+                uniq, starts = np.unique(sid_s, return_index=True)
+                ends = np.append(starts[1:], sid_s.shape[0])
+                for gi, s0, e0 in zip(uniq.tolist(), starts.tolist(), ends.tolist()):
+                    sel = order[s0:e0]
+                    px = tx + (xs[sel] + 0.5) / ss
+                    py = ty + (ys[sel] + 0.5) / ss
+                    col[ys[sel], xs[sel]] = paints[gi].colors_at(px, py) / 255.0
+            col[..., :3] *= col[..., 3:4]  # premultiply before averaging
+            out[ty : ty + th, tx : tx + tw] = col.reshape(th, ss, tw, ss, 4).mean(axis=(1, 3))
+    if d.overlay:
+        canvas = out.astype(np.float32)
+        _composite(canvas, d.overlay, scale, antialias, w, h)
+        out = canvas.astype(np.float64)
+    alpha = out[..., 3:4]
+    rgb = np.where(alpha > 1e-6, out[..., :3] / np.maximum(alpha, 1e-6), 0.0)
+    return np.clip(np.concatenate([rgb, alpha], -1) * 255.0 + 0.5, 0, 255).astype(np.uint8)
+
+
+def rasterize_drawing(d: Drawing, scale: float, antialias: bool = True, background=None) -> np.ndarray:
+    if background is None and all(_opaque(it) for it in d.items):
+        return rasterize_seamless(d, scale, antialias)
+    return rasterize_composited(d, scale, antialias, background)
+
+
+def _composite(canvas: np.ndarray, items, scale: float, antialias: bool, w: int, h: int) -> None:
+    tol = 0.04 / max(scale, 1e-6)
+    for item in items:
         pts_all = [path_flatten(lp, tol) * scale for lp in item.loops]
         pts_all = [p for p in pts_all if p.shape[0] >= 3]
         if not pts_all:
@@ -73,8 +143,8 @@ def rasterize_drawing(d: Drawing, scale: float, antialias: bool = True, backgrou
         if paint is not None:
             p = paint.transformed(Affine.scale(scale))
             gy, gx = np.mgrid[y0:y1, x0:x1].astype(np.float64)
-            col = p.colors_at(gx + 0.5, gy + 0.5) / 255.0
-            r, g, b, a = col[..., 0], col[..., 1], col[..., 2], col[..., 3]
+            colr = p.colors_at(gx + 0.5, gy + 0.5) / 255.0
+            r, g, b, a = colr[..., 0], colr[..., 1], colr[..., 2], colr[..., 3]
         else:
             r, g, b, a = (c / 255.0 for c in item.color)
         src_a = cov * a
@@ -83,6 +153,19 @@ def rasterize_drawing(d: Drawing, scale: float, antialias: bool = True, backgrou
         region[..., 1] = g * src_a + region[..., 1] * inv
         region[..., 2] = b * src_a + region[..., 2] * inv
         region[..., 3] = src_a + region[..., 3] * inv
+
+
+def rasterize_composited(d: Drawing, scale: float, antialias: bool = True, background=None) -> np.ndarray:
+    w = max(1, int(round(d.width * scale)))
+    h = max(1, int(round(d.height * scale)))
+    if w * h > MAX_PIXELS:
+        raise RasterTooLarge(f"Requested PNG of {w}x{h} exceeds {MAX_PIXELS:,} pixels.")
+    canvas = np.zeros((h, w, 4), dtype=np.float32)  # premultiplied, 0..1
+    if background is not None:
+        bg = np.asarray(background, dtype=np.float32) / 255.0
+        canvas[..., :3] = bg[:3] * bg[3]
+        canvas[..., 3] = bg[3]
+    _composite(canvas, list(d.items) + list(d.overlay), scale, antialias, w, h)
     alpha = canvas[..., 3:4]
     rgb = np.where(alpha > 1e-6, canvas[..., :3] / np.maximum(alpha, 1e-6), 0.0)
     out = np.concatenate([rgb, alpha], axis=-1)

@@ -17,6 +17,8 @@ export interface DrawState {
   highlight: number[]
   highlightColor: string
   outlines: boolean
+  /** cover anti-aliasing seams between neighbouring shapes */
+  gapFill: boolean
 }
 
 /** Pure drawing routine; no DOM access so it runs in a worker as well. */
@@ -29,7 +31,7 @@ export class Renderer {
   width = 1
   height = 1
   dpr = 1
-  state: DrawState = { view: { scale: 1, tx: 0, ty: 0 }, mode: 'vector', split: 0.5, rs: null, highlight: [], highlightColor: '#3d5afe', outlines: false }
+  state: DrawState = { view: { scale: 1, tx: 0, ty: 0 }, mode: 'vector', split: 0.5, rs: null, highlight: [], highlightColor: '#3d5afe', outlines: false, gapFill: true }
   lastMs = 0
 
   constructor(private canvas: OffscreenCanvas | HTMLCanvasElement) {
@@ -160,15 +162,38 @@ export class Renderer {
       ctx.rect(0, 0, gw, gh)
       ctx.clip()
       const m = this.model
+      // Draw level by level (parents before children). Before filling a
+      // level, its shapes are stroked with their own colour ~1 device px
+      // wide: where two neighbours meet, the anti-aliased edges would
+      // otherwise let the parent underneath shine through as a thin seam.
+      const levels = new Map<number, number[]>()
       for (const id of rs.order) {
-        const fill = rs.fill[id]
-        if (!fill) continue
-        const path = m.shapePath(id, rs.holes[id] ?? [])
-        const paint = rs.paints?.[id]
-        if (paint) this.fillPaint(id, path, paint)
-        else {
-          ctx.fillStyle = fill
-          ctx.fill(path, 'evenodd')
+        if (!rs.fill[id]) continue
+        const dpt = m.shapes.get(id)?.depth ?? 0
+        const arr = levels.get(dpt)
+        if (arr) arr.push(id)
+        else levels.set(dpt, [id])
+      }
+      const seam = 1.1 / (dpr * view.scale) // ~1.1 device pixel in user units
+      ctx.lineJoin = 'round'
+      for (const dpt of [...levels.keys()].sort((a, b) => a - b)) {
+        const ids = levels.get(dpt)!
+        if (this.state.gapFill && ids.length > 1) {
+          ctx.lineWidth = seam
+          for (const id of ids) {
+            const paint = rs.paints?.[id]
+            ctx.strokeStyle = paint && paint.type === 'linear' ? this.gradientFor(id, paint) : rs.fill[id]
+            ctx.stroke(m.shapePath(id, rs.holes[id] ?? []))
+          }
+        }
+        for (const id of ids) {
+          const path = m.shapePath(id, rs.holes[id] ?? [])
+          const paint = rs.paints?.[id]
+          if (paint) this.fillPaint(id, path, paint)
+          else {
+            ctx.fillStyle = rs.fill[id]
+            ctx.fill(path, 'evenodd')
+          }
         }
       }
       if (this.state.outlines) {
