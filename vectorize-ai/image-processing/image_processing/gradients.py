@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import heapq
 import math
+import time as _time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -48,17 +49,29 @@ class GradientStats:
     extra: dict = field(default_factory=dict)
 
 
-def _fit_sse(G: np.ndarray, Rm: np.ndarray, Q: np.ndarray) -> np.ndarray:
-    """Batched per-channel least squares. G (P,6,6), Rm (P,3,6), Q (P,3,3)."""
+def _fit_theta(G: np.ndarray, Rm: np.ndarray) -> np.ndarray:
+    """Batched per-channel least squares θ (P,6,3) for G (P,6,6), Rm (P,3,6)."""
     P = G.shape[0]
     reg = np.eye(6)[None] * (_RIDGE * np.maximum(G[:, 0, 0], 1.0))[:, None, None]
     reg[:, 0, 0] = 0
     try:
-        theta = np.linalg.solve(G + reg, np.transpose(Rm, (0, 2, 1)))  # (P,6,3)
+        return np.linalg.solve(G + reg, np.transpose(Rm, (0, 2, 1)))
     except np.linalg.LinAlgError:
-        theta = np.stack([np.linalg.lstsq(G[i] + reg[i], Rm[i].T, rcond=None)[0] for i in range(P)])
+        return np.stack([np.linalg.lstsq(G[i] + reg[i], Rm[i].T, rcond=None)[0] for i in range(P)])
+
+
+def _fit_sse(G: np.ndarray, Rm: np.ndarray, Q: np.ndarray) -> np.ndarray:
+    """Batched per-channel least squares. G (P,6,6), Rm (P,3,6), Q (P,3,3)."""
+    theta = _fit_theta(G, Rm)
     fitted = np.einsum("pjk,pkj->p", theta, Rm)  # Σ_k θ_k·R_k
     return np.maximum(np.trace(Q, axis1=1, axis2=2) - fitted, 0.0)
+
+
+def _part_sse(theta: np.ndarray, G: np.ndarray, Rm: np.ndarray, Q: np.ndarray) -> np.ndarray:
+    """SSE of a part (G, Rm, Q) under a given model θ (closed form)."""
+    lin = np.einsum("pjk,pkj->p", theta, Rm)
+    quad = np.einsum("pjk,pjl,plk->p", theta, G, theta)
+    return np.maximum(np.trace(Q, axis1=1, axis2=2) - 2.0 * lin + quad, 0.0)
 
 
 class _Stats:
@@ -93,13 +106,15 @@ def _smooth_matrix(K: int) -> np.ndarray:
     return m
 
 
-def _pl_fit(t: np.ndarray, cols: np.ndarray, knots: int) -> tuple[np.ndarray, float]:
-    """Least-squares piecewise-linear profile c(t), t in [0, 1], with uniform
-    knots (hat basis). Returns (knot colours (K, 3), SSE)."""
-    K = knots
-    pos = np.clip(t, 0.0, 1.0) * (K - 1)
-    j = np.minimum(pos.astype(np.int64), K - 2)
-    f = pos - j
+def _pl_fit(t: np.ndarray, cols: np.ndarray, knots) -> tuple[np.ndarray, float]:
+    """Least-squares piecewise-linear profile c(t), t in [0, 1] (hat basis).
+    ``knots`` is a count (uniform) or an increasing array of positions from
+    0 to 1. Returns (knot colours (K, 3), SSE)."""
+    pos = np.linspace(0.0, 1.0, knots) if np.isscalar(knots) else np.asarray(knots, dtype=np.float64)
+    K = pos.shape[0]
+    tc = np.clip(t, 0.0, 1.0)
+    j = np.clip(np.searchsorted(pos, tc, side="right") - 1, 0, K - 2)
+    f = (tc - pos[j]) / np.maximum(pos[j + 1] - pos[j], 1e-12)
     w0, w1 = 1.0 - f, f
     ata = np.zeros((K, K))
     d0 = np.bincount(j, weights=w0 * w0, minlength=K) + np.bincount(j + 1, weights=w1 * w1, minlength=K)
@@ -116,29 +131,53 @@ def _pl_fit(t: np.ndarray, cols: np.ndarray, knots: int) -> tuple[np.ndarray, fl
     return x, float(((pred - cols) ** 2).sum())
 
 
-def _stops_from(knots_cols: np.ndarray, t0: float = 0.0) -> list:
+def _pl_fit_adaptive(t: np.ndarray, cols: np.ndarray, knots: int = 12) -> tuple[np.ndarray, np.ndarray, float]:
+    """Profile fit with knots placed where the colour changes: a uniform fit
+    gives the colour curve, then the knots are spread evenly along its
+    length (plus a uniform share), and the profile is refitted. Vignettes —
+    a long plateau and a short ramp — need this. Returns (positions, knot
+    colours, SSE)."""
+    pos0 = np.linspace(0.0, 1.0, knots)
+    kc0, sse0 = _pl_fit(t, cols, pos0)
+    seg = np.sqrt((np.diff(kc0, axis=0) ** 2).sum(1))
+    total = float(seg.sum())
+    if total < 1e-6:
+        return pos0, kc0, sse0
+    dens = seg + 0.2 * total / (knots - 1)
+    cum = np.concatenate([[0.0], np.cumsum(dens)])
+    cum /= cum[-1]
+    pos1 = np.interp(np.linspace(0.0, 1.0, knots), cum, pos0)
+    pos1[0], pos1[-1] = 0.0, 1.0
+    if np.any(np.diff(pos1) < 1e-4):
+        return pos0, kc0, sse0
+    kc1, sse1 = _pl_fit(t, cols, pos1)
+    return (pos1, kc1, sse1) if sse1 < sse0 else (pos0, kc0, sse0)
+
+
+def _stops_from(knots_cols: np.ndarray, t0: float = 0.0, pos: np.ndarray | None = None) -> list:
     K = knots_cols.shape[0]
-    ts = np.linspace(t0, 1.0, K)
+    base = np.linspace(0.0, 1.0, K) if pos is None else np.asarray(pos, dtype=np.float64)
+    ts = t0 + (1.0 - t0) * base
     stops = [(float(t), tuple(int(round(min(255.0, max(0.0, v)))) for v in c) + (255,)) for t, c in zip(ts, knots_cols)]
     if t0 > 1e-6:
         stops = [(0.0, stops[0][1])] + stops
     return _thin_stops(stops)
 
 
-def _fit_linear_px(px, py, cols, direction, knots=10):
+def _fit_linear_px(px, py, cols, direction, knots=12):
     u = direction / max(np.hypot(*direction), 1e-12)
     proj = px * u[0] + py * u[1]
     t0, t1 = float(proj.min()), float(proj.max())
     if t1 - t0 < 2.0:
         return None, np.inf
     t = (proj - t0) / (t1 - t0)
-    kc, sse = _pl_fit(t, cols, knots)
+    pos, kc, sse = _pl_fit_adaptive(t, cols, knots)
     # endpoints in user space along u, through the point (0, 0)·u = t0
     cx, cy = float(px.mean()), float(py.mean())
     base = cx * u[0] + cy * u[1]
     p1 = (cx + u[0] * (t0 - base), cy + u[1] * (t0 - base))
     p2 = (cx + u[0] * (t1 - base), cy + u[1] * (t1 - base))
-    return GradientPaint("linear", _stops_from(kc), p1[0], p1[1], p2[0], p2[1]), sse
+    return GradientPaint("linear", _stops_from(kc, 0.0, pos), p1[0], p1[1], p2[0], p2[1]), sse
 
 
 def _radial_metric(px, py, q, M):
@@ -147,7 +186,7 @@ def _radial_metric(px, py, q, M):
     return np.sqrt(np.maximum(M[0, 0] * dx * dx + 2 * M[0, 1] * dx * dy + M[1, 1] * dy * dy, 0.0))
 
 
-def _fit_radial_px(px, py, cols, q, M, knots=10):
+def _fit_radial_px(px, py, cols, q, M, knots=12):
     rho = _radial_metric(px, py, q, M)
     rmax = float(rho.max())
     if rmax < 2.0:
@@ -155,23 +194,23 @@ def _fit_radial_px(px, py, cols, q, M, knots=10):
     t = rho / rmax
     t0 = float(t.min())
     tt = (t - t0) / max(1.0 - t0, 1e-9) if t0 > 0.08 else t
-    kc, sse = _pl_fit(tt, cols, knots)
+    pos, kc, sse = _pl_fit_adaptive(tt, cols, knots)
     # unit circle -> ellipse {rho = rmax}
     lam, vec = np.linalg.eigh(M)
     L = rmax / np.sqrt(np.maximum(lam, 1e-12))
     e1, e2 = vec[:, 0] * L[0], vec[:, 1] * L[1]
-    paint = GradientPaint("radial", _stops_from(kc, t0 if t0 > 0.08 else 0.0), m=(float(e1[0]), float(e1[1]), float(e2[0]), float(e2[1]), float(q[0]), float(q[1])))
+    paint = GradientPaint("radial", _stops_from(kc, t0 if t0 > 0.08 else 0.0, pos), m=(float(e1[0]), float(e1[1]), float(e2[0]), float(e2[1]), float(q[0]), float(q[1])))
     return paint, sse
 
 
-def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_radial, rng):
+def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_radial, rng, min_explained=0.5, max_px=12000, nm_px=2500):
     """Pixel-based paint selection: linear and radial candidates with
     piecewise-linear colour profiles; returns (paint or None, rms)."""
     m = px.shape[0]
-    if m > 12000:
-        sel = rng.choice(m, 12000, replace=False)
+    if m > max_px:
+        sel = rng.choice(m, max_px, replace=False)
         px, py, cols = px[sel], py[sel], cols[sel]
-        m = 12000
+        m = max_px
     mu = cols.mean(0)
     flat = float(((cols - mu) ** 2).sum())
     if flat / (3 * m) < 1.5:  # practically flat
@@ -200,24 +239,36 @@ def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_ra
         hi_i = np.argpartition(-s_proj, k)[:k]
         lo_i = np.argpartition(s_proj, k)[:k]
         cands += [np.array([px[hi_i].mean(), py[hi_i].mean()]), np.array([px[lo_i].mean(), py[lo_i].mean()])]
+        M_ell = None
+        q_ell = None
         try:
             th_q = np.linalg.solve(G + np.eye(6) * _RIDGE * max(n, 1.0) * (np.arange(6) > 0), rs)
             A = np.array([[th_q[3], th_q[4] / 2], [th_q[4] / 2, th_q[5]]])
-            if np.linalg.det(A) > 0:
+            det = float(np.linalg.det(A))
+            if det > 0:
                 qn = -0.5 * np.linalg.solve(A, th_q[1:3])
-                cands.append(qn * S + np.asarray(c0))
+                q_ell = qn * S + np.asarray(c0)
+                cands.append(q_ell)
+                # iso-colour lines of the quadratic model are ellipses: their
+                # shape seeds an elliptical radial gradient
+                Mn = A * np.sign(A[0, 0]) / math.sqrt(det)
+                lam = np.linalg.eigvalsh(Mn)
+                if lam[0] > 0 and lam[1] / lam[0] > 1.25 and lam[1] / lam[0] < 400:
+                    M_ell = Mn
         except np.linalg.LinAlgError:
             pass
-        sub = slice(None) if m <= 2500 else rng.choice(m, 2500, replace=False)
+        sub = slice(None) if m <= nm_px else rng.choice(m, nm_px, replace=False)
         spx, spy, scol = px[sub], py[sub], cols[sub]
         sq_total = float((scol ** 2).sum())
         I2 = np.eye(2)
         KB = 10
 
+        Mcur = [I2]
+
         def obj(q):
             # residual of a ring-wise constant profile (cheap proxy for the
             # piecewise-linear fit, used only to locate the centre)
-            rho = np.sqrt((spx - q[0]) ** 2 + (spy - q[1]) ** 2)
+            rho = _radial_metric(spx, spy, q, Mcur[0])
             rmax = rho.max()
             if rmax < 1e-6:
                 return 1e18
@@ -235,15 +286,31 @@ def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_ra
         paint, sse = _fit_radial_px(px, py, cols, res.x, I2)
         if paint is not None and sse < best_sse * 0.9:
             best, best_sse = paint, sse
+        if M_ell is not None:
+            Mcur[0] = M_ell
+            start = min([res.x, q_ell], key=obj)
+            res = minimize(obj, start, method="Nelder-Mead", options={"xatol": 0.75, "fatol": 1e-3 * max(obj(start), 1.0), "maxiter": 45, "initial_simplex": [start, start + [span * 0.1, 0], start + [0, span * 0.1]]})
+            paint, sse = _fit_radial_px(px, py, cols, res.x, M_ell)
+            if paint is not None and sse < best_sse * 0.9:
+                best, best_sse = paint, sse
     if best is None:
         return None, 0.0
     rms = math.sqrt(best_sse / (3 * m))
     explained = 1.0 - best_sse / max(flat, 1e-9)
     colors = np.array([c for _, c in best.stops], dtype=np.float64)[:, :3]
     rng_vis = float(np.abs(colors.max(0) - colors.min(0)).max())
-    if rms > tau_fin or explained < 0.5 or rng_vis < min_range:
+    if rms > tau_fin or explained < min_explained or rng_vis < min_range:
         return None, rms
     return best, rms
+
+
+def _gradient_magnitude(rgba: np.ndarray) -> np.ndarray:
+    import cv2
+
+    f = cv2.GaussianBlur(rgba[..., :3].astype(np.float32), (0, 0), 1.0)
+    gx = cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=3) / 8.0
+    gy = cv2.Sobel(f, cv2.CV_32F, 0, 1, ksize=3) / 8.0
+    return np.sqrt((gx * gx + gy * gy).sum(-1))
 
 
 def _thin_stops(stops, tol: float = 1.5):
@@ -302,19 +369,46 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
     b = np.concatenate([regions[:, 1:].ravel(), regions[1:, :].ravel()])
     m = a != b
     lo, hi = np.minimum(a[m], b[m]), np.maximum(a[m], b[m])
-    pairs = np.unique(lo.astype(np.int64) * nreg + hi)
+    # edge strength of every boundary: mean image gradient across it. Bands
+    # of a quantised smooth ramp have soft boundaries, real edges do not.
+    gmag = _gradient_magnitude(rgba)
+    gpair = np.concatenate([np.maximum(gmag[:, :-1], gmag[:, 1:]).ravel(), np.maximum(gmag[:-1, :], gmag[1:, :]).ravel()])[m]
+    pairs, pinv = np.unique(lo.astype(np.int64) * nreg + hi, return_inverse=True)
+    p_cnt = np.bincount(pinv).astype(np.float64)
+    p_g = np.bincount(pinv, weights=gpair) / np.maximum(p_cnt, 1.0)
     pa, pb = pairs // nreg, pairs % nreg
     ok = opaque[pa] & opaque[pb]
-    pa, pb = pa[ok], pb[ok]
+    pa, pb, p_g, p_cnt = pa[ok], pb[ok], p_g[ok], p_cnt[ok]
+    # A boundary is soft when the image changes slowly across it: either in
+    # absolute terms or relative to the colour step between the two regions
+    # (a real edge concentrates the whole step in one or two pixels).
+    pal_rgb = seg.palette[:, :3].astype(np.float64)
+    if pa.size:
+        step = np.sqrt(((pal_rgb[region_color[pa]] - pal_rgb[region_color[pb]]) ** 2).sum(1))
+    else:
+        step = np.zeros(0)
+    g_soft = 4.0 + 2.0 * noise_sigma + (2.0 if compressed else 0.0)
+    p_soft_len = np.where((p_g <= g_soft) | (p_g <= 0.2 * step), p_cnt, 0.0)
 
     G, Rm, Q, n = stats.G.copy(), stats.Rm.copy(), stats.Q.copy(), stats.n.copy()
 
+    tau_part = 1.6 * tau_abs
+
     def cost_batch(ia, ib):
-        sm = _fit_sse(G[ia] + G[ib], Rm[ia] + Rm[ib], Q[ia] + Q[ib])
+        Gu, Ru, Qu = G[ia] + G[ib], Rm[ia] + Rm[ib], Q[ia] + Q[ib]
+        th = _fit_theta(Gu, Ru)
+        sm = np.maximum(np.trace(Qu, axis1=1, axis2=2) - np.einsum("pjk,pkj->p", th, Ru), 0.0)
         nm = n[ia] + n[ib]
         rms_m = np.sqrt(sm / (3 * nm))
         pooled = np.sqrt((sse[ia] + sse[ib]) / (3 * nm))
-        return rms_m - pooled, rms_m, sm
+        # Every part must stay explained by the joint model: a small, distinct
+        # detail (a highlight, a thin ray) barely moves the pooled error of a
+        # large neighbour, but must not be dissolved into its gradient.
+        ra = np.sqrt(_part_sse(th, G[ia], Rm[ia], Q[ia]) / (3 * np.maximum(n[ia], 1.0)))
+        rb = np.sqrt(_part_sse(th, G[ib], Rm[ib], Q[ib]) / (3 * np.maximum(n[ib], 1.0)))
+        d = rms_m - pooled
+        d = np.where(np.maximum(ra, rb) > tau_part, np.inf, d)
+        return d, rms_m, sm
 
     heap: list = []
     if pa.size:
@@ -413,10 +507,17 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
         pred = paint.colors_at(xs[sel] + 0.5, ys[sel] + 0.5)[:, :3]
         rms_of[r] = math.sqrt(float(((pred - col[sel]) ** 2).mean()))
 
+    n0, Q0, R0 = stats.n, stats.Q, stats.Rm
+
     def flat_rms(r: int) -> float:
-        mu = Rm[r][:, 0] / max(n[r], 1.0)
-        cov = Q[r] / max(n[r], 1.0) - np.outer(mu, mu)
-        return math.sqrt(max(float(np.trace(cov)) / 3.0, 0.0))
+        """RMS error of the group as it would be drawn without a paint:
+        every member region filled with its own mean colour."""
+        mem = np.asarray(members[r])
+        tot = float(n0[mem].sum())
+        if tot <= 0:
+            return 0.0
+        sse_m = np.trace(Q0[mem], axis1=1, axis2=2) - (R0[mem, :, 0] ** 2).sum(1) / np.maximum(n0[mem], 1.0)
+        return math.sqrt(max(float(sse_m.sum()), 0.0) / (3.0 * tot))
 
     gparent = {r: r for r in members}
 
@@ -426,31 +527,75 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
             r = gparent[r]
         return r
 
+    t_start = _time.perf_counter()
+    max_attempts, time_budget = 500, 15.0
     attempts, changed = 0, True
-    while changed and attempts < 300:
+    failed: set = set()
+    while changed and attempts < max_attempts and _time.perf_counter() - t_start < time_budget:
         changed = False
-        gp = set()
-        for a0, b0 in zip(pa.tolist(), pb.tolist()):
+        gsum: dict = {}
+        for a0, b0, gs_, gc_ in zip(pa.tolist(), pb.tolist(), p_soft_len.tolist(), p_cnt.tolist()):
             ra, rb = gfind(int(root[a0])), gfind(int(root[b0]))
-            if ra != rb and (ra in paints or rb in paints) and ra in pix and rb in pix:
-                gp.add((min(ra, rb), max(ra, rb)))
-        for A, B in sorted(gp, key=lambda t: -(n[t[0]] + n[t[1]])):
+            if ra == rb or ra not in pix or rb not in pix:
+                continue
+            key = (min(ra, rb), max(ra, rb))
+            acc = gsum.get(key)
+            if acc is None:
+                gsum[key] = [gs_, gc_]
+            else:
+                acc[0] += gs_
+                acc[1] += gc_
+        cands = []
+        for (A, B), (gs_, gc_) in gsum.items():
+            soft = gs_ >= 0.6 * gc_
+            if not (A in paints or B in paints or (soft and n[A] + n[B] >= 400)):
+                continue
+            cands.append((not soft, -(n[A] + n[B]), A, B, soft))
+        cands.sort()
+        for _, _, A, B, soft in cands:
             A, B = gfind(A), gfind(B)
-            if A == B or attempts >= 300:
+            if A == B or attempts >= max_attempts or _time.perf_counter() - t_start > time_budget:
+                continue
+            fkey = (A, B, int(n[A]), int(n[B]))
+            if fkey in failed:
+                continue
+            # cheap screen: a union the quadratic model misses by far is not
+            # rescued by the (more flexible) profile paints either
+            rms_q = math.sqrt(float(_fit_sse(G[A : A + 1] + G[B : B + 1], Rm[A : A + 1] + Rm[B : B + 1], Q[A : A + 1] + Q[B : B + 1])[0]) / (3.0 * max(n[A] + n[B], 1.0)))
+            if rms_q > 2.4 * tau_fin:
+                failed.add(fkey)
                 continue
             attempts += 1
             sel = np.concatenate([pix[A], pix[B]])
             try:
                 radial_parts = any(paints.get(x) is not None and paints[x].kind == "radial" for x in (A, B))
-                paint, _ = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[A] + G[B], Rm[A] + Rm[B], Q[A] + Q[B], n[A] + n[B], S, c0, tau_fin, min_range, allow_radial=radial_parts, rng=rng)
+                allow_radial = radial_parts or (soft and n[A] + n[B] >= 300)
+                paint, _ = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[A] + G[B], Rm[A] + Rm[B], Q[A] + Q[B], n[A] + n[B], S, c0, tau_fin, min_range, allow_radial=allow_radial, rng=rng, max_px=6000, nm_px=1500)
             except np.linalg.LinAlgError:
                 paint = None
             if paint is None:
+                failed.add(fkey)
                 continue
-            pred = paint.colors_at(xs[sel] + 0.5, ys[sel] + 0.5)[:, :3]
-            r_u = math.sqrt(float(((pred - col[sel]) ** 2).mean()))
-            limit = max(rms_of.get(A, flat_rms(A)), rms_of.get(B, flat_rms(B))) + 0.5 * tau_inc
+            # error of each part on (a sample of) its own pixels: a small part
+            # is always checked in full, it must not vanish in a sample
+            part_e = []
+            for part in (pix[A], pix[B]):
+                pp_ = part if part.shape[0] <= 10000 else part[rng.choice(part.shape[0], 10000, replace=False)]
+                pred = paint.colors_at(xs[pp_] + 0.5, ys[pp_] + 0.5)[:, :3]
+                part_e.append(float(((pred - col[pp_]) ** 2).mean()))
+            na_, nb_ = float(pix[A].shape[0]), float(pix[B].shape[0])
+            r_u = math.sqrt((part_e[0] * na_ + part_e[1] * nb_) / max(na_ + nb_, 1.0))
+            r_pa, r_pb = math.sqrt(part_e[0]), math.sqrt(part_e[1])
+            if max(r_pa, r_pb) > 1.2 * tau_fin:
+                failed.add(fkey)
+                continue
+            ra_ = rms_of[A] if A in paints else flat_rms(A)
+            rb_ = rms_of[B] if B in paints else flat_rms(B)
+            # across a soft boundary one smooth paint is preferred to two
+            # pieces with a visible seam, so the tolerance is wider there
+            limit = max(ra_, rb_) + (tau_inc if soft else 0.5 * tau_inc)
             if r_u > limit or r_u > tau_fin:
+                failed.add(fkey)
                 continue
             G[A] += G[B]
             Rm[A] += Rm[B]
@@ -466,13 +611,49 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
             gparent[B] = A
             changed = True
 
+    # ---- third pass: shading inside the remaining bands of smooth areas ----
+    # Where no single paint spans several bands (a vignette that follows an
+    # egg-shaped border, blurred bokeh), each band of a soft area still gets
+    # its own gradient: the colour then runs on across band boundaries
+    # instead of stepping, which is what makes posterised shading visible.
+    soft_len: dict[int, float] = {}
+    all_len: dict[int, float] = {}
+    for a0, b0, sl, tl in zip(pa.tolist(), pb.tolist(), p_soft_len.tolist(), p_cnt.tolist()):
+        ra, rb = gfind(int(root[a0])), gfind(int(root[b0]))
+        if ra == rb:
+            continue
+        for r_ in (ra, rb):
+            soft_len[r_] = soft_len.get(r_, 0.0) + sl
+            all_len[r_] = all_len.get(r_, 0.0) + tl
+    band_cands = [r for r in pix if r not in paints and n[r] >= 80 and all_len.get(r, 0.0) > 0 and soft_len.get(r, 0.0) >= 0.5 * all_len[r]]
+    band_cands.sort(key=lambda r: -n[r])
+    t_band = _time.perf_counter()
+    band_added = 0
+    for i, r in enumerate(band_cands[:600]):
+        if _time.perf_counter() - t_band > 10.0:  # safety net only
+            break
+        sel = pix[r]
+        fr = flat_rms(r)
+        try:
+            # a band paint replaces flat colours, so any clear gain is taken
+            paint, rms_b = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[r], Rm[r], Q[r], n[r], S, c0, max(tau_fin, 0.85 * fr), 3.0, allow_radial=n[r] >= 300 and i < 400, rng=rng, min_explained=0.3)
+        except np.linalg.LinAlgError:
+            paint = None
+        if paint is None:
+            continue
+        if rms_b > 0.85 * fr:  # must clearly beat the flat colours it replaces
+            continue
+        paints[r] = paint
+        rms_of[r] = rms_b
+        band_added += 1
+
     # ---- verification on real pixels (all pixels of the group) ---------
     rejected = set()
     for r, paint in list(paints.items()):
         sel = pix[r]
         pred = paint.colors_at(xs[sel] + 0.5, ys[sel] + 0.5)[:, :3]
         err = math.sqrt(float(((pred - col[sel]) ** 2).mean()))
-        if err > tau_fin * 1.1:
+        if err > max(tau_fin * 1.1, 0.9 * flat_rms(r)):
             rejected.add(r)
     for r in rejected:
         paints.pop(r, None)
@@ -521,7 +702,7 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
     counts = np.bincount(labels[labels >= 0].ravel(), minlength=palette.shape[0]).astype(np.int64)
     st.merged_groups = sum(1 for r, mem in members.items() if r in paints and len(mem) > 1)
     st.regions_after = keep_ids.shape[0]
-    st.extra = {"merges": merges, "tau_abs": round(tau_abs, 2), "tau_inc": round(tau_inc, 2)}
+    st.extra = {"merges": merges, "joins_attempted": attempts, "band_paints": band_added, "tau_abs": round(tau_abs, 2), "tau_inc": round(tau_inc, 2)}
     stats_out = dict(seg.stats)
     stats_out.update({"gradient_regions": len(fills), "gradient_linear": st.linear, "gradient_radial": st.radial, "gradient_merged_groups": st.merged_groups, "gradient_reverted": st.reverted, "regions_before_gradients": st.regions_before, "regions": st.regions_after, "colors": int(palette.shape[0])})
     out = Segmentation(labels=labels, palette=palette, counts=counts, regions=new_regions, region_color=new_rc, stats=stats_out)

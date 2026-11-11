@@ -12,6 +12,9 @@ from typing import Any
 
 from image_processing import DEFAULT_MAX_PIXELS, MAX_WORKING_PIXELS, parse_palette
 
+# bump when stages 1-3 change their output, so on-disk caches are not reused
+SEGMENTATION_VERSION = 2
+
 
 @dataclass
 class ProcessingOptions:
@@ -62,6 +65,7 @@ class ProcessingOptions:
     def segmentation_key(self) -> str:
         """Hash of every option that affects stages 1-3 (cacheable)."""
         key = {k: getattr(self, k) for k in ("max_pixels", "color_profile", "denoise", "max_colors", "palette", "color_threshold", "min_area_px", "gradients")}
+        key["engine"] = SEGMENTATION_VERSION  # cached results of older algorithms are not reused
         return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:20]
 
 

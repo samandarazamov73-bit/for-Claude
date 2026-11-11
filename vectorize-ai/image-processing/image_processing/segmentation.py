@@ -41,6 +41,7 @@ class SegmentationOptions:
     palette: list[PaletteEntry] | None = None
     min_region_px: float = 0.0  # 0 = automatic
     color_threshold: float = 0.0  # dE76; 0 = automatic
+    thin_lines: bool = True  # continue thin lines into partially covered pixels
 
 
 @dataclass
@@ -318,6 +319,229 @@ def _absorb_thin_regions(labels: np.ndarray, label_feats: np.ndarray, de_limit: 
     return lut[regions], int(first.sum())
 
 
+def _absorb_edge_bands(labels: np.ndarray, label_feats: np.ndarray, label_rgb: np.ndarray, max_width: float, ratio: float = 0.32, de_max: float = 26.0, aa_width: float = 1.6, de_enclosed: float = 12.0) -> tuple[np.ndarray, int]:
+    """Merge edge bands into the shapes they belong to.
+
+    *Anti-aliasing strips*: a strip about one pixel wide between regions A
+    and B whose colour is a mixture of A and B is the partially covered
+    pixel row of the A–B edge (its colour merely happens to match another
+    palette entry). It joins the side that covers most of it; the sub-pixel
+    stage then places the edge inside those pixels.
+
+    *Sharpening halos*: sharpened or AI-upscaled artwork carries a thin band along strong edges
+    that *overshoots* the colour of one side (a darker rim around dark
+    letters, a lighter rim around light ones). Such a band is thin, lies
+    between two regions A and B, its lightness is beyond A's on the side away
+    from B, and it is close to A compared with the A–B contrast. Kept as its
+    own region it splits letter outlines into pieces, so corners get rounded
+    and edges wobble. Genuine outlines (black lines around a light fill)
+    are far from both sides and are kept."""
+    regions, region_color = label_regions(labels)
+    nreg = region_color.shape[0]
+    area = np.bincount(regions.ravel(), minlength=nreg).astype(np.float64)
+    a = np.concatenate([regions[:, :-1].ravel(), regions[:-1, :].ravel()])
+    b = np.concatenate([regions[:, 1:].ravel(), regions[1:, :].ravel()])
+    m = a != b
+    a, b = a[m].astype(np.int64), b[m].astype(np.int64)
+    border = np.concatenate([regions[0], regions[-1], regions[:, 0], regions[:, -1]])
+    perim = np.bincount(a, minlength=nreg) + np.bincount(b, minlength=nreg) + np.bincount(border, minlength=nreg)
+    width = 2.0 * area / np.maximum(perim, 1)
+    wide_halo = 1.4 * max_width  # allowed for faint halos along strong edges
+    thin = (width < wide_halo) & (region_color >= 0)
+    thin[0] = False
+    if not thin.any() or a.size == 0:
+        return labels, 0
+    lo, hi = np.minimum(a, b), np.maximum(a, b)
+    keys, cnt = np.unique(lo * nreg + hi, return_counts=True)
+    p, q = keys // nreg, keys % nreg
+    src = np.concatenate([p, q])
+    dst = np.concatenate([q, p])
+    ln = np.concatenate([cnt, cnt]).astype(np.float64)
+    sel = thin[src] & (region_color[dst] >= 0)
+    src, dst, ln = src[sel], dst[sel], ln[sel]
+    if src.size == 0:
+        return labels, 0
+    lab = label_feats[:, :3]
+    alpha = label_feats[:, 3]
+    order = np.argsort(src, kind="stable")
+    src, dst, ln = src[order], dst[order], ln[order]
+    starts = np.flatnonzero(np.r_[True, src[1:] != src[:-1]])
+    ends = np.r_[starts[1:], src.shape[0]]
+    lut = region_color.astype(np.int64).copy()
+    merged = 0
+    for s0, e0 in zip(starts.tolist(), ends.tolist()):
+        r = int(src[s0])
+        cr = int(region_color[r])
+        nb, nl = dst[s0:e0], ln[s0:e0]
+        cols = region_color[nb]
+        tot = float(perim[r])
+        # border length per neighbouring colour
+        ucol, inv = np.unique(cols, return_inverse=True)
+        clen = np.bincount(inv, weights=nl)
+        big = clen >= 0.2 * tot
+        if big.sum() < 2:
+            # *enclosed strips*: a one-pixel line inside a single shape that
+            # differs only moderately from it (compression ringing parallel
+            # to an edge) belongs to that shape
+            ia = int(np.argmax(clen))
+            ca = int(ucol[ia])
+            if width[r] <= aa_width and clen[ia] >= 0.8 * tot and abs(alpha[ca] - alpha[cr]) <= 1e-6:
+                if float(np.sqrt(((lab[cr] - lab[ca]) ** 2).sum())) <= de_enclosed:
+                    lut[r] = ca
+                    merged += 1
+            continue
+        best = None
+        if width[r] <= aa_width:
+            for ia in np.flatnonzero(big):
+                for ib in np.flatnonzero(big):
+                    if ib <= ia:
+                        continue
+                    ca, cb = int(ucol[ia]), int(ucol[ib])
+                    d = label_rgb[cb] - label_rgb[ca]
+                    dd = float((d * d).sum())
+                    if dd < 900.0:  # A and B too similar to call R a mixture
+                        continue
+                    v = label_rgb[cr] - label_rgb[ca]
+                    t = float((v * d).sum()) / dd
+                    perp = float(np.sqrt(((v - t * d) ** 2).sum()))
+                    if -0.05 <= t <= 1.05 and perp <= max(12.0, 0.15 * math.sqrt(dd)):
+                        score = perp / math.sqrt(dd) - 1.0  # prefer mixtures over halos
+                        if best is None or score < best[0]:
+                            best = (score, ca if t < 0.5 else cb)
+        for ia in np.flatnonzero(big):
+            ca = int(ucol[ia])
+            if abs(alpha[ca] - alpha[cr]) > 1e-6:
+                continue
+            de_ra = float(np.sqrt(((lab[cr] - lab[ca]) ** 2).sum()))
+            if de_ra > de_max:
+                continue
+            for ib in np.flatnonzero(big):
+                if ib == ia:
+                    continue
+                cb = int(ucol[ib])
+                de_ab = float(np.sqrt(((lab[ca] - lab[cb]) ** 2).sum()))
+                dl_r = float(lab[cr, 0] - lab[ca, 0])
+                dl_b = float(lab[cb, 0] - lab[ca, 0])
+                if dl_r * dl_b >= 0 or abs(dl_r) < 0.5 * de_ra:
+                    continue  # not an overshoot of A away from B
+                if de_ra > ratio * de_ab or (width[r] >= max_width and de_ra > 0.15 * de_ab):
+                    continue
+                score = de_ra / max(de_ab, 1e-6)
+                if best is None or score < best[0]:
+                    best = (score, ca)
+        if best is not None:
+            lut[r] = best[1]
+            merged += 1
+    if not merged:
+        return labels, 0
+    return lut[regions], merged
+
+
+def _unify_thin_lines(labels: np.ndarray, pm: np.ndarray, colors: np.ndarray, noise_sigma: float, compressed: bool = False) -> tuple[np.ndarray, int]:
+    """Keep thin lines (leaf veins, hairline highlights, sparkle rays) whole.
+
+    A line one or two pixels wide is a chain of partially covered pixels: each
+    gets whichever palette colour its mixture happens to match, and where the
+    line runs diagonally the pixels touch only at corners. As 4-connected
+    regions they are single pixels, and speckle removal deletes the line.
+
+    Thin ridges and valleys are found with a morphological top-hat. In each
+    connected ridge the line colour L is estimated from its strongest pixels;
+    ridge pixels whose colour is a mixture of L and the local background with
+    at least a third of L are relabelled L, and diagonal steps are closed so
+    the line forms one region. The sub-pixel stage later gives it the width
+    its coverage indicates."""
+    h, w = labels.shape
+    if h < 5 or w < 5 or colors.shape[0] == 0:
+        return labels, 0
+    y = (0.299 * pm[..., 0] + 0.587 * pm[..., 1] + 0.114 * pm[..., 2]).astype(np.float32)
+    se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    # JPEG ringing forms faint ridges along every edge: stricter there
+    t = max(24.0 if compressed else 14.0, 4.0 * noise_sigma)
+    k = colors.shape[0]
+    pal = np.zeros((k, 4))
+    pal[:, :3] = colors[:, :3] * (colors[:, 3:4] / 255.0)
+    pal[:, 3] = colors[:, 3]
+    out = labels.copy()
+    total = 0
+    for resp in (y - cv2.morphologyEx(y, cv2.MORPH_OPEN, se), cv2.morphologyEx(y, cv2.MORPH_CLOSE, se) - y):
+        mask = (resp > t) & (out >= 0)
+        if not mask.any():
+            continue
+        core = mask & (resp > 2.5 * t)
+        ncc, cc = cv2.connectedComponents(mask.astype(np.uint8), connectivity=8)
+        core_cnt = np.bincount(cc[core], minlength=ncc)
+        core_cnt[0] = 0
+        keep = core_cnt >= (8 if compressed else 4)
+        if not keep.any():
+            continue
+        # local background: label of the nearest pixel outside the ridge
+        _, (iy, ix) = ndimage.distance_transform_edt(mask, return_indices=True)
+        bg_lab = out[iy, ix]
+        # line colour per component: mean of its strongest core pixels
+        cys, cxs = np.nonzero(core & keep[cc])
+        comp = cc[cys, cxs]
+        r = resp[cys, cxs]
+        order = np.lexsort((-r, comp))
+        comp_s = comp[order]
+        starts = np.flatnonzero(np.r_[True, comp_s[1:] != comp_s[:-1]])
+        ends = np.r_[starts[1:], comp_s.shape[0]]
+        line_lab = np.full(ncc, -1, dtype=np.int64)
+        for s0, e0 in zip(starts.tolist(), ends.tolist()):
+            m = max(2, (e0 - s0) // 3)
+            sel = order[s0 : s0 + m]
+            c = pm[cys[sel], cxs[sel]].astype(np.float64).mean(0)
+            line_lab[int(comp_s[s0])] = int(np.argmin(((pal - c) ** 2).sum(1)))
+        ys, xs = np.nonzero(mask & keep[cc])
+        L = line_lab[cc[ys, xs]]
+        B = bg_lab[ys, xs]
+        ok = (L >= 0) & (B >= 0) & (B != L)
+        cl, cb = pal[np.maximum(L, 0)], pal[np.maximum(B, 0)]
+        d = cl - cb
+        dd = (d * d).sum(1)
+        x = pm[ys, xs].astype(np.float64)
+        a = ((x - cb) * d).sum(1) / np.maximum(dd, 1e-9)
+        res = np.sqrt(((x - cb - a[:, None] * d) ** 2).sum(1))
+        ok &= (dd > 1600.0) & (a >= 0.33) & (a <= 1.4) & (res <= np.maximum(14.0, 0.25 * np.sqrt(dd)))
+        ok &= out[ys, xs] != L
+        if not ok.any():
+            continue
+        out[ys[ok], xs[ok]] = L[ok]
+        total += int(ok.sum())
+        # close diagonal steps: a line pixel touching another of the same
+        # colour only at a corner gets the stronger of the two bridging pixels
+        line_px = np.zeros((h, w), dtype=bool)
+        line_px[ys[ok], xs[ok]] = True
+        for _ in range(2):
+            fixed = 0
+            for dx in (1, -1):
+                y0, y1 = 0, h - 1
+                x0, x1 = (0, w - 1) if dx == 1 else (1, w)
+                p = out[y0:y1, x0:x1]
+                q = out[y0 + 1 : y1 + 1, x0 + dx : x1 + dx]
+                b1 = out[y0:y1, x0 + dx : x1 + dx]  # same row, next column
+                b2 = out[y0 + 1 : y1 + 1, x0:x1]  # next row, same column
+                lp = line_px[y0:y1, x0:x1] | line_px[y0 + 1 : y1 + 1, x0 + dx : x1 + dx]
+                diag = lp & (p == q) & (p >= 0) & (b1 != p) & (b2 != p)
+                if not diag.any():
+                    continue
+                dy_, dx_ = np.nonzero(diag)
+                r1 = resp[dy_, dx_ + x0 + dx]
+                r2 = resp[dy_ + 1, dx_ + x0]
+                lab_ = p[dy_, dx_]
+                use1 = r1 >= r2
+                ty = np.where(use1, dy_, dy_ + 1)
+                tx = np.where(use1, dx_ + x0 + dx, dx_ + x0)
+                good = out[ty, tx] >= 0
+                out[ty[good], tx[good]] = lab_[good]
+                line_px[ty[good], tx[good]] = True
+                fixed += int(good.sum())
+            total += fixed
+            if not fixed:
+                break
+    return out, total
+
+
 def _candidates(filled: np.ndarray, ys: np.ndarray, xs: np.ndarray, near: np.ndarray, offset: int) -> np.ndarray:
     """Up to four distinct nearby palette labels per pixel plus the globally
     nearest colour. Nearby labels come from the nearest-flat-pixel map sampled
@@ -360,7 +584,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     lab_noise = noise_sigma * 0.4
     auto_thr = float(np.clip(5.5 + 2.5 * lab_noise, 5.5, 16.0))
     if compressed:
-        auto_thr = max(auto_thr, 12.0)
+        auto_thr = max(auto_thr, 9.0)
     thr = opts.color_threshold if opts.color_threshold > 0 else auto_thr
     min_support = max(3.0, npx * 4e-6)
 
@@ -468,6 +692,9 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
 
     k = centers.shape[0]
     labels[labels == k] = TRANSPARENT
+    extended = 0
+    if k and opts.thin_lines:
+        labels, extended = _unify_thin_lines(labels, pm, colors, noise_sigma, compressed)
 
     # ---- custom palette snapping ----------------------------------------
     out_colors = np.clip(colors + 0.5, 0, 255).astype(np.int64) if k else np.zeros((0, 4), np.int64)
@@ -492,7 +719,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
         labels = np.where(labels >= 0, lut[np.maximum(labels, 0)], TRANSPARENT)
 
     labels, speckles = _remove_speckles(labels, min_region)
-    thin_absorbed = 0
+    thin_absorbed = halos = 0
     if k:
         de_limit = 24.0 if compressed else 9.0
         for _ in range(2):
@@ -500,7 +727,12 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
             thin_absorbed += n_abs
             if not n_abs:
                 break
-        if thin_absorbed:
+        for _ in range(3):  # bands can be nested (AA strip outside a halo)
+            labels, n_b = _absorb_edge_bands(labels, centers, colors, 3.0 if compressed else 2.6, de_enclosed=40.0 if compressed else 12.0)
+            halos += n_b
+            if not n_b:
+                break
+        if thin_absorbed or halos:
             labels, sp2 = _remove_speckles(labels, min_region)
             speckles += sp2
     prog(0.85, "removing speckles")
@@ -539,6 +771,8 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
         "min_region_px": round(float(min_region), 3),
         "speckles_removed": int(speckles),
         "thin_regions_absorbed": int(thin_absorbed),
+        "edge_bands_absorbed": int(halos),
+        "thin_line_pixels": int(extended),
         "colors_added_second_pass": int(added),
         "compressed_source": bool(compressed),
     }

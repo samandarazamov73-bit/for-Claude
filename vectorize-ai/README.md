@@ -108,7 +108,7 @@ curl http://localhost:8000/api/v1/vectorize -u 'API_ID:API_SECRET' \
 ## Тесты
 
 ```bash
-python -m pytest            # 94 теста: декодирование, сегментация, геометрия, конвейер, экспорт, бэкенд
+python -m pytest            # 99 тестов: декодирование, сегментация, геометрия, конвейер, экспорт, бэкенд
 cd frontend && npm test     # vitest
 ```
 

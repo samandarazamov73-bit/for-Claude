@@ -42,10 +42,20 @@ def fit_parameters(opts: ProcessingOptions, soft_edge_ratio: float, compressed: 
     return FitParams(tol, sigma, curve, corner, hard)
 
 
+def _weakness(contrast: float) -> float:
+    return float(np.clip((70.0 - contrast) / 70.0, 0.0, 1.0))
+
+
 def adaptive_tolerance(base: float, contrast: float) -> float:
     """Weak (low-contrast) boundaries are simplified more aggressively."""
-    weak = float(np.clip((70.0 - contrast) / 70.0, 0.0, 1.0))
-    return base * (1.0 + 0.9 * weak)
+    return base * (1.0 + 0.9 * _weakness(contrast))
+
+
+def adaptive_sigma(base: float, contrast: float) -> float:
+    """Low-contrast boundaries are iso-lines of smooth shading: their pixel
+    position is noisy (a small colour error moves them far), so they are
+    faired more strongly; strong edges keep the base smoothing."""
+    return base * (1.0 + 1.6 * _weakness(contrast))
 
 
 def fit_interface(f, g: VectorGraph, p: FitParams, max_radius: float) -> None:
@@ -55,20 +65,21 @@ def fit_interface(f, g: VectorGraph, p: FitParams, max_radius: float) -> None:
         return
     pts, w = f.samples, f.weights
     tol = adaptive_tolerance(p.tolerance, f.contrast)
+    sigma = adaptive_sigma(p.sigma, f.contrast)
     copts = CurveOptions(tolerance=tol, allow_cubic=p.curve.allow_cubic, allow_quadratic=p.curve.allow_quadratic, allow_arcs=p.curve.allow_arcs)
     if f.closed:
         if pts.shape[0] < 3:
             q = tuple(pts[0])
             f.segments = [Line(q, q)]
             return
-        f.segments = fit_closed(pts, w, copts, p.corner, p.sigma, max_radius).segments
+        f.segments = fit_closed(pts, w, copts, p.corner, sigma, max_radius).segments
         return
     a, b = g.nodes[f.start].pt, g.nodes[f.end].pt
     length = float(np.sqrt((np.diff(pts, axis=0) ** 2).sum(1)).sum())
     if pts.shape[0] <= 3 or length < 1.5:
         f.segments = [Line(a, b)]
         return
-    segs = fit_open(pts, w, copts, p.corner, p.sigma, max_radius).segments
+    segs = fit_open(pts, w, copts, p.corner, sigma, max_radius).segments
     # guarantee exact attachment to the (refined) junctions
     if segs[0].start() != a:
         segs = move_endpoint(segs[0], a, at_end=False) + segs[1:]
