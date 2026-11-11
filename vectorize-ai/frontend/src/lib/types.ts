@@ -23,6 +23,10 @@ export interface Primitive {
   [k: string]: unknown
 }
 
+export type PaintJSON =
+  | { type: 'linear'; x1: number; y1: number; x2: number; y2: number; stops: number[][] }
+  | { type: 'radial'; m: [number, number, number, number, number, number]; stops: number[][] }
+
 export interface GraphShape {
   id: number
   color: number
@@ -37,6 +41,7 @@ export interface GraphShape {
   primitive?: Primitive
   symmetry?: { mirror: { angle: number; axis: string }[]; rotation: number; center: [number, number] }
   repeat?: number
+  fill?: PaintJSON
 }
 
 export interface PaletteEntry {
@@ -59,6 +64,7 @@ export interface GraphStats {
   primitives: number
   symmetric_shapes: number
   repeated_shapes: number
+  gradient_shapes?: number
   fit_tolerance: number
   timings: Record<string, number>
   analysis?: Record<string, number | boolean>

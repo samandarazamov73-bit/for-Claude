@@ -33,7 +33,34 @@ def region_pm_colors(region_color: np.ndarray, palette: np.ndarray) -> np.ndarra
     return pal[idx]
 
 
-def crack_samples(cf: CrackField, rgba: np.ndarray, regions: np.ndarray, reg_pm: np.ndarray, enabled: bool = True):
+def _local_colors(region_ids: np.ndarray, base: np.ndarray, mid: np.ndarray, fills: dict) -> np.ndarray:
+    """Per-crack region colour; gradient regions use their paint evaluated at
+    the crack (the colour on each side of a boundary varies along it)."""
+    from geometry_engine.paint import GradientPaint
+
+    out = base.copy()
+    if not fills:
+        return out
+    keys = np.array(sorted(fills), dtype=np.int64)
+    has = np.isin(region_ids, keys)
+    idx = np.nonzero(has)[0]
+    if idx.size == 0:
+        return out
+    order = idx[np.argsort(region_ids[idx], kind="stable")]
+    rid_sorted = region_ids[order]
+    uniq, starts = np.unique(rid_sorted, return_index=True)
+    ends = np.append(starts[1:], rid_sorted.shape[0])
+    for r, s0, e0 in zip(uniq.tolist(), starts.tolist(), ends.tolist()):
+        sel = order[s0:e0]
+        paint = GradientPaint.from_json(fills[r])
+        c = paint.colors_at(mid[sel, 0], mid[sel, 1])
+        a = c[:, 3:4] / 255.0
+        out[sel, :3] = c[:, :3] * a
+        out[sel, 3] = c[:, 3]
+    return out
+
+
+def crack_samples(cf: CrackField, rgba: np.ndarray, regions: np.ndarray, reg_pm: np.ndarray, enabled: bool = True, fills: dict | None = None):
     """Return (samples (n,2), soft (n,) bool, contrast (n,))."""
     mid = cf.midpoints()
     n = cf.n
@@ -42,7 +69,8 @@ def crack_samples(cf: CrackField, rgba: np.ndarray, regions: np.ndarray, reg_pm:
     soft = np.zeros(n, dtype=bool)
     if n == 0:
         return mid, soft, contrast
-    ca, cb = reg_pm[cf.ra], reg_pm[cf.rb]
+    ca = _local_colors(cf.ra, reg_pm[cf.ra], mid, fills or {})
+    cb = _local_colors(cf.rb, reg_pm[cf.rb], mid, fills or {})
     d = ca - cb
     dd = (d * d).sum(1)
     contrast = np.sqrt(dd)

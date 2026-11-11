@@ -23,6 +23,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pypdf>=4", "openapi-spec-validator>=0.7"]
+# neural background removal (rembg, MIT; ONNX model downloaded on first use)
+ai = ["rembg[cpu]>=2.0"]
+# benchmark comparison against vtracer (MIT)
+bench = ["vtracer>=0.6"]
 
 [tool.setuptools]
 # The requested repository layout uses hyphenated module folders; each one

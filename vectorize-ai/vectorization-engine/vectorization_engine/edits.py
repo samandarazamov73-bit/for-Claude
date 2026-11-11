@@ -113,6 +113,7 @@ def merge_shapes(g: VectorGraph, groups: list[list[int]]) -> None:
         s = g.shapes[r]
         s.primitive = None
         s.symmetry = None
+        s.fill = None
     g.rebuild_shape_loops(affected)
     g.remove_unused()
 
@@ -136,6 +137,8 @@ def apply_edits(graph: VectorGraph, edits: EditState | None, *, merge_same_color
         c = _resolve(c, edits.merged_colors)
         if not (0 <= c < nk):
             c = s.color
+        if s.fill and (c != s.color or c in edits.palette_overrides or s.id in edits.shape_colors):
+            s.fill = None  # a recoloured gradient becomes a flat colour
         s.color = c
         if c in edits.deleted_colors or s.id in edits.hidden_shapes or s.id in edits.background_shapes:
             s.transparent = True
@@ -173,7 +176,7 @@ def merge_same_colored_neighbours(g: VectorGraph) -> None:
         if f.left < 0 or f.right < 0:
             continue
         a, b = g.shapes[f.left], g.shapes[f.right]
-        same = (a.transparent and b.transparent) or (not a.transparent and not b.transparent and a.color == b.color)
+        same = (a.transparent and b.transparent) or (not a.transparent and not b.transparent and a.color == b.color and not a.fill and not b.fill)
         if same:
             ra, rb = find(a.id), find(b.id)
             if ra != rb:

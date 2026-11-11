@@ -346,6 +346,7 @@ export default function Editor() {
         <span>{info ? `${info.width}×${info.height}px` : '–'}{graph && graph.scale < 1 ? ` (working ${graph.width}×${graph.height})` : ''}</span>
         <span>{graph ? `${graph.stats.colors} colours` : ''}</span>
         <span>{graph ? `${graph.stats.shapes} shapes` : ''}</span>
+        {graph?.stats.gradient_shapes ? <span>{graph.stats.gradient_shapes} gradients</span> : null}
         <span>{graph ? `${graph.stats.segments} segments` : ''}</span>
         {st.selection.length > 0 && <span>{st.selection.length} selected</span>}
         <span className="ml-auto">{busy ? `${job?.status} ${pct}%` : job?.status === 'failed' ? 'error' : graph ? 'ready' : 'processing'}</span>

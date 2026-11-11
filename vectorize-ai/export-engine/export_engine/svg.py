@@ -78,6 +78,8 @@ def path_data(loops: list[list[Segment]], allow_arcs: bool = True, close: bool =
 def _paint(item: DrawItem, style: str, stroke_w: float) -> str:
     c = item.color
     op = c[3] / 255.0
+    if style == "fill_shapes" and getattr(item, "paint", None) is not None:
+        return f'fill="url(#g{item.shape_id})"'.replace("#g-", "#gm")
     if style == "stroke_shapes":
         a = f'fill="none" stroke="{_hex(c)}" stroke-width="{fmt(stroke_w)}" stroke-linejoin="round"'
         if op < 1:
@@ -130,6 +132,25 @@ def _element(item: DrawItem, opts: ExportOptions, allow_arcs: bool) -> str:
     return f'<path d="{path_data(item.loops, allow_arcs)}"{rule} {paint}/>'
 
 
+def _gradient_def(item: DrawItem, tiny: bool) -> str:
+    p = item.paint
+    gid = f"g{item.shape_id}".replace("g-", "gm")
+    stops = "".join(
+        f'<stop offset="{fmt(o)}" stop-color="{_hex(c)}"' + (f' stop-opacity="{fmt(c[3] / 255)}"' if c[3] < 255 else "") + "/>"
+        for o, c in p.stops
+    )
+    if p.kind == "linear":
+        return f'<linearGradient id="{gid}" gradientUnits="userSpaceOnUse" x1="{fmt(p.x1)}" y1="{fmt(p.y1)}" x2="{fmt(p.x2)}" y2="{fmt(p.y2)}">{stops}</linearGradient>'
+    a, b, c, d, e, f = p.m
+    if tiny or p.is_circular():
+        # SVG Tiny 1.2 has no gradientTransform: use the equivalent circle
+        return f'<radialGradient id="{gid}" gradientUnits="userSpaceOnUse" cx="{fmt(e)}" cy="{fmt(f)}" r="{fmt(p.radius)}">{stops}</radialGradient>'
+    return (
+        f'<radialGradient id="{gid}" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" '
+        f'gradientTransform="matrix({" ".join(fmt(v) for v in (a, b, c, d, e, f))})">{stops}</radialGradient>'
+    )
+
+
 def write_svg(graph, opts: ExportOptions) -> bytes:
     d = build_drawing(graph, opts)
     return render_svg(d, opts).encode("utf-8")
@@ -151,6 +172,11 @@ def render_svg(d: Drawing, opts: ExportOptions) -> str:
     )
     out.append("<title>Vectorize AI result</title>\n" if opts.svg_version != "svg_1_0" else "")
     style = opts.draw_style
+    painted = [it for it in d.items if getattr(it, "paint", None) is not None] if style == "fill_shapes" else []
+    if painted:
+        out.append("<defs>\n")
+        out.extend(_gradient_def(it, opts.svg_version == "svg_tiny_1_2") + "\n" for it in painted)
+        out.append("</defs>\n")
     if style == "stroke_edges":
         out.append(f'<g fill="none" stroke-width="{fmt(opts.stroke_width)}" stroke-linecap="round" stroke-linejoin="round">\n')
         for e in d.edges:

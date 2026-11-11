@@ -51,6 +51,7 @@ class Segmentation:
     regions: np.ndarray  # (H, W) int32 region id, 1..R
     region_color: np.ndarray  # (R + 1,) palette index per region (-1 transparent)
     stats: dict = field(default_factory=dict)
+    fills: dict = field(default_factory=dict)  # region id -> gradient paint JSON
 
     @property
     def region_count(self) -> int:

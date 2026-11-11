@@ -11,6 +11,7 @@ from .limits import (
 )
 from .preprocess import ImageAnalysis, PreprocessResult, preprocess, resize_rgba
 from .segmentation import TRANSPARENT, Segmentation, SegmentationOptions, label_regions, segment
+from .gradients import merge_gradients
 
 __all__ = [
     "DecodedImage",
@@ -30,6 +31,7 @@ __all__ = [
     "Segmentation",
     "SegmentationOptions",
     "segment",
+    "merge_gradients",
     "label_regions",
     "TRANSPARENT",
     "DEFAULT_MAX_PIXELS",

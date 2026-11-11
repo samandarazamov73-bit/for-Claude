@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Combine, Eraser, Paintbrush, RotateCcw, Trash2, WandSparkles } from 'lucide-react'
 import { api } from '../../lib/api'
 import { rgbToHex } from '../../lib/color'
@@ -13,7 +13,11 @@ export function BackgroundPanel() {
   const edits = useEditor((s) => s.edits)
   const applyEdits = useEditor((s) => s.applyEdits)
   const setHighlight = useEditor((s) => s.setHighlight)
-  const [method, setMethod] = useState<'auto' | 'color' | 'grabcut'>('auto')
+  const [method, setMethod] = useState<'auto' | 'color' | 'grabcut' | 'neural'>('auto')
+  const [neural, setNeural] = useState(false)
+  useEffect(() => {
+    api<{ capabilities?: { neuralBackground?: boolean } }>('/api/health').then((h) => setNeural(!!h.capabilities?.neuralBackground)).catch(() => undefined)
+  }, [])
   const [enclosed, setEnclosed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -25,7 +29,7 @@ export function BackgroundPanel() {
     try {
       const r = await api<{ method: string; shapes: number[]; border_share: number | null }>(`/api/images/${token}/background`, { method: 'POST', json: { method, includeEnclosed: enclosed } })
       applyEdits((x) => ({ ...x, backgroundShapes: r.shapes }))
-      setInfo(r.shapes.length ? `${r.shapes.length} region${r.shapes.length > 1 ? 's' : ''} removed (${r.method === 'grabcut' ? 'GrabCut segmentation' : 'border colour analysis'}).` : 'No opaque background found – it may already be transparent.')
+      setInfo(r.shapes.length ? `${r.shapes.length} region${r.shapes.length > 1 ? 's' : ''} removed (${r.method === 'grabcut' ? 'GrabCut segmentation' : r.method === 'neural' ? 'neural network, ISNet' : 'border colour analysis'}).` : 'No opaque background found – it may already be transparent.')
     } catch (e) {
       setErr(String((e as Error).message))
     } finally {
@@ -36,7 +40,7 @@ export function BackgroundPanel() {
     <div>
       <Section title="Automatic removal">
         <div className="space-y-3">
-          <Segmented value={method} onChange={setMethod} size="sm" options={[{ value: 'auto', label: 'Auto' }, { value: 'color', label: 'Colour' }, { value: 'grabcut', label: 'Foreground' }]} />
+          <Segmented value={method} onChange={setMethod} size="sm" options={[{ value: 'auto', label: 'Auto' }, { value: 'color', label: 'Colour' }, { value: 'grabcut', label: 'Foreground' }, ...(neural ? [{ value: 'neural' as const, label: 'AI' }] : [])]} />
           <Switch checked={enclosed} onChange={setEnclosed} label="Also remove enclosed areas of the background colour (e.g. letter counters)" />
           <button className="btn-primary btn-sm w-full" onClick={detect} disabled={busy}>
             {busy ? <Spinner /> : <WandSparkles className="size-3.5" />} Remove background

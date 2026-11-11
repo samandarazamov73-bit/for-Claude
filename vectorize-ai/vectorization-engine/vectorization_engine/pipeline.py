@@ -24,6 +24,7 @@ from image_processing import (
     Segmentation,
     SegmentationOptions,
     decode_image,
+    merge_gradients,
     parse_palette,
     preprocess,
     segment,
@@ -145,13 +146,14 @@ class StageCache:
             return None
         try:
             z = np.load(path, allow_pickle=False)
-            return Segmentation(z["labels"], z["palette"], z["counts"], z["regions"], z["region_color"], json.loads(str(z["stats"])))
+            fills = {int(k): v for k, v in json.loads(str(z["fills"])).items()} if "fills" in z.files else {}
+            return Segmentation(z["labels"], z["palette"], z["counts"], z["regions"], z["region_color"], json.loads(str(z["stats"])), fills)
         except Exception:  # noqa: BLE001
             return None
 
     def save_segmentation(self, key: str, s: Segmentation) -> None:
         tmp = self._p(f"seg_{key}.tmp.npz")
-        np.savez_compressed(tmp, labels=s.labels, palette=s.palette, counts=s.counts, regions=s.regions, region_color=s.region_color, stats=json.dumps(s.stats))
+        np.savez_compressed(tmp, labels=s.labels, palette=s.palette, counts=s.counts, regions=s.regions, region_color=s.region_color, stats=json.dumps(s.stats), fills=json.dumps({str(k): v for k, v in s.fills.items()}))
         os.replace(tmp, self._p(f"seg_{key}.npz"))
 
 
@@ -227,8 +229,16 @@ def vectorize(
             noise_sigma=a.noise_sigma,
             edge_width=a.edge_width,
             compressed=a.compressed,
-            progress=rep.sub("segmentation"),
+            progress=lambda f, msg="": rep("segmentation", 0.8 * f, msg),
         )
+        if opts.gradients:
+            seg, _, _ = merge_gradients(
+                prepared.rgba,
+                seg,
+                noise_sigma=a.noise_sigma,
+                compressed=a.compressed,
+                progress=lambda f, msg="": rep("segmentation", 0.8 + 0.2 * f, msg),
+            )
         if cache:
             cache.save_segmentation(skey, seg)
     else:
@@ -238,7 +248,7 @@ def vectorize(
     # ---- stage 4 --------------------------------------------------------
     t = time.perf_counter()
     rep("topology", 0.1, "building vector graph")
-    graph, cf = build_topology(seg.regions, seg.region_color, seg.palette, seg.counts)
+    graph, cf = build_topology(seg.regions, seg.region_color, seg.palette, seg.counts, fills=seg.fills)
     graph.scale = prepared.scale
     graph.original_size = prepared.original_size
     rep("topology", 1.0, f"{len(graph.interfaces)} interfaces")
@@ -247,7 +257,7 @@ def vectorize(
     # ---- stage 5 --------------------------------------------------------
     t = time.perf_counter()
     reg_pm = region_pm_colors(seg.region_color, seg.palette)
-    samples, soft, contrast = crack_samples(cf, prepared.rgba, seg.regions, reg_pm, enabled=opts.subpixel)
+    samples, soft, contrast = crack_samples(cf, prepared.rgba, seg.regions, reg_pm, enabled=opts.subpixel, fills=seg.fills)
     refiner = registry.edge_refiner()
     if refiner is not None:
         samples = refiner.refine(prepared.rgba, cf, samples)
@@ -300,6 +310,7 @@ def vectorize(
         "primitives": n_prims,
         "symmetric_shapes": n_sym,
         "repeated_shapes": n_rep,
+        "gradient_shapes": sum(1 for s_ in drawn if s_.fill),
         "fit_tolerance": round(params.tolerance, 3),
         "hard_edges": params.hard_edges,
         "analysis": a.to_dict(),

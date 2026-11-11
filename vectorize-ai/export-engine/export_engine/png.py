@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from geometry_engine import path_flatten
+from geometry_engine import Affine, path_flatten
 
 from .common import Drawing, ExportOptions, build_drawing
 
@@ -68,9 +68,16 @@ def rasterize_drawing(d: Drawing, scale: float, antialias: bool = True, backgrou
         if x1 <= x0 or y1 <= y0:
             continue
         cov = _coverage(pts_all, x0, y0, x1 - x0, y1 - y0, antialias)
-        r, g, b, a = (c / 255.0 for c in item.color)
-        src_a = cov * a
         region = canvas[y0:y1, x0:x1]
+        paint = getattr(item, "paint", None)
+        if paint is not None:
+            p = paint.transformed(Affine.scale(scale))
+            gy, gx = np.mgrid[y0:y1, x0:x1].astype(np.float64)
+            col = p.colors_at(gx + 0.5, gy + 0.5) / 255.0
+            r, g, b, a = col[..., 0], col[..., 1], col[..., 2], col[..., 3]
+        else:
+            r, g, b, a = (c / 255.0 for c in item.color)
+        src_a = cov * a
         inv = 1.0 - src_a
         region[..., 0] = r * src_a + region[..., 0] * inv
         region[..., 1] = g * src_a + region[..., 1] * inv

@@ -6,10 +6,16 @@
 * ``grabcut`` – foreground/background segmentation of the source image
   (OpenCV GrabCut, initialised with the image border as background); a
   shape is background when most of its pixels are classified as such.
+* ``neural``  – salient-object segmentation with a neural network
+  (rembg / ISNet, MIT licensed, ONNX on CPU). Optional dependency: installed
+  with ``pip install -e ".[ai]"``; the model is downloaded on first use.
 * ``auto``    – ``color`` when one colour clearly dominates the border,
   otherwise ``grabcut``.
 """
 from __future__ import annotations
+
+import os
+import threading
 
 import cv2
 import numpy as np
@@ -88,6 +94,11 @@ def by_grabcut(g: VectorGraph, rgba: np.ndarray, iterations: int = 5) -> list[in
     fg &= rgba[..., 3] >= 128
     if g.width != w or g.height != h:
         fg = cv2.resize(fg.astype(np.uint8), (g.width, g.height), interpolation=cv2.INTER_NEAREST).astype(bool)
+    return _vote(g, fg)
+
+
+def _vote(g: VectorGraph, fg: np.ndarray) -> list[int]:
+    """Shapes whose pixels are mostly background according to ``fg``."""
     lab = shape_label_raster(g)
     valid = lab >= 0
     n = max(g.shapes) + 1 if g.shapes else 0
@@ -102,9 +113,45 @@ def by_grabcut(g: VectorGraph, rgba: np.ndarray, iterations: int = 5) -> list[in
     return picked
 
 
+_SESSIONS: dict = {}
+_SESSION_LOCK = threading.Lock()
+
+
+def neural_available() -> bool:
+    try:
+        import rembg  # noqa: F401
+    except Exception:  # noqa: BLE001 - optional dependency
+        return False
+    return True
+
+
+def by_neural(g: VectorGraph, rgba: np.ndarray, model: str | None = None) -> list[int]:
+    from PIL import Image
+    from rembg import new_session, remove
+
+    name = model or os.environ.get("VZ_REMBG_MODEL", "isnet-general-use")
+    with _SESSION_LOCK:
+        sess = _SESSIONS.get(name)
+        if sess is None:
+            sess = _SESSIONS[name] = new_session(name)
+    mask = np.asarray(remove(Image.fromarray(np.ascontiguousarray(rgba[..., :3])), session=sess, only_mask=True))
+    if mask.ndim == 3:
+        mask = mask[..., 0]
+    fg = (mask >= 128) & (rgba[..., 3] >= 128)
+    if fg.shape != (g.height, g.width):
+        fg = cv2.resize(fg.astype(np.uint8), (g.width, g.height), interpolation=cv2.INTER_NEAREST).astype(bool)
+    return _vote(g, fg)
+
+
 def detect_background(g: VectorGraph, rgba: np.ndarray | None = None, method: str = "auto", include_enclosed: bool = False) -> dict:
-    if method not in ("auto", "color", "grabcut"):
-        raise ValueError("method must be auto, color or grabcut")
+    if method not in ("auto", "color", "grabcut", "neural"):
+        raise ValueError("method must be auto, color, grabcut or neural")
+    if method == "neural":
+        if rgba is None:
+            raise ValueError("neural background removal needs the source image")
+        if not neural_available():
+            raise ValueError("Neural background removal is not installed on this server (pip install -e '.[ai]').")
+        return {"method": "neural", "shapes": by_neural(g, rgba), "border_share": None}
     used = method
     if method in ("auto", "color"):
         ids, frac = by_color(g, include_enclosed)
@@ -128,4 +175,4 @@ def coverage(g: VectorGraph) -> float:
     return total / max(1.0, g.width * g.height)
 
 
-__all__ = ["detect_background", "by_color", "by_grabcut", "shape_label_raster", "coverage"]
+__all__ = ["detect_background", "by_color", "by_grabcut", "by_neural", "neural_available", "shape_label_raster", "coverage"]

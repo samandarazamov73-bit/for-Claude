@@ -44,7 +44,30 @@ def write_eps(graph, opts: ExportOptions) -> bytes:
         f"0 {_n(h_pt)} translate {_n(k)} {_n(-k)} scale",
         "1 setlinecap 1 setlinejoin",
     ]
+    from .pdf import shading_dict
+
     for op in paint_ops(d, opts):
+        if op.kind == "fill" and op.paint is not None:
+            lines.append("gsave newpath")
+            for lp in op.loops:
+                if not lp:
+                    continue
+                p = lp[0].start()
+                buf = [f"{_n(p[0])} {_n(p[1])} m"]
+                for cmd in cubic_path(lp):
+                    if cmd[0] == "L":
+                        buf.append(f"{_n(cmd[1][0])} {_n(cmd[1][1])} l")
+                    else:
+                        (a, b2), (c2, d2), (e, f) = cmd[1], cmd[2], cmd[3]
+                        buf.append(f"{_n(a)} {_n(b2)} {_n(c2)} {_n(d2)} {_n(e)} {_n(f)} c")
+                buf.append("h")
+                lines.extend(_wrap(buf))
+            lines.append("eoclip newpath")
+            if op.paint.kind == "radial":
+                lines.append("[" + " ".join(_n(v) for v in op.paint.m) + "] concat")
+            lines.extend(_wrap(shading_dict(op.paint).split(" ")))
+            lines.append("shfill grestore")
+            continue
         r, g, b = _flatten_alpha(op.color)
         lines.append(f"{_n(r)} {_n(g)} {_n(b)} rgb")
         lines.append("newpath")

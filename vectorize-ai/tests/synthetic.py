@@ -153,3 +153,63 @@ def photo_like(w=1400, h=1000, seed=3):
     img[..., :3] += rng.normal(0, 4, (h, w, 3))
     img[..., 3] = 255
     return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def _radial(h, w, cx, cy, r, c_in, c_out):
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    t = np.clip(np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / r, 0, 1)[..., None]
+    return np.asarray(c_in, np.float32) * (1 - t) + np.asarray(c_out, np.float32) * t
+
+
+def label_scene(w=560, h=960, seed=5, noise=2.0):
+    """Packaging-label style test image: gradient backgrounds, Cyrillic
+    text, shaded spheres with highlights, a plate, gold stroke, mild noise
+    and a transparent surround (similar to real product labels)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    img = np.zeros((h, w, 3), np.float32)
+    # vertical green gradient background
+    t = (yy / h)[..., None]
+    img[:] = np.array([170, 225, 120]) * (1 - t) + np.array([20, 120, 40]) * t
+    # white panel with soft gradient
+    panel = (((xx - w / 2) / (w * 0.42)) ** 2 + ((yy - h * 0.3) / (h * 0.24)) ** 2) < 1
+    pg = np.array([255, 255, 252]) * (1 - (yy / h)[..., None] * 0.6) + np.array([200, 235, 190]) * (yy / h)[..., None] * 0.6
+    img[panel] = pg[panel]
+    # plate (radial gradient disc) and two "apples" (shaded spheres)
+    plate = _radial(h, w, w * 0.45, h * 0.66, w * 0.3, (250, 250, 250), (175, 180, 185))
+    m = (xx - w * 0.45) ** 2 + (yy - h * 0.66) ** 2 < (w * 0.3) ** 2
+    img[m] = plate[m]
+    for cx, cy, r in ((w * 0.33, h * 0.74, w * 0.18), (w * 0.62, h * 0.78, w * 0.14)):
+        sph = _radial(h, w, cx - r * 0.35, cy - r * 0.35, r * 1.4, (215, 255, 120), (40, 120, 20))
+        m = (xx - cx) ** 2 + (yy - cy) ** 2 < r * r
+        img[m] = sph[m]
+        hl = (xx - (cx - r * 0.4)) ** 2 + (yy - (cy - r * 0.45)) ** 2 < (r * 0.12) ** 2
+        img[hl] = (250, 255, 240)
+    # dark banner
+    band = (yy > h * 0.86) & (yy < h * 0.95)
+    img[band] = np.array([2, 70, 30]) * 1.0
+    if noise > 0:
+        img += rng.normal(0, noise, img.shape)
+    rgba = np.zeros((h, w, 4), np.uint8)
+    rgba[..., :3] = np.clip(img, 0, 255)
+    rgba[..., 3] = 255
+    pil = Image.fromarray(rgba, "RGBA")
+    d = ImageDraw.Draw(pil)
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    try:
+        big = ImageFont.truetype(font_path, int(w * 0.13))
+        mid = ImageFont.truetype(font_path, int(w * 0.065))
+    except OSError:
+        big = mid = ImageFont.load_default()
+    d.text((w / 2, h * 0.17), "AROMA", font=big, fill=(2, 50, 22, 255), anchor="mm")
+    d.text((w / 2, h * 0.27), "ГЕЛЬ ДЛЯ", font=mid, fill=(2, 50, 22, 255), anchor="mm")
+    d.text((w / 2, h * 0.33), "ПОСУДЫ", font=mid, fill=(2, 50, 22, 255), anchor="mm")
+    d.text((w / 2, h * 0.905), "500 мл", font=mid, fill=(255, 255, 255, 255), anchor="mm")
+    d.arc((w * 0.15, h * 0.15, w * 0.85, h * 0.25), 20, 160, fill=(220, 170, 40, 255), width=max(2, w // 80))
+    rgba = np.array(pil)
+    # transparent surround: oval label shape
+    outside = (((xx - w / 2) / (w * 0.49)) ** 2 + ((yy - h / 2) / (h * 0.49)) ** 2) > 1
+    rgba[outside] = 0
+    return rgba

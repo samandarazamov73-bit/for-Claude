@@ -108,7 +108,7 @@ def trace_chains(cf: CrackField) -> tuple[list[np.ndarray], list[bool], np.ndarr
     return chains, closed, brk
 
 
-def build_topology(regions: np.ndarray, region_color: np.ndarray, palette: np.ndarray, counts: np.ndarray) -> tuple[VectorGraph, CrackField]:
+def build_topology(regions: np.ndarray, region_color: np.ndarray, palette: np.ndarray, counts: np.ndarray, fills: dict | None = None) -> tuple[VectorGraph, CrackField]:
     h, w = regions.shape
     cf = CrackField(regions)
     chains, closed, _ = trace_chains(cf)
@@ -117,7 +117,7 @@ def build_topology(regions: np.ndarray, region_color: np.ndarray, palette: np.nd
     area = np.bincount(regions.ravel(), minlength=region_color.shape[0])
     for rid in range(1, region_color.shape[0]):
         col = int(region_color[rid])
-        g.shapes[rid - 1] = Shape(id=rid - 1, color=col if col >= 0 else -1, area=float(area[rid]), transparent=col < 0)
+        g.shapes[rid - 1] = Shape(id=rid - 1, color=col if col >= 0 else -1, area=float(area[rid]), transparent=col < 0, fill=(fills or {}).get(rid))
 
     node_of: dict[int, int] = {}
 

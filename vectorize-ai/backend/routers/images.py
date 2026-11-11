@@ -276,7 +276,7 @@ def background(token: str, body: BackgroundIn, request: Request, db: DbSession =
         raise ApiError("not_ready")
     g = VectorGraph.from_json(st.storage.load_graph_json(token))
     rgba = None
-    if body.method in ("auto", "grabcut") and st.storage.preview_path(token).exists():
+    if body.method in ("auto", "grabcut", "neural") and st.storage.preview_path(token).exists():
         import cv2
 
         bgra = cv2.imread(str(st.storage.preview_path(token)), cv2.IMREAD_UNCHANGED)

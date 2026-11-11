@@ -1,4 +1,4 @@
-import type { Edits, GraphShape, Seg, VectorGraphJSON } from './types'
+import type { Edits, GraphShape, PaintJSON, Seg, VectorGraphJSON } from './types'
 
 /** Drawing command in absolute coordinates (canvas semantics). */
 export type Cmd =
@@ -213,6 +213,8 @@ export interface RenderState {
   holes: Record<number, number[]>
   /** draw order (parents before children) */
   order: number[]
+  /** gradient paints of shapes whose colour was not edited */
+  paints: Record<number, PaintJSON>
 }
 
 export const rgbaCss = (c: RGBA) => (c[3] >= 255 ? `rgb(${c[0]},${c[1]},${c[2]})` : `rgba(${c[0]},${c[1]},${c[2]},${(c[3] / 255).toFixed(3)})`)
@@ -231,6 +233,7 @@ export function deriveRenderState(g: VectorGraphJSON, e: Edits): RenderState {
   }
   const fill: Record<number, string> = {}
   const colorOf: Record<number, number> = {}
+  const paints: Record<number, PaintJSON> = {}
   const transparent = new Set<number>()
   for (const s of g.shapes) {
     if (s.transparent) {
@@ -246,6 +249,8 @@ export function deriveRenderState(g: VectorGraphJSON, e: Edits): RenderState {
     }
     fill[s.id] = rgbaCss(pal[c])
     colorOf[s.id] = c
+    const recoloured = c !== s.color || e.shapeColors[s.id] !== undefined || e.paletteOverrides[s.color] !== undefined || mergeColor.has(s.id)
+    if (s.fill && !recoloured) paints[s.id] = s.fill
   }
   // stack holes: a hole may be filled by the parent only when nothing
   // transparent lies inside it (same rule as the server).
@@ -273,7 +278,7 @@ export function deriveRenderState(g: VectorGraphJSON, e: Edits): RenderState {
     }
     holes[s.id] = keep
   }
-  return { fill, colorOf, holes, order: order.filter((id) => id in fill) }
+  return { fill, colorOf, holes, order: order.filter((id) => id in fill), paints }
 }
 
 /** Shapes containing (x, y) in graph coordinates, topmost first. */

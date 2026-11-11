@@ -21,6 +21,7 @@ class ProcessingOptions:
     max_colors: int = 0
     palette: str = ""
     color_threshold: float = 0.0
+    gradients: bool = True
     min_area_px: float = 0.0
     fit_tolerance: float = 0.0
     subpixel: bool = True
@@ -60,7 +61,7 @@ class ProcessingOptions:
 
     def segmentation_key(self) -> str:
         """Hash of every option that affects stages 1-3 (cacheable)."""
-        key = {k: getattr(self, k) for k in ("max_pixels", "color_profile", "denoise", "max_colors", "palette", "color_threshold", "min_area_px")}
+        key = {k: getattr(self, k) for k in ("max_pixels", "color_profile", "denoise", "max_colors", "palette", "color_threshold", "min_area_px", "gradients")}
         return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -83,6 +84,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     OptionSpec("processing.max_colors", "max_colors", "integer", "Maximum number of colours (0 = determined automatically).", 0, 256, group="palette"),
     OptionSpec("processing.palette", "palette", "string", "Custom palette: '#RRGGBB[AA] [-> #RRGGBB[AA]] [~ tolerance]' entries separated by ';' (max 1024).", group="palette"),
     OptionSpec("processing.color_threshold", "color_threshold", "number", "Colour merge threshold in CIE76 dE (0 = automatic, noise adaptive).", 0, 60, group="palette"),
+    OptionSpec("processing.gradients", "gradients", "boolean", "Represent smooth shading with linear and radial gradients instead of bands of flat colour.", group="palette"),
     OptionSpec("processing.min_area_px", "min_area_px", "number", "Regions smaller than this many pixels are merged into neighbours (0 = automatic).", 0, 10000, group="geometry"),
     OptionSpec("processing.fit_tolerance", "fit_tolerance", "number", "Maximum curve deviation in pixels (0 = automatic). Larger = fewer anchor points.", 0, 5, group="geometry"),
     OptionSpec("processing.subpixel", "subpixel", "boolean", "Use anti-aliasing coverage to place boundaries with sub-pixel precision.", group="geometry"),

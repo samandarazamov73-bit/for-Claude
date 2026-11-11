@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass, field, fields
 
 from geometry_engine import Affine, Line, Segment
+from geometry_engine.paint import GradientPaint
 
 FORMATS = ("svg", "pdf", "eps", "dxf", "png")
 MIME = {
@@ -166,6 +167,7 @@ class DrawItem:
     depth: int
     primitive: dict | None = None
     has_holes: bool = False
+    paint: "GradientPaint | None" = None  # gradient fill in output coordinates
 
 
 @dataclass
@@ -218,7 +220,10 @@ def build_drawing(graph, opts: ExportOptions) -> Drawing:
         if not loops:
             continue
         col = graph.color_of(s)
-        item = DrawItem(s.id, col, s.color, loops, s.parent, s.depth, _tx_primitive(s.primitive, m), has_holes=len(loops) > 1)
+        paint = GradientPaint.from_json(s.fill).transformed(m) if s.fill else None
+        if paint is not None:
+            col = paint.mean_color()  # fallback colour (DXF, gap filler)
+        item = DrawItem(s.id, col, s.color, loops, s.parent, s.depth, _tx_primitive(s.primitive, m), has_holes=len(loops) > 1, paint=paint)
         d.items.append(item)
     if opts.draw_style == "stroke_edges":
         for f in graph.interfaces.values():
@@ -258,6 +263,7 @@ class PaintOp:
     color: tuple[int, int, int, int]
     width: float = 0.0
     close: bool = True
+    paint: "GradientPaint | None" = None
 
 
 def paint_ops(d: Drawing, opts: ExportOptions) -> list[PaintOp]:
@@ -274,7 +280,7 @@ def paint_ops(d: Drawing, opts: ExportOptions) -> list[PaintOp]:
             if opts.draw_style == "stroke_shapes":
                 ops.append(PaintOp("stroke", it.loops, it.color, opts.stroke_width))
             else:
-                ops.append(PaintOp("fill", it.loops, it.color))
+                ops.append(PaintOp("fill", it.loops, it.color, paint=it.paint))
     for it in d.overlay:
         ops.append(PaintOp("fill", it.loops, it.color))
     return ops

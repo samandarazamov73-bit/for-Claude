@@ -30,16 +30,50 @@ def _path_ops(loops, close: bool) -> list[str]:
     return out
 
 
+def ps_function(stops) -> str:
+    """PDF/PostScript function dictionary for gradient stops (type 2 for one
+    interval, type 3 stitching for several)."""
+    def c(col):
+        return "[" + " ".join(_n(v / 255.0) for v in col[:3]) + "]"
+
+    if len(stops) == 1:
+        stops = [stops[0], (1.0, stops[0][1])]
+    parts = [f"<< /FunctionType 2 /Domain [0 1] /C0 {c(a[1])} /C1 {c(b[1])} /N 1 >>" for a, b in zip(stops[:-1], stops[1:])]
+    if len(parts) == 1:
+        return parts[0]
+    bounds = " ".join(_n(o) for o, _ in stops[1:-1])
+    encode = " ".join(["0 1"] * len(parts))
+    return f"<< /FunctionType 3 /Domain [0 1] /Functions [{' '.join(parts)}] /Bounds [{bounds}] /Encode [{encode}] >>"
+
+
+def shading_dict(paint) -> str:
+    fn = ps_function(paint.stops)
+    if paint.kind == "linear":
+        return f"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{_n(paint.x1)} {_n(paint.y1)} {_n(paint.x2)} {_n(paint.y2)}] /Function {fn} /Extend [true true] >>"
+    return f"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 0 0 0 0 1] /Function {fn} /Extend [true true] >>"
+
+
 def write_pdf(graph, opts: ExportOptions) -> bytes:
     d = build_drawing(graph, opts)
     geo = d.geometry
     k = geo.points_per_px
     w_pt, h_pt = d.width * k, d.height * k
     alphas: dict[int, str] = {}
+    shadings: list[str] = []
     content = [f"q {_n(k)} 0 0 {_n(-k)} 0 {_n(h_pt)} cm", "1 J 1 j"]
     for op in paint_ops(d, opts):
         r, g, b, a = (c / 255.0 for c in op.color)
         content.append("q")
+        if op.kind == "fill" and op.paint is not None:
+            name = f"Sh{len(shadings)}"
+            shadings.append(shading_dict(op.paint))
+            content.extend(_path_ops(op.loops, True))
+            content.append("W* n")
+            if op.paint.kind == "radial":
+                content.append(" ".join(_n(v) for v in op.paint.m) + " cm")
+            content.append(f"/{name} sh")
+            content.append("Q")
+            continue
         if op.color[3] < 255:
             name = alphas.setdefault(op.color[3], f"GS{len(alphas)}")
             content.append(f"/{name} gs")
@@ -55,20 +89,27 @@ def write_pdf(graph, opts: ExportOptions) -> bytes:
     content.append("Q")
     stream = zlib.compress("\n".join(content).encode("ascii"), 6)
 
+    first_extra = 6
+    gs_ids = {name: first_extra + i for i, name in enumerate(alphas.values())}
+    sh_first = first_extra + len(alphas)
+    res = []
+    if alphas:
+        res.append("/ExtGState << " + " ".join(f"/{nm} {oid} 0 R" for nm, oid in gs_ids.items()) + " >>")
+    if shadings:
+        res.append("/Shading << " + " ".join(f"/Sh{i} {sh_first + i} 0 R" for i in range(len(shadings))) + " >>")
+    resources = "<< " + " ".join(res) + " >>"
     objs: list[bytes] = []
-    ext = " ".join(f"/{name} {6 + i} 0 R" for i, name in enumerate(alphas.values()))
-    resources = f"<< /ExtGState << {ext} >> >>" if alphas else "<< >>"
     objs.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     objs.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-    objs.append(
-        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {_n(w_pt)} {_n(h_pt)}] /Contents 4 0 R /Resources {resources} >>".encode()
-    )
+    objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {_n(w_pt)} {_n(h_pt)}] /Contents 4 0 R /Resources {resources} >>".encode())
     objs.append(f"<< /Length {len(stream)} /Filter /FlateDecode >>\nstream\n".encode() + stream + b"\nendstream")
     now = _dt.datetime.now(_dt.timezone.utc).strftime("D:%Y%m%d%H%M%SZ")
     objs.append(f"<< /Producer (Vectorize AI) /Creator (Vectorize AI) /CreationDate ({now}) >>".encode())
     for alpha in alphas:
-        a = _n(alpha / 255.0)
-        objs.append(f"<< /Type /ExtGState /ca {a} /CA {a} >>".encode())
+        av = _n(alpha / 255.0)
+        objs.append(f"<< /Type /ExtGState /ca {av} /CA {av} >>".encode())
+    for sh in shadings:
+        objs.append(sh.encode())
 
     out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = []

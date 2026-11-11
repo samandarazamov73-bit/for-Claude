@@ -51,6 +51,11 @@ describe('deriveRenderState', () => {
     expect(hidden.holes[1]).toEqual([1]) // the hole must stay open now
     expect(hidden.holes[0]).toEqual([1]) // and the outer shape's hole too
   })
+  it('keeps gradients unless the shape is recoloured', () => {
+    const g2 = { ...graph, shapes: graph.shapes.map((s) => (s.id === 1 ? { ...s, fill: { type: 'linear' as const, x1: 0, y1: 0, x2: 10, y2: 0, stops: [[0, 0, 0, 0, 255], [1, 255, 255, 255, 255]] } } : s)) }
+    expect(deriveRenderState(g2, emptyEdits()).paints[1]).toBeDefined()
+    expect(deriveRenderState(g2, { ...emptyEdits(), shapeColors: { '1': 2 } }).paints[1]).toBeUndefined()
+  })
   it('applies recolours, merges and deletions', () => {
     const e = { ...emptyEdits(), paletteOverrides: { '1': [0, 128, 0, 255] as [number, number, number, number] }, mergedColors: { '2': 1 }, deletedColors: [0] }
     const rs = deriveRenderState(graph, e)

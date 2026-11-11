@@ -86,6 +86,7 @@ class Shape:
     symmetry: dict | None = None
     repeat_group: int | None = None
     stack_holes: list[int] = field(default_factory=list)
+    fill: dict | None = None  # gradient paint JSON (None = flat palette colour)
 
 
 @dataclass
@@ -382,6 +383,8 @@ class VectorGraph:
                 d["symmetry"] = s.symmetry
             if s.repeat_group is not None:
                 d["repeat"] = s.repeat_group
+            if s.fill:
+                d["fill"] = s.fill
             shapes.append(d)
         out = {
             "version": 1,
@@ -447,6 +450,7 @@ class VectorGraph:
                 symmetry=sd.get("symmetry"),
                 repeat_group=sd.get("repeat"),
                 stack_holes=list(sd.get("stackHoles", [])),
+                fill=sd.get("fill"),
             )
             g.shapes[s.id] = s
         g.order = [int(i) for i in d.get("order", list(g.shapes))]
