@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -24,7 +25,7 @@ from .config import Settings
 from .deps import AppState
 from .routers import accounts, images, jobs, meta
 from .routers.images import EXAMPLES_DIR
-from .security import SecurityMiddleware
+from .security import CSP, SecurityMiddleware
 
 log = logging.getLogger("vectorize")
 SWEEP_SECONDS = 600
@@ -111,12 +112,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/openapi.json", include_in_schema=False)
     def public_openapi():
         if "spec" not in spec_cache:
-            spec_cache["spec"] = build_openapi(settings.public_url)
+            # relative server URL unless a public URL was configured explicitly
+            explicit = settings.public_url != Settings.public_url
+            spec_cache["spec"] = build_openapi(settings.public_url if explicit else "/")
         return JSONResponse(spec_cache["spec"])
 
     @app.get("/api/docs", include_in_schema=False)
     def swagger():
-        return get_swagger_ui_html(openapi_url="/api/openapi.json", title="Vectorize AI API – Swagger UI")
+        # Swagger UI boots from an inline script: allow exactly that script
+        # with a per-response nonce instead of weakening the global CSP.
+        nonce = secrets.token_urlsafe(16)
+        local = (Path(settings.frontend_dist) / "swagger" / "swagger-ui-bundle.js").exists()
+        assets = {"swagger_js_url": "/swagger/swagger-ui-bundle.js", "swagger_css_url": "/swagger/swagger-ui.css"} if local else {}
+        html = get_swagger_ui_html(openapi_url="/api/openapi.json", title="Vectorize AI API - Swagger UI", swagger_favicon_url="/favicon.svg", **assets).body.decode()
+        html = html.replace("<script>", f'<script nonce="{nonce}">')
+        csp = CSP.replace("script-src 'self' https://cdn.jsdelivr.net", f"script-src 'self' https://cdn.jsdelivr.net 'nonce-{nonce}'")
+        return HTMLResponse(html, headers={"Content-Security-Policy": csp})
 
     if EXAMPLES_DIR.exists():
         app.mount("/examples", StaticFiles(directory=EXAMPLES_DIR), name="examples")
