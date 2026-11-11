@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vectorize-ai"
+version = "0.1.0"
+description = "Raster-to-vector conversion platform: engine, exports, web app and REST API"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "opencv-python-headless>=4.9",
+  "pillow>=10.2",
+  "shapely>=2.0",
+  "ezdxf>=1.2",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "python-multipart>=0.0.9",
+  "sqlalchemy>=2.0",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pypdf>=4", "openapi-spec-validator>=0.7"]
+
+[tool.setuptools]
+# The requested repository layout uses hyphenated module folders; each one
+# holds a regular Python package with an importable (underscored) name.
+package-dir = { "image_processing" = "image-processing/image_processing", "geometry_engine" = "geometry-engine/geometry_engine", "vectorization_engine" = "vectorization-engine/vectorization_engine", "export_engine" = "export-engine/export_engine" }
+packages = [
+  "image_processing", "geometry_engine", "vectorization_engine", "export_engine",
+  "auth", "billing", "api", "workers", "database", "backend", "backend.routers",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "image-processing", "geometry-engine", "vectorization-engine", "export-engine"]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
