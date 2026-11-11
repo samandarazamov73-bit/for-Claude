@@ -11,4 +11,5 @@ storage/
 *.sqlite3
 *.db
 .env
-public/swagger/
+frontend/public/swagger/
+*.tsbuildinfo
