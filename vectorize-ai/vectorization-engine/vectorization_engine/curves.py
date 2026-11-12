@@ -30,6 +30,7 @@ def fit_parameters(opts: ProcessingOptions, soft_edge_ratio: float, compressed: 
         tol = 0.75 if hard else 0.5
         if compressed:
             tol += 0.15
+        tol *= (1.0, 0.85, 0.7)[opts.detail_level]
     sigma = 1.6 if hard else (1.2 if compressed else 0.9)
     scale = max(2.0, min(4.0, 1.1 * edge_width + 0.9)) + (0.5 if hard else 0.0)
     curve = CurveOptions(

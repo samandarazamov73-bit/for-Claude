@@ -47,11 +47,15 @@ def smooth_points(pts: np.ndarray, sigma: float, *, closed: bool = False, fixed:
     n = pts.shape[0]
     if sigma <= 0 or n < 3:
         return pts.copy()
+    if closed:
+        sigma = min(sigma, n / 6.0)  # small loops would otherwise shrink to a point
     rad = int(math.ceil(3 * sigma))
     k = np.exp(-0.5 * (np.arange(-rad, rad + 1) / sigma) ** 2)
     k /= k.sum()
     if closed:
-        ext = np.concatenate([pts[-rad:], pts, pts[:rad]]) if n > rad else np.concatenate([pts] * 3)[n - rad : 2 * n + rad]
+        # circular padding by modular indices: valid for loops shorter than
+        # the kernel radius too (tiny regions at high detail)
+        ext = pts[np.arange(-rad, n + rad) % n]
         out = np.stack([np.convolve(ext[:, c], k, mode="valid") for c in range(2)], 1)[:n]
     else:
         # Reflect around the end points (keeps the ends in place).

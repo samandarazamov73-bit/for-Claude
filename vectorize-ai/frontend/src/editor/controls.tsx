@@ -15,13 +15,14 @@ export function useSchema() {
 }
 
 /** Options that change stages 1–3 (and therefore shape ids/palette indices). */
-export const SEGMENTATION_ATTRS = new Set(['max_pixels', 'color_profile', 'denoise', 'max_colors', 'palette', 'color_threshold', 'min_area_px', 'gradients'])
+export const SEGMENTATION_ATTRS = new Set(['max_pixels', 'color_profile', 'denoise', 'max_colors', 'palette', 'color_threshold', 'min_area_px', 'gradients', 'detail'])
 
 const LABELS: Record<string, string> = {
   max_colors: 'Maximum colours',
   color_threshold: 'Colour merge threshold (ΔE)',
   palette: 'Custom palette',
   gradients: 'Smooth gradients',
+  detail: 'Detail level',
   denoise: 'Noise reduction',
   min_area_px: 'Minimum region area (px)',
   fit_tolerance: 'Curve tolerance (px)',

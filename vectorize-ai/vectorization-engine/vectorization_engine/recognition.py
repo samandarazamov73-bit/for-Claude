@@ -112,7 +112,10 @@ def recognize_shapes(g: VectorGraph, opts: ProcessingOptions, tol: float, progre
     enabled = opts.enabled_shapes()
     if not enabled:
         return 0
-    shapes = sorted((s for s in g.shapes.values() if not s.transparent and s.area >= 10 and s.loops), key=lambda s: s.area)
+    # at higher detail levels the many tiny regions are texture, not geometry:
+    # idealising them would cost time and fidelity
+    min_area = (10, 40, 150)[opts.detail_level]
+    shapes = sorted((s for s in g.shapes.values() if not s.transparent and s.area >= min_area and s.loops), key=lambda s: s.area)
     found = 0
     shape_tol = max(0.7, tol * 1.5)
     for i, s in enumerate(shapes):

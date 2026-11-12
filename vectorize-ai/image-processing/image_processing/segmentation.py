@@ -42,6 +42,7 @@ class SegmentationOptions:
     min_region_px: float = 0.0  # 0 = automatic
     color_threshold: float = 0.0  # dE76; 0 = automatic
     thin_lines: bool = True  # continue thin lines into partially covered pixels
+    detail: int = 0  # 0 normal, 1 high, 2 max: finer colours, smaller regions
 
 
 @dataclass
@@ -585,6 +586,8 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     auto_thr = float(np.clip(5.5 + 2.5 * lab_noise, 5.5, 16.0))
     if compressed:
         auto_thr = max(auto_thr, 9.0)
+    if opts.detail:
+        auto_thr = max(2.5, auto_thr * (0.72 if opts.detail == 1 else 0.5))
     thr = opts.color_threshold if opts.color_threshold > 0 else auto_thr
     min_support = max(3.0, npx * 4e-6)
 
@@ -613,6 +616,8 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     min_region = opts.min_region_px if opts.min_region_px > 0 else float(np.clip(2.0 + 0.8 * noise_sigma, 2.0, 12.0))
     if compressed and opts.min_region_px <= 0:
         min_region = max(min_region, 5.0)
+    if opts.detail and opts.min_region_px <= 0:
+        min_region = max(1.0, min_region * (0.6 if opts.detail == 1 else 0.35))
     opaque = ~transparent
     added = 0
     labels = np.full((h, w), TRANSPARENT, dtype=np.int64)
@@ -721,7 +726,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     labels, speckles = _remove_speckles(labels, min_region)
     thin_absorbed = halos = 0
     if k:
-        de_limit = 24.0 if compressed else 9.0
+        de_limit = (24.0 if compressed else 9.0) * (1.0, 0.8, 0.6)[min(opts.detail, 2)]
         for _ in range(2):
             labels, n_abs = _absorb_thin_regions(labels, centers, de_limit, 3.0 if compressed else 2.2)
             thin_absorbed += n_abs

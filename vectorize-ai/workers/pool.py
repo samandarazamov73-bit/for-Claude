@@ -289,15 +289,18 @@ class JobManager:
             self._notify(live)
             self._update_positions()
             fut = loop.run_in_executor(self._executor, run_vectorize_job, spec, self.progress_q, self.cancel_flags)
+            # higher detail levels legitimately take longer
+            detail = str((spec.get("options") or {}).get("detail", "normal"))
+            budget = self.timeout * {"high": 1.5, "max": 3.0}.get(detail, 1.0)
             try:
-                result = await asyncio.wait_for(asyncio.shield(fut), self.timeout)
+                result = await asyncio.wait_for(asyncio.shield(fut), budget)
             except asyncio.TimeoutError:
                 self.cancel_flags[job_id] = True
                 try:
                     await asyncio.wait_for(fut, 30)
                 except Exception:  # noqa: BLE001
                     pass
-                self._finish(live, "failed", "timeout", f"Processing exceeded the {int(self.timeout)} s time budget.")
+                self._finish(live, "failed", "timeout", f"Processing exceeded the {int(budget)} s time budget.")
                 return
             except cf.process.BrokenProcessPool:
                 log.warning("worker pool broke while running %s (attempt %d)", job_id, live.attempts)

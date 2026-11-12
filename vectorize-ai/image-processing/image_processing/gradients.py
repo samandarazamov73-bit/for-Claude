@@ -203,7 +203,7 @@ def _fit_radial_px(px, py, cols, q, M, knots=12):
     return paint, sse
 
 
-def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_radial, rng, min_explained=0.5, max_px=12000, nm_px=2500):
+def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_radial, rng, min_explained=0.5, max_px=12000, nm_px=2500, knots=12):
     """Pixel-based paint selection: linear and radial candidates with
     piecewise-linear colour profiles; returns (paint or None, rms)."""
     m = px.shape[0]
@@ -225,7 +225,7 @@ def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_ra
     try:
         th = np.linalg.solve(G[:3, :3] + ridge, rs[:3])
         if np.hypot(th[1], th[2]) > 1e-9:
-            paint, sse = _fit_linear_px(px, py, cols, np.array([th[1], th[2]]))
+            paint, sse = _fit_linear_px(px, py, cols, np.array([th[1], th[2]]), knots)
             if paint is not None:
                 best, best_sse = paint, sse
     except np.linalg.LinAlgError:
@@ -283,14 +283,14 @@ def _choose_paint(px, py, cols, G, Rm, Q, n, S, c0, tau_fin, min_range, allow_ra
         start = min(cands, key=obj)
         span = max(np.ptp(px), np.ptp(py), 1.0)
         res = minimize(obj, start, method="Nelder-Mead", options={"xatol": 0.75, "fatol": 1e-3 * max(obj(start), 1.0), "maxiter": 45, "initial_simplex": [start, start + [span * 0.1, 0], start + [0, span * 0.1]]})
-        paint, sse = _fit_radial_px(px, py, cols, res.x, I2)
+        paint, sse = _fit_radial_px(px, py, cols, res.x, I2, knots)
         if paint is not None and sse < best_sse * 0.9:
             best, best_sse = paint, sse
         if M_ell is not None:
             Mcur[0] = M_ell
             start = min([res.x, q_ell], key=obj)
             res = minimize(obj, start, method="Nelder-Mead", options={"xatol": 0.75, "fatol": 1e-3 * max(obj(start), 1.0), "maxiter": 45, "initial_simplex": [start, start + [span * 0.1, 0], start + [0, span * 0.1]]})
-            paint, sse = _fit_radial_px(px, py, cols, res.x, M_ell)
+            paint, sse = _fit_radial_px(px, py, cols, res.x, M_ell, knots)
             if paint is not None and sse < best_sse * 0.9:
                 best, best_sse = paint, sse
     if best is None:
@@ -324,7 +324,11 @@ def _thin_stops(stops, tol: float = 1.5):
     return keep
 
 
-def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float = 0.0, compressed: bool = False, max_regions: int = 120_000, progress=None) -> tuple[Segmentation, dict[int, dict], GradientStats]:
+def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float = 0.0, compressed: bool = False, detail: int = 0, max_regions: int = 200_000, progress=None) -> tuple[Segmentation, dict[int, dict], GradientStats]:
+    """``detail`` 0 / 1 / 2 (normal / high / max): higher levels merge less
+    (tighter tolerances) and give almost every remaining region its own
+    gradient, approaching the source at the cost of more paints."""
+    detail = int(min(max(detail, 0), 2))
     regions = seg.regions
     region_color = seg.region_color
     h, w = regions.shape
@@ -358,6 +362,9 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
     opaque[0] = False
     tau_abs = min(12.0, 3.2 + 1.3 * noise_sigma + (2.0 if compressed else 0.0))
     tau_inc = min(5.0, 1.1 + 0.45 * noise_sigma + (0.8 if compressed else 0.0))
+    if detail:
+        tau_abs *= (1.0, 0.8, 0.65)[detail]
+        tau_inc *= (1.0, 0.8, 0.65)[detail]
     tau_fin = tau_abs * 1.35
     sse = np.zeros(nreg)
     good = np.nonzero(opaque)[0]
@@ -625,23 +632,28 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
         for r_ in (ra, rb):
             soft_len[r_] = soft_len.get(r_, 0.0) + sl
             all_len[r_] = all_len.get(r_, 0.0) + tl
-    band_cands = [r for r in pix if r not in paints and n[r] >= 80 and all_len.get(r, 0.0) > 0 and soft_len.get(r, 0.0) >= 0.5 * all_len[r]]
+    # At higher detail levels every region qualifies, not only soft bands:
+    # shading inside objects (droplets, leaves, glass) is then reproduced.
+    band_min_n = (80, 30, 12)[detail]
+    band_cap = (600, 4000, 12000)[detail]
+    band_gain = (0.85, 0.9, 0.92)[detail]
+    band_cands = [r for r in pix if r not in paints and n[r] >= band_min_n and all_len.get(r, 0.0) > 0 and (detail > 0 or soft_len.get(r, 0.0) >= 0.5 * all_len[r])]
     band_cands.sort(key=lambda r: -n[r])
     t_band = _time.perf_counter()
     band_added = 0
-    for i, r in enumerate(band_cands[:600]):
-        if _time.perf_counter() - t_band > 10.0:  # safety net only
+    for i, r in enumerate(band_cands[:band_cap]):
+        if _time.perf_counter() - t_band > (10.0, 30.0, 60.0)[detail]:  # safety net only
             break
         sel = pix[r]
         fr = flat_rms(r)
         try:
             # a band paint replaces flat colours, so any clear gain is taken
-            paint, rms_b = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[r], Rm[r], Q[r], n[r], S, c0, max(tau_fin, 0.85 * fr), 3.0, allow_radial=n[r] >= 300 and i < 400, rng=rng, min_explained=0.3)
+            paint, rms_b = _choose_paint(xs[sel] + 0.5, ys[sel] + 0.5, col[sel], G[r], Rm[r], Q[r], n[r], S, c0, max(tau_fin, band_gain * fr), 3.0 if detail == 0 else 2.0, allow_radial=n[r] >= 300 and i < 400, rng=rng, min_explained=0.3 if detail == 0 else 0.2, max_px=12000 if n[r] > 2000 else 4000, knots=12 if detail == 0 else int(np.clip(n[r] // 25, 3, 12)))
         except np.linalg.LinAlgError:
             paint = None
         if paint is None:
             continue
-        if rms_b > 0.85 * fr:  # must clearly beat the flat colours it replaces
+        if rms_b > band_gain * fr:  # must clearly beat the flat colours it replaces
             continue
         paints[r] = paint
         rms_of[r] = rms_b

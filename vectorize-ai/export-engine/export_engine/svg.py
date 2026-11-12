@@ -27,52 +27,104 @@ def _hex(c) -> str:
     return "#%02x%02x%02x" % (int(c[0]), int(c[1]), int(c[2]))
 
 
-def _arc_cmd(seg, allow_arcs: bool) -> list[str]:
-    if not allow_arcs:
-        return [_seg_cmd(c, True) for c in seg.to_cubics()]
-    if abs(seg.sweep) >= 2 * math.pi - 1e-6:  # full ellipse: two halves
-        if isinstance(seg, Arc):
-            h1 = Arc(seg.cx, seg.cy, seg.r, seg.start_angle, seg.sweep / 2)
-            h2 = Arc(seg.cx, seg.cy, seg.r, seg.start_angle + seg.sweep / 2, seg.sweep / 2)
+def _num(v: float) -> str:
+    """Compact number: two decimals (0.01 px), no trailing or leading zeros."""
+    t = f"{v:.2f}".rstrip("0").rstrip(".")
+    if t in ("-0", "", "-"):
+        return "0"
+    if t.startswith("0."):
+        return t[1:]
+    if t.startswith("-0."):
+        return "-" + t[2:]
+    return t
+
+
+class _PathWriter:
+    """Writes compact path data: relative commands, repeated command letters
+    omitted, a minus sign doubling as separator. Deltas are taken between
+    *rounded* absolute points, so rounding never accumulates along a path."""
+
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.cur = (0.0, 0.0)
+        self.start = (0.0, 0.0)
+        self.last = ""
+
+    @staticmethod
+    def _round(p) -> tuple[float, float]:
+        return (round(float(p[0]), 2), round(float(p[1]), 2))
+
+    def _emit(self, cmd: str, nums: list[str]) -> None:
+        body = ""
+        for i, n in enumerate(nums):
+            body += n if (i == 0 or n.startswith("-")) else " " + n
+        if cmd == self.last and cmd not in ("M", "z"):
+            self.parts.append(body if body.startswith("-") else " " + body)
         else:
-            h1 = EllipticArc(seg.cx, seg.cy, seg.rx, seg.ry, seg.rotation, seg.start_angle, seg.sweep / 2)
-            h2 = EllipticArc(seg.cx, seg.cy, seg.rx, seg.ry, seg.rotation, seg.start_angle + seg.sweep / 2, seg.sweep / 2)
-        return _arc_cmd(h1, True) + _arc_cmd(h2, True)
-    end = seg.end()
-    large = 1 if abs(seg.sweep) > math.pi else 0
-    sweep = 1 if seg.sweep > 0 else 0
-    if isinstance(seg, Arc):
-        rx = ry = seg.r
-        rot = 0.0
-    else:
-        rx, ry, rot = seg.rx, seg.ry, math.degrees(seg.rotation)
-    return [f"A{fmt(rx)} {fmt(ry)} {fmt(rot)} {large} {sweep} {fmt(end[0])} {fmt(end[1])}"]
+            self.parts.append(cmd + body)
+        self.last = cmd
 
+    def _rel(self, p) -> list[str]:
+        q = self._round(p)
+        return [_num(q[0] - self.cur[0]), _num(q[1] - self.cur[1])]
 
-def _seg_cmd(seg: Segment, allow_arcs: bool) -> str:
-    if isinstance(seg, Line):
-        return f"L{fmt(seg.p1[0])} {fmt(seg.p1[1])}"
-    if isinstance(seg, QuadBezier):
-        return f"Q{fmt(seg.p1[0])} {fmt(seg.p1[1])} {fmt(seg.p2[0])} {fmt(seg.p2[1])}"
-    if isinstance(seg, CubicBezier):
-        return f"C{fmt(seg.p1[0])} {fmt(seg.p1[1])} {fmt(seg.p2[0])} {fmt(seg.p2[1])} {fmt(seg.p3[0])} {fmt(seg.p3[1])}"
-    if isinstance(seg, (Arc, EllipticArc)):
-        return "".join(_arc_cmd(seg, allow_arcs))
-    raise TypeError(type(seg))
+    def move(self, p) -> None:
+        q = self._round(p)
+        self._emit("M", [_num(q[0]), _num(q[1])])
+        self.cur = self.start = q
+
+    def close(self) -> None:
+        self._emit("z", [])
+        self.cur = self.start
+
+    def seg(self, seg: Segment, allow_arcs: bool) -> None:
+        if isinstance(seg, Line):
+            self._emit("l", self._rel(seg.p1))
+            self.cur = self._round(seg.p1)
+        elif isinstance(seg, QuadBezier):
+            self._emit("q", self._rel(seg.p1) + self._rel(seg.p2))
+            self.cur = self._round(seg.p2)
+        elif isinstance(seg, CubicBezier):
+            self._emit("c", self._rel(seg.p1) + self._rel(seg.p2) + self._rel(seg.p3))
+            self.cur = self._round(seg.p3)
+        elif isinstance(seg, (Arc, EllipticArc)):
+            if not allow_arcs:
+                for c in seg.to_cubics():
+                    self.seg(c, False)
+                return
+            if abs(seg.sweep) >= 2 * math.pi - 1e-6:  # full ellipse: two halves
+                if isinstance(seg, Arc):
+                    halves = [Arc(seg.cx, seg.cy, seg.r, seg.start_angle + k * seg.sweep / 2, seg.sweep / 2) for k in (0, 1)]
+                else:
+                    halves = [EllipticArc(seg.cx, seg.cy, seg.rx, seg.ry, seg.rotation, seg.start_angle + k * seg.sweep / 2, seg.sweep / 2) for k in (0, 1)]
+                for h in halves:
+                    self.seg(h, True)
+                return
+            if isinstance(seg, Arc):
+                rx = ry = seg.r
+                rot = 0.0
+            else:
+                rx, ry, rot = seg.rx, seg.ry, math.degrees(seg.rotation)
+            large = "1" if abs(seg.sweep) > math.pi else "0"
+            sweep = "1" if seg.sweep > 0 else "0"
+            end = seg.end()
+            self._emit("a", [_num(rx), _num(ry), _num(rot), large, sweep] + self._rel(end))
+            self.cur = self._round(end)
+        else:
+            raise TypeError(type(seg))
 
 
 def path_data(loops: list[list[Segment]], allow_arcs: bool = True, close: bool = True) -> str:
-    parts = []
+    w = _PathWriter()
     for lp in loops:
         if not lp:
             continue
-        p = lp[0].start()
-        parts.append(f"M{fmt(p[0])} {fmt(p[1])}")
+        w.move(lp[0].start())
         for s in lp:
-            parts.append(_seg_cmd(s, allow_arcs))
+            w.seg(s, allow_arcs)
         if close:
-            parts.append("Z")
-    return "".join(parts)
+            w.close()
+    return "".join(w.parts)
 
 
 def _paint(item: DrawItem, style: str, stroke_w: float) -> str:

@@ -2,6 +2,7 @@
 and profile fitting of vignette-like gradients."""
 import cv2
 import numpy as np
+import pytest
 
 from image_processing import SegmentationOptions, preprocess, segment
 from image_processing.gradients import _pl_fit, _pl_fit_adaptive
@@ -93,3 +94,43 @@ def test_adaptive_knots_follow_a_vignette_profile():
     assert sse_adaptive < 0.6 * sse_uniform
     assert pos[0] == 0.0 and pos[-1] == 1.0 and np.all(np.diff(pos) > 0)
     assert (pos > 0.7).sum() >= 3  # knots gather where the colour changes
+
+
+def test_detail_option_is_validated():
+    from vectorization_engine import OptionError, ProcessingOptions, parse_public
+
+    assert parse_public({"processing.detail": "max"}).detail_level == 2
+    assert ProcessingOptions().detail_level == 0
+    with pytest.raises(OptionError):
+        parse_public({"processing.detail": "ultra"})
+    # detail changes the segmentation, so it is part of the cache key
+    assert ProcessingOptions(detail="high").segmentation_key() != ProcessingOptions().segmentation_key()
+
+
+def test_tiny_closed_loops_stay_in_place():
+    from geometry_engine.fitting import smooth_points
+
+    tri = np.array([[458.0, 194.5], [458.5, 195.0], [459.0, 194.5]])
+    out = smooth_points(tri, 1.5, closed=True)  # kernel radius > loop length
+    assert np.abs(out - tri.mean(0)).max() < 1.0
+    sq = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]])
+    out = smooth_points(sq, 0.9, closed=True)
+    assert np.allclose(out.mean(0), [5.0, 5.0]) and np.ptp(out[:, 0]) > 5.0  # not collapsed
+
+
+def test_higher_detail_is_closer_to_the_source():
+    from synthetic import photo_like
+    from vectorization_engine import ProcessingOptions
+
+    img = photo_like(360, 260, seed=7)
+    errs, shapes = [], []
+    for level in ("normal", "max"):
+        res = vectorize(png_bytes(img), ProcessingOptions(detail=level))
+        ren = render_graph(res.graph)
+        errs.append(np.abs(ren[..., :3].astype(int) - res.prepared.rgba[..., :3].astype(int)).mean())
+        shapes.append(len(res.graph.drawable_shapes()))
+        # no stray geometry: every shape lies inside the canvas
+        for sh in res.graph.drawable_shapes():
+            assert sh.bbox[0] > -2 and sh.bbox[1] > -2 and sh.bbox[2] < 362 and sh.bbox[3] < 262
+    assert errs[1] < 0.85 * errs[0]
+    assert shapes[1] > shapes[0]

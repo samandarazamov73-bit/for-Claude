@@ -60,7 +60,7 @@ Shape     (id, color, loops: [[(interface, reversed)…] outer, holes…], paren
 
 | Формат | Реализация |
 |---|---|
-| SVG 1.0 / 1.1 / Tiny 1.2 | свои пути (в Tiny 1.2 дуги переводятся в Безье), нативные `circle`/`ellipse`/`rect`/`polygon` для распознанных фигур, cut-outs или stacked, группировка none / color / parent / layer, заливка, обводка фигур или обводка рёбер, gap filler, физический размер (px/pt/in/cm/mm + DPI) |
+| SVG 1.0 / 1.1 / Tiny 1.2 | компактные относительные пути (0,01 px, без накопления ошибки округления) (в Tiny 1.2 дуги переводятся в Безье), нативные `circle`/`ellipse`/`rect`/`polygon` для распознанных фигур, cut-outs или stacked, группировка none / color / parent / layer, заливка, обводка фигур или обводка рёбер, gap filler, физический размер (px/pt/in/cm/mm + DPI) |
 | PDF 1.4 | собственный писатель: FlateDecode, xref, ExtGState для полупрозрачности, `f*` (even-odd) |
 | EPS | EPSF-3.0 / Language Level 3, DSC-комментарии, строки короче 255 символов; полупрозрачность сводится к белому фону (в PostScript нет альфа-канала) |
 | DXF (R2010, ezdxf) | `lines` — полилинии; `lines_arcs` — LWPOLYLINE с bulge, где Безье аппроксимируются дугами; `lines_arcs_splines` — дуги через bulge и точные B-SPLINE; слой и true color на каждый цвет |

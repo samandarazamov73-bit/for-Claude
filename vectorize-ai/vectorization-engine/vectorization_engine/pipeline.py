@@ -221,6 +221,7 @@ def vectorize(
             palette=parse_palette(opts.palette) if opts.palette else None,
             min_region_px=opts.min_area_px,
             color_threshold=opts.color_threshold,
+            detail=opts.detail_level,
         )
         model = registry.segmentation()
         seg = model.segment(
@@ -237,6 +238,7 @@ def vectorize(
                 seg,
                 noise_sigma=a.noise_sigma,
                 compressed=a.compressed,
+                detail=opts.detail_level,
                 progress=lambda f, msg="": rep("segmentation", 0.8 + 0.2 * f, msg),
             )
         if cache:

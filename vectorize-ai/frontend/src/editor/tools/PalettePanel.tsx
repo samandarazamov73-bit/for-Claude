@@ -190,7 +190,7 @@ export function PalettePanel() {
         <p className="mt-2 text-[11px] text-faint">Added colours can be assigned to regions in the Regions tool.</p>
       </Section>
       <Section title="Colour detection">
-        <OptionGroup schema={schema} attrs={['gradients', 'max_colors', 'color_threshold', 'palette']} options={draft} onChange={(a, v) => setDraft({ ...draft, [a]: v as never })} />
+        <OptionGroup schema={schema} attrs={['detail', 'gradients', 'max_colors', 'color_threshold', 'palette']} options={draft} onChange={(a, v) => setDraft({ ...draft, [a]: v as never })} />
         <button className="btn-primary btn-sm mt-3 w-full" disabled={!segDirty || busy} onClick={() => reprocess(draft)}>
           Re-detect colours
         </button>
