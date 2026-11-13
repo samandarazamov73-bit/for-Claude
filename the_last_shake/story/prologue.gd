@@ -213,14 +213,14 @@ func _build_world() -> void:
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_depth_curve = 1.5
 	env.fog_sky_affect = 1.0
-	env.fog_sun_scatter = 0.08
+	env.fog_sun_scatter = 0.0                  # без светлого пятна вокруг солнца в тумане
 	env.fog_aerial_perspective = 0.4
 	env.fog_height = -3.0
 	env.fog_height_density = 0.04
 	env.volumetric_fog_enabled = true
 	env.volumetric_fog_density = 0.008
 	env.volumetric_fog_albedo = Color(0.9, 0.92, 0.93)
-	env.volumetric_fog_anisotropy = 0.6
+	env.volumetric_fog_anisotropy = 0.15
 	env.volumetric_fog_length = 90.0
 	env.volumetric_fog_detail_spread = 1.6
 	env.volumetric_fog_ambient_inject = 0.12
@@ -248,7 +248,10 @@ func _build_world() -> void:
 	sun.directional_shadow_max_distance = 90.0
 	sun.directional_shadow_blend_splits = true
 	sun.light_angular_distance = 2.5          # пасмурно: мягкие расплывчатые тени
-	sun.light_volumetric_fog_energy = 0.8
+	# пасмурно: самого диска солнца (и луны) на небе нет — иначе сквозь туман в окне автобуса висит белый круг
+	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	sun.light_specular = 0.35                 # без яркой полосы-блика на рамах окон
+	sun.light_volumetric_fog_energy = 0.35
 	add_child(sun)
 	forest.lod_manager.sun_light = sun
 	set_day(0.0)
@@ -359,6 +362,7 @@ func _build_bus() -> void:
 	probe.ambient_mode = ReflectionProbe.AMBIENT_COLOR
 	probe.ambient_color = Color(0.6, 0.64, 0.68)
 	probe.ambient_color_energy = 0.42             # свет только из окон: салон чуть темнее улицы
+	probe.intensity = 0.0                         # без отражений из пробы (в стекле не было бы белого круга)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	bus.body.add_child(probe)
 	probe.position = Vector3(0, 1.9, 0)
@@ -366,6 +370,28 @@ func _build_bus() -> void:
 	for l in bus.body.get_children():
 		if l is OmniLight3D:
 			(l as OmniLight3D).visible = false
+	# стёкла без зеркального пятна: иначе в форточке висит белый круг (отражение светлого неба)
+	for mi in bus.body.find_children("Glass_*", "MeshInstance3D", true, false):
+		var gm: MeshInstance3D = mi
+		for si in gm.mesh.get_surface_count():
+			var gmat: Material = gm.get_active_material(si)
+			if gmat is BaseMaterial3D:
+				var g2: BaseMaterial3D = (gmat as BaseMaterial3D).duplicate()
+				g2.metallic_texture = null
+				g2.roughness_texture = null
+				g2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED   # просто лёгкий оттенок, без бликов
+				g2.albedo_color = Color(0.5, 0.58, 0.56, 0.12)
+				gm.set_surface_override_material(si, g2)
+	# …и сами плафоны не светятся (иначе их белый круг отражается в стекле окна)
+	for mi in bus.body.find_children("*Plafond*", "MeshInstance3D", true, false):
+		var m3: MeshInstance3D = mi
+		for si in m3.mesh.get_surface_count():
+			var mat: Material = m3.get_active_material(si)
+			if mat is BaseMaterial3D:
+				var off: BaseMaterial3D = (mat as BaseMaterial3D).duplicate()
+				off.emission_enabled = false
+				off.albedo_color = off.albedo_color.darkened(0.25)
+				m3.set_surface_override_material(si, off)
 	_place_bus(0.0)
 	for pair in [["driver", "anchor_driver"], ["grandma_scarf", "seat_13_w_r"], ["man_newspaper", "seat_11_a"],
 			["mother_baby", "seat_19_s"]]:

@@ -11,6 +11,7 @@ const Sets = preload("res://story/floor_sets.gd")
 const Scares = preload("res://story/scares.gd")
 const Props = preload("res://story/props.gd")
 const Interactable = preload("res://story/interactable.gd")
+const Minigame = preload("res://story/minigame.gd")
 
 # --- точки здания (метры, координаты Godot) ---
 const SPAWN := Vector3(28.75, 1.2, 4.27)        # тамбур: сюда заезжаем с улицы (пролог кончается здесь же)
@@ -28,6 +29,8 @@ const HALL_TO_STAIRS := [Vector3(33.4, 1.2, 4.0), Vector3(33.0, 1.2, 0.7), Vecto
 	Vector3(31.0, 1.2, -2.4), Vector3(30.85, 1.2, -4.6), Vector3(30.9, 1.2, -5.8)]
 const SCREAM_ROOM := Vector3(52.5, 1.6, -13.0)
 const CRASH_POS := Vector3(52.8, 1.6, -13.8)
+const TRAP_SPOT := Vector3(52.5, 1.2, -10.75)      # запертый в кабинете 139: коляска лицом к двери
+const SCALPEL_POS := Vector3(51.3, 2.14, -14.65)   # скальпель на инструментальном столике
 const DOOR_SCREAM := 74          # процедурный кабинет 139 (L0.R17) — «моя комната» психа
 const DOOR_ADMIN := 56           # администрация 134 (L0.F14), дверь с матовым стеклом
 const DOOR_GURNEY := 72          # кабинет 136 (L0.R15): оттуда выкатывается каталка
@@ -43,7 +46,7 @@ const PSYCHO_SPAWN := Vector3(72.0, 1.2, -8.1)
 const PSYCHO_FAR := Vector3(52.0, 1.2, -8.1)       # погоня: стоит в коридоре (~14 м), когда загорается свет
 const PSYCHO_NEAR := Vector3(45.5, 1.2, -8.1)      # …свет гаснет на миг — он уже в 8 м
 const CHASE_RESTART := Vector3(43.5, 1.2, -7.7)
-const PSYCHO_SPEED := 4.0         # м/с; после каждой поимки чуть медленнее
+const PSYCHO_SPEED := 3.3         # м/с; после каждой поимки чуть медленнее
 const MAN_POS := Vector3(37.0, 7.8, -8.5)          # человек в коляске у лифта на 3-м этаже
 const KEY204_POS := Vector3(30.3, 5.43, -14.65)    # ключ от палаты — на инструментальном столике в 213
 const ROOM204_DOOR := Vector3(8.83, 4.5, -6.5)
@@ -83,6 +86,8 @@ var _rumble: AudioStreamPlayer
 var _drone: AudioStreamPlayer
 var _moan_t := 0.0
 var _scream_door_open := false
+var minigame                     # story/minigame.gd
+var has_scalpel := false
 var _flick_t := 1.0
 var _psycho_speed := PSYCHO_SPEED
 
@@ -95,6 +100,9 @@ func begin(g) -> void:
 	ui = StoryUI.new()
 	add_child(ui)
 	ui.line_skipped.connect(_on_skip)
+	minigame = Minigame.new()
+	minigame.process_mode = Node.PROCESS_MODE_PAUSABLE
+	ui.add_child(minigame)
 	sets = Sets.new()
 	game.add_child(sets)
 	sets.setup(game)
@@ -243,7 +251,15 @@ func say(who: String, text: String, sec := 0.0) -> void:
 
 
 ## Задание наверху слева; target — куда показывает маркер (точка или персонаж), null — без маркера.
+var _objective_text := ""
+
+
+func objective_text() -> String:
+	return _objective_text
+
+
 func objective(text: String, target: Variant = null, offset := Vector3(0, 1.0, 0)) -> void:
+	_objective_text = text
 	ui.set_objective(text, target, offset)
 	if text != "":
 		snd("monitor_beep", null, -16.0, 0.6)
@@ -482,20 +498,135 @@ func _act2_scream() -> void:
 	# пока не откроет дверь — изредка из комнаты слышен стон
 	await until(func(): return (d != null and d.angle > 18.0) or room_id() == "L0.R17")
 	_scream_door_open = true
+	game.lights.set_room("L0.R17", true)
 	await wait(0.6)
 	await say("hero", "Дедушка?.. Здесь есть кто-нибудь?")
-	await wait(5.0)
-	snd("crash_heavy", CRASH_POS, 8.0, 1.0, 40.0)
-	shake(1.0, 0.7)
-	game.critters.scare(CRASH_POS, 10.0)
-	objective("Вернись к лестнице", STAIR_FOOT + Vector3(0, 0, 2.0))
-	await wait(5.0)
-	snd("psycho_shout", SCREAM_ROOM, 6.0, 1.0, 50.0)
-	await say("psycho", "Кто заходил в мою комнату?! Я тебя найду, слышишь?! Найду!")
+	objective("Осмотри кабинет 139", SCREAM_ROOM + Vector3(0, -0.4, 0))
+	# заехал вглубь (за створку двери) — дверь за спиной захлопывается
+	await until(func(): return room_id() == "L0.R17" and ppos().z < -11.6)
+	await _locked_in_room()
 	await until(func(): return ppos().x < 40.5 and ppos().z < -0.5 and ppos().z > -10.0)
-	await say("thought", "Лифт… Надо уехать отсюда наверх, к маме.")
+	await say("thought", "Лифт… Надо уехать отсюда наверх, к маме. Пока он не вернулся.")
 	objective("Поднимись на лифте на 2-й этаж — лифт рядом с лестницей, вызови его кнопкой (E)", LIFT_CALL)
 	act = "need_key"
+
+
+## Псих запирает Самана в своём кабинете и говорит через дверь; дверь не выбить — мини-игра «толкай»;
+## другой способ — скальпель со столика: поддеть язычок замка (вторая мини-игра). Потом — к лифту.
+func _locked_in_room() -> void:
+	act = "locked"
+	objective("")
+	game.lights.set_room("L0.R17", true)
+	snd("instruments_fall", CRASH_POS, 2.0, 1.0, 25.0)
+	await wait(0.9)
+	var d = door(DOOR_SCREAM)
+	if d:
+		await until(func(): return not d._blocked(0.0), 4.0)
+		await d.slam()
+		d.locked = true
+		d.locked_text = "Заперто снаружи"
+	shake(0.8, 0.4)
+	snd("stinger", null, -2.0, 0.9)
+	freeze(true)
+	await look_at_point(SCREAM_DOOR + Vector3(0, 1.2, 0), 0.5)
+	await wait(0.5)
+	game.play_at("door_locked", SCREAM_DOOR + Vector3(0, 1.1, 0), 4.0, 0.75, 15.0)    # ключ в замке
+	await wait(0.9)
+	snd("breathing", SCREAM_DOOR + Vector3(0, 1.6, 0.3), 2.0, 0.8, 12.0)
+	await say("psycho", "Тш-ш-ш… Не шуми. Здесь все сначала шумят.", 3.2)
+	await say("hero", "Откройте!! Выпустите меня!", 2.2)
+	await wait(0.8)
+	await say("psycho", "Я тебя знаю. Ты — тот, кого нет. Тебя придумали, мальчик.", 4.0)
+	await say("psycho", "Посиди. Подумай. А я схожу… за твоей мамой.", 3.6)
+	snd("laughter", SCREAM_DOOR + Vector3(2.0, 1.6, 0.6), 0.0, 0.9, 30.0)
+	snd("barefoot_steps", SCREAM_DOOR + Vector3(5.0, 1.0, 1.5), 0.0, 1.0, 30.0)
+	await wait(1.6)
+	await say("hero", "Мама?.. Нет… НЕТ! Откройте!!", 2.2)
+	# 1) выбить дверь: не выходит
+	place_player(TRAP_SPOT, PI)
+	player.look_pitch = -0.05
+	objective("Выбей дверь!")
+	minigame.hit.connect(_on_push_hit)
+	await minigame.run("Толкни дверь", 4, 190.0, 54.0, {"shrink": true})
+	minigame.hit.disconnect(_on_push_hit)
+	await wait(0.3)
+	game.play_at("door_locked", SCREAM_DOOR + Vector3(0, 1.1, 0), 2.0, 0.7, 15.0)
+	await say("thought", "Не поддаётся… Замок. Нужно чем-то поддеть язычок.")
+	freeze(false)
+	# 2) другой способ: скальпель на столике
+	var holder := _place_scalpel()
+	objective("Найди, чем поддеть замок — инструментальный столик", SCALPEL_POS + Vector3(0, -0.3, 0), Vector3(0, 0.5, 0))
+	await until(func(): return has_scalpel)
+	holder.queue_free()
+	objective("Вернись к двери и поддень язычок замка", SCREAM_DOOR + Vector3(0, 0, -0.9), Vector3(0, 1.0, 0))
+	await until(func(): return room_id() == "L0.R17" and ppos().distance_to(TRAP_SPOT) < 1.0)
+	freeze(true)
+	place_player(TRAP_SPOT, PI)
+	objective("Поддень язычок замка скальпелем")
+	minigame.hit.connect(_on_pick_hit)
+	await minigame.run("Поддень язычок", 3, 230.0, 34.0, {"lose_on_miss": true, "reverse": true})
+	minigame.hit.disconnect(_on_pick_hit)
+	game.play_at("button", SCREAM_DOOR + Vector3(0, 1.1, 0), 2.0, 0.6, 10.0)
+	await wait(0.4)
+	if d:
+		d.locked = false
+		d.locked_text = ""
+		d.swing_to(35.0, 0.9)
+		game.play_at("door_open_wood2", d.center, -2.0, 0.85, 20.0)
+	freeze(false)
+	await say("thought", "Открыл… Надо выбираться. Быстро.")
+	act = "scream"
+	objective("Выбирайся к лестнице", STAIR_FOOT + Vector3(0, 0, 2.0))
+
+
+func _on_push_hit(ok: bool) -> void:
+	var d = door(DOOR_SCREAM)
+	if ok:
+		snd("knock", SCREAM_DOOR + Vector3(0, 1.0, 0), 8.0, 0.55, 20.0)
+		if d:
+			d.rattle(3.5)
+		shake(0.6, 0.25)
+		player.input_override = Vector2(0.9, 0.0)        # коляска рывком в дверь
+		await wait(0.18)
+		player.input_override = Vector2.ZERO
+		await wait(0.2)
+		place_player(TRAP_SPOT, PI)
+	else:
+		game.play_at("bump", SCREAM_DOOR + Vector3(0, 0.8, 0), -6.0, 1.2, 10.0)
+
+
+func _on_pick_hit(ok: bool) -> void:
+	if ok:
+		game.play_at("button", SCREAM_DOOR + Vector3(0, 1.1, 0), -4.0, 1.4, 8.0)
+	else:
+		snd("knock", SCREAM_DOOR + Vector3(0, 1.1, 0), -10.0, 1.8, 8.0)
+		ui.hint("Соскользнул…", 1.2)
+
+
+func _place_scalpel() -> Node3D:
+	var holder := Node3D.new()
+	game.add_child(holder)
+	holder.global_position = SCALPEL_POS
+	var blade := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.16, 0.006, 0.018)
+	blade.mesh = bm
+	blade.material_override = Props.mat(Color(0.75, 0.77, 0.8), 0.25, 0.9)
+	holder.add_child(blade)
+	blade.rotation.y = 0.5
+	var shine := OmniLight3D.new()
+	shine.light_color = Color(0.9, 0.95, 1.0)
+	shine.light_energy = 0.2
+	shine.omni_range = 0.9
+	holder.add_child(shine)
+	shine.position.y = 0.25
+	var it: Area3D = Interactable.new()
+	holder.add_child(it)
+	it.setup(Vector3(0.5, 0.35, 0.5), "[E] Взять скальпель", func():
+		has_scalpel = true
+		game.play_at("button", SCALPEL_POS, -6.0, 1.6, 6.0)
+		ui.hint("Скальпель — у тебя", 2.5))
+	return holder
 
 
 func _on_lift_locked() -> void:
@@ -624,9 +755,9 @@ func _act2_return() -> void:
 	GameState.checkpoint = "chase"
 	objective("Вернись к лифту и поднимись на 2-й этаж", LIFT_CALL)
 	chase = "off"
-	# подъехал к лифту по коридору (из кабинета администратора и с места, где очнулся, — ещё нет)
-	await until(func(): return ppos().y < 2.5 and ((ppos().x < 41.0 and near(LIFT_CALL, 5.0)) or
-		(lift.state in ["opening", "open"] and lift.floor_idx == 0 and near(Vector3(37.5, 1.2, -7.0), 7.0))))
+	# вызвал лифт (двери уже открываются) — тогда и появляется он: время доехать до кабины есть
+	await until(func(): return ppos().y < 2.5 and lift.state in ["opening", "open"] and lift.floor_idx == 0 \
+		and near(Vector3(37.5, 1.2, -7.0), 7.0))
 	_start_chase()
 
 
@@ -636,9 +767,10 @@ func _act2_return() -> void:
 func _start_chase() -> void:
 	act = "chase"
 	var retry: bool = GameState.deaths > 0
-	_psycho_speed = PSYCHO_SPEED - 0.3 * mini(GameState.deaths, 3)
+	_psycho_speed = PSYCHO_SPEED - 0.25 * mini(GameState.deaths, 3)
 	_drone.volume_db = -14.0
-	objective("Вызови лифт (E), заезжай и нажми «2»!", LIFT_CALL, Vector3(0, 1.3, 0))
+	objective("Быстрее в лифт!", Vector3(37.5, 1.2, -5.2), Vector3(0, 1.3, 0))
+	_auto_lift()
 	await _corridor_flicker(3 if not retry else 1)
 	game.lights.set_room("L0.C", false)
 	game.play_at("flicker", Vector3(50.0, 3.6, -8.1), 0.0, 0.7, 60.0)
@@ -676,6 +808,28 @@ func _start_chase() -> void:
 	chase = "run"
 
 
+## В погоне: заехал в кабину — Саман сам доезжает до середины (иначе двери упираются в коляску)
+## и жмёт «2»; если двери почему-то снова открылись — жмёт ещё раз.
+func _auto_lift() -> void:
+	var pressed := false
+	while act == "chase" and not (lift.state == "moving" and lift.player_in_cabin()):
+		await get_tree().physics_frame
+		if chase == "caught" or not lift.player_in_cabin() or lift.floor_idx != 0:
+			continue
+		if ppos().z < -5.35:
+			var goal := Vector3(37.5, ppos().y, -5.15)
+			var tw := create_tween()
+			tw.tween_property(player, "global_position", goal, 0.45).set_ease(Tween.EASE_OUT)
+			await tw.finished
+		if lift.state in ["open", "opening"] and not (1 in lift.queue):
+			if not pressed:
+				await wait(0.15)
+			lift.request(1)
+			if not pressed:
+				game.play_at("button", Vector3(38.3, 2.2, -5.2), -4.0, 1.0, 8.0)
+			pressed = true
+
+
 ## Уже уехал на лифте, пока он показывался, — дальше не бежит (на 2-м этаже его нет).
 func _chase_over() -> bool:
 	if act == "chase" and not (lift.player_in_cabin() and lift.state == "moving"):
@@ -701,7 +855,7 @@ func _chase_target() -> Vector3:
 
 
 func _update_chase(dt: float) -> void:
-	var safe: bool = lift.player_in_cabin() and (lift.state == "moving" or (lift.state in ["closing", "closed"] and lift.open_f < 0.45))
+	var safe: bool = lift.player_in_cabin() and (lift.state == "moving" or (lift.state in ["closing", "closed"] and lift.open_f < 0.8))
 	var target: Vector3 = Vector3(37.5, 1.2, -7.15) if safe else _chase_target()
 	var to: Vector3 = target - psycho.global_position
 	to.y = 0.0

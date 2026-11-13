@@ -53,7 +53,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2":
+		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -69,6 +69,8 @@ func _run() -> void:
 			await _prologue_play()
 		"caught":
 			await _caught_test()
+		"fair":
+			await _fair_test()
 		"menu":
 			get_tree().change_scene_to_file("res://story/menu.tscn")
 			await secs(2.0)
@@ -301,7 +303,7 @@ func GameStateRef() -> Node:
 
 func _sanatorium() -> void:
 	var cp: String = case_name
-	if case_name == "sanatorium" or case_name == "chair":
+	if case_name == "sanatorium" or case_name == "chair" or case_name == "trap":
 		cp = "start"
 	elif case_name == "chase2":
 		cp = "chase"
@@ -350,6 +352,26 @@ func _sanatorium() -> void:
 			await get_tree().process_frame
 		await secs(3.0)
 		await shot("quake")
+	elif case_name == "trap":
+		var dr = d.door(74)
+		dr.set_angle(90.0)
+		d.player.global_position = Vector3(52.5, 1.25, -12.6)
+		d.player.rotation.y = PI
+		d._locked_in_room()
+		while not d.minigame.running:
+			await get_tree().process_frame
+		await secs(1.0)
+		await shot("trap_push")
+		d.minigame.cheat = true
+		while d.minigame.running:
+			d.minigame.press()
+			await secs(0.3)
+		while not d.objective_text().contains("столик"):
+			await get_tree().process_frame
+		d.player.look_yaw = 0.6
+		d.player.look_pitch = -0.35
+		await secs(1.5)
+		await shot("trap_scalpel")
 	elif case_name == "chase2":
 		# погоня по этапам: стоит в конце коридора → ближе → бежит
 		d.player.global_position = Vector3(38.2, 1.25, -7.5)
@@ -448,7 +470,31 @@ func _playthrough() -> void:
 	await tp(Vector3(52.5, 1.2, -8.4), 0.0)
 	door.interact(pl)
 	await wait_for(func(): return door.angle > 18.0, 20, "scream door opens")
-	await secs(5.0)
+	await secs(1.0)
+	await tp(Vector3(52.5, 1.2, -12.6), PI)
+	await wait_for(func(): return d.act == "locked", 30, "locked in")
+	step("locked in the room")
+	d.minigame.cheat = true
+	await wait_for(func(): return d.minigame.running, 60, "push minigame")
+	step("push minigame")
+	while d.minigame.running:
+		d.minigame.press()
+		await secs(0.2)
+	await wait_for(func(): return d.objective_text().contains("столик"), 30, "scalpel objective")
+	step("door holds, look for scalpel")
+	for c in d.game.get_children():
+		for it in c.get_children():
+			if it is Area3D and it.has_meta("interact") and str(it.get_meta("interact").get("text")).contains("скальпель"):
+				it.get_meta("interact").action.call()
+	await wait_for(func(): return d.has_scalpel, 10, "scalpel")
+	await tp(d.TRAP_SPOT, PI)
+	await wait_for(func(): return d.minigame.running, 30, "pick minigame")
+	step("pick minigame")
+	while d.minigame.running:
+		d.minigame.press()
+		await secs(0.2)
+	await wait_for(func(): return d.act == "scream" and not door.locked, 30, "door unlocked")
+	step("escaped the room")
 	await tp(Vector3(37.5, 1.2, -7.3), 0.0)
 	await wait_for(func(): return d.act == "need_key", 120, "need_key")
 	step("need_key")
@@ -467,9 +513,7 @@ func _playthrough() -> void:
 	await wait_for(func(): return d.act == "chase", 30, "chase")
 	step("chase")
 	await tp(Vector3(37.5, 1.2, -5.0), PI)
-	await wait_for(func(): return d.lift.state == "open", 20, "cab open")
-	press_cab("2")
-	await wait_for(func(): return d.act == "void", 90, "void")
+	await wait_for(func(): return d.act == "void", 90, "void (lift goes up by itself in the chase)")
 	step("void")
 	await wait_for(func(): return d.lift.state == "open", 30, "doors open at 2")
 	await tp(Vector3(9.0, 4.5, -3.5), 0.0)
@@ -585,6 +629,28 @@ func wait_for_p(cond: Callable, limit: float, what: String, p: Node) -> bool:
 			print("TIMEOUT waiting for ", what, " phase=", p.phase)
 			return false
 	return true
+
+
+## Честность погони: медленный игрок (после открытия дверей ещё 1,5 с стоит) сам заезжает в лифт.
+func _fair_test() -> void:
+	GameStateRef().checkpoint = "chase"
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(2.0)
+	d = get_tree().current_scene.get_node("Director")
+	await wait_for(func(): return d.act == "lift_key", 60, "lift_key")
+	pl = d.player
+	await tp(Vector3(37.5, 1.2, -7.4), PI)                # лицом к лифту (+Z)
+	var t0 := Time.get_ticks_msec()
+	press_call(0)
+	await wait_for(func(): return d.lift.state == "open", 20, "open")
+	await secs(1.5)
+	step("driving in after %.1f s" % ((Time.get_ticks_msec() - t0) / 1000.0))
+	pl.input_override = Vector2(1.0, 0.0)
+	await wait_for(func(): return d.lift.player_in_cabin() or d.chase == "caught", 20, "in cabin")
+	pl.input_override = Vector2.ZERO
+	step("in cabin=%s after %.1f s, psycho %.1f m away" % [str(d.lift.player_in_cabin()), (Time.get_ticks_msec() - t0) / 1000.0, d.psycho.global_position.distance_to(pl.global_position)])
+	await wait_for(func(): return d.act == "void" or d.chase == "caught", 30, "result")
+	step("RESULT " + ("escaped" if d.act == "void" else "caught") + " after %.1f s" % ((Time.get_ticks_msec() - t0) / 1000.0))
 
 
 func _caught_test() -> void:
