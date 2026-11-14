@@ -48,6 +48,20 @@ const PSYCHO_NEAR := Vector3(45.5, 1.2, -8.1)      # …свет гаснет н
 const CHASE_RESTART := Vector3(43.5, 1.2, -7.7)
 const PSYCHO_SPEED := 3.3         # м/с; после каждой поимки чуть медленнее
 const MAN_POS := Vector3(37.0, 7.8, -8.5)          # человек в коляске у лифта на 3-м этаже
+# братья: холл отдыха 309 (L2.R7) — сюда притаскивают Самана; старший брат — тот самый мужчина в белом
+const LOUNGE := "L2.R7"
+const DOOR_LOUNGE := 165
+const TIED_POS := Vector3(25.9, 7.8, -11.3)        # коляска с привязанными руками, лицом к двери (−X)
+const TIED_YAW := PI * 0.5
+const WASHERS := [Vector3(24.35, 7.8, -10.02), Vector3(25.05, 7.8, -10.02)]
+const YOUNGER_ROOM := [Vector3(22.95, 7.8, -11.05), Vector3(23.65, 7.8, -11.2), Vector3(24.3, 7.8, -11.35)]
+const ELDER_ROOM := Vector3(23.25, 7.8, -10.4)     # старший стоит у двери — сторожит выход
+const ELDER_STARE := Vector3(24.65, 7.8, -10.75)
+const ELDER_EXIT := [Vector3(23.3, 7.8, -10.45), Vector3(22.88, 7.8, -9.8), Vector3(22.88, 7.8, -8.1), Vector3(6.0, 7.8, -8.1)]
+const WRISTS := [Vector3(0.307, 0.8, 0.02), Vector3(-0.307, 0.8, 0.02)]   # кисти Самана (координаты коляски)
+# поза лежащего младшего (модель, после падения): живот, ось тела к голове
+const LIE_BELLY := Vector3(-0.097, 0.0, 1.044)
+const LIE_AXIS := Vector3(-0.391, 0.0, 0.92)
 const KEY204_POS := Vector3(30.3, 5.43, -14.65)    # ключ от палаты — на инструментальном столике в 213
 const ROOM204_DOOR := Vector3(8.83, 4.5, -6.5)
 const GRANDPA_RUN := [Vector3(8.83, 4.5, -5.6), Vector3(8.83, 4.5, -8.1), Vector3(12.0, 4.5, -8.1),
@@ -92,6 +106,12 @@ var minigame                     # story/minigame.gd
 var has_scalpel := false
 var _flick_t := 1.0
 var _psycho_speed := PSYCHO_SPEED
+var younger                      # младший брат (characters/younger.glb)
+var _tied := false               # руки привязаны к коляске: ехать нельзя, вверху надпись
+var _tied_msg_t := 0.0
+var _bandages: Array = []
+var _track: Variant = null       # Callable → Vector3: куда сюжет держит взгляд Самана (сцена в холле)
+var _lounge_props: Array = []
 
 
 # ================================================================================ запуск
@@ -116,7 +136,10 @@ func begin(g) -> void:
 	psycho = _actor("res://characters/psycho.glb", "Псих")
 	psycho.natural = {"walk_loop": 1.3, "run_loop": 3.6, "sprint_loop": 2.13}
 	psycho.step_volume = 2.0
-	for a in [grandpa, psycho]:
+	younger = _actor("res://characters/younger.glb", "Младший")
+	younger.natural = {"walk_loop": 1.3, "run_loop": 3.6}
+	younger.step_volume = 0.0
+	for a in [grandpa, psycho, younger]:
 		a.visible = false
 	lift.locked = true
 	lift.lock_text = "Лифт заперт на ключ"
@@ -155,10 +178,10 @@ func begin(g) -> void:
 		"void":
 			_jump_to_lift(1)
 			_act3()
-		"floor3":
+		"floor3", "floor3b":
 			sets.build_void()
 			_jump_to_lift(2)
-			_act4()
+			_act4(cp == "floor3b")
 		"maze":
 			_jump_to_lift(1, false)
 			sets.build_real2()
@@ -1096,9 +1119,9 @@ func _read_note(key: String) -> void:
 
 
 # ================================================================================ АКТ 4: третий этаж, звуки, человек в коляске
-func _act4() -> void:
+func _act4(after_brothers := false) -> void:
 	act = "floor3_search"
-	GameState.checkpoint = "floor3"
+	GameState.checkpoint = "floor3b" if after_brothers else "floor3"
 	if GameState.fade_target() > 0.5:
 		await GameState.fade_to(0.0, 1.5)
 	if game.critters:
@@ -1108,8 +1131,14 @@ func _act4() -> void:
 	lift.lock_text = "Сначала найди маму"
 	objective("Найди маму на 3-м этаже")
 	_drone.volume_db = -16.0
+	if not after_brothers:
+		scares.start(self)
+		await until(func(): return scares.elapsed > 70.0 and scares.count >= 3, 110.0)   # минута-полторы
+		scares.stop()
+		await _brothers()
+		act = "floor3_search"
 	scares.start(self)
-	await until(func(): return scares.elapsed > 200.0 and scares.count >= 8, 260.0)   # 3–4 минуты
+	await until(func(): return scares.elapsed > 55.0 and scares.count >= 2, 80.0)     # ещё около минуты
 	scares.stop()
 	# лёгкий скрип металла в коридоре — человек в обычной коляске у лифта
 	var man := Props.glb("res://characters/wheelchair_man_static.glb", 1.4, 0.476)
@@ -1176,12 +1205,468 @@ func _act4() -> void:
 	man.queue_free()
 
 
+# ------------------------------------------------------------------------------- братья
+## Два брата-психа: появляются в конце коридора, догоняют, оглушают и притаскивают Самана в холл отдыха;
+## руки привязаны к коляске. Младший хочет засунуть его в стиральную машину, старший не даёт — и убивает
+## младшего: удар, падение, бьёт сидя на нём; потом встаёт, долго смотрит на Самана и убегает. Саман
+## перегрызает бинты (мини-игра: держать E).
+func _brothers() -> void:
+	act = "brothers"
+	await until(func(): return room_id() == "L2.C", 30.0)
+	await wait(1.5)
+	# в ~20 м по коридору, с той стороны, где коридор длиннее
+	var dir_x: float = 1.0 if ppos().x < 37.5 else -1.0
+	var base := Vector3(clampf(ppos().x + dir_x * 20.0, 3.0, 72.0), 7.8, -8.1)
+	game.lights.set_room("L2.C", false)
+	game.play_at("flicker", ppos() + Vector3(0, 2.8, 0), -4.0, 0.8, 20.0)
+	await wait(0.5)
+	younger.global_position = base + Vector3(0, 0, 0.45)
+	psycho.global_position = base + Vector3(0, 0, -0.45)
+	for b in [younger, psycho]:
+		b.visible = true
+		b.face(ppos(), true)
+		b.play("idle_loop", 0.0)
+		b.set_look(player.head.global_position)
+	game.lights.set_room("L2.C", true)
+	_heartbeat_burst(3)
+	snd("laugh_evil", younger.head_pos(), 4.0, 1.0, 60.0)
+	ui.say("younger", "Братик, смотри… Новенький.", 2.6)
+	await wait(2.4)
+	ui.say("elder", "Взять его.", 1.6)
+	snd("psycho_roar", psycho.head_pos(), 6.0, 0.9, 60.0)
+	await wait(0.6)
+	objective("Беги!")
+	for b in [younger, psycho]:
+		b.set_look(null)
+	var run: Node3D = snd("run_steps", younger.global_position, 2.0, 1.15, 50.0) as Node3D
+	var t := 0.0
+	var jumped := false
+	var caught := false
+	while not caught:
+		await get_tree().process_frame
+		if get_tree().paused:
+			continue
+		var dt: float = get_process_delta_time()
+		t += dt
+		for b in [younger, psycho]:
+			var tgt: Vector3 = _hunt_target(b, 0.4 if b == younger else -0.4)
+			var to: Vector3 = tgt - b.global_position
+			to.y = 0.0
+			var spd: float = 4.6 if b == younger else 4.3
+			var step: float = minf(spd * dt, to.length())
+			if to.length() > 0.05:
+				b.global_position += to.normalized() * step
+				b.step_moved(step)
+				b.face(b.global_position + to)
+			b.play("run_loop", 0.2, spd / 3.6)
+			var d: float = Vector2(b.global_position.x - ppos().x, b.global_position.z - ppos().z).length()
+			var in_corridor: bool = ppos().z > -9.5 and ppos().z < -6.7
+			if d < 1.35 or (not in_corridor and d < 2.4):
+				caught = true
+		if run and is_instance_valid(run):
+			run.global_position = younger.global_position
+		# далеко убежал — свет гаснет на миг, и они уже за спиной
+		if t > 14.0 and not jumped and younger.global_position.distance_to(ppos()) > 8.0:
+			jumped = true
+			game.lights.set_room("L2.C", false)
+			await wait(0.35)
+			var back: float = signf(younger.global_position.x - ppos().x)
+			younger.global_position = Vector3(ppos().x + back * 4.5, 7.8, -7.7)
+			psycho.global_position = Vector3(ppos().x + back * 5.3, 7.8, -8.5)
+			game.lights.set_room("L2.C", true)
+			snd("laugh_evil", younger.head_pos(), 6.0, 1.1, 40.0)
+		if t > 40.0:
+			caught = true
+	await _brothers_catch()
+	await _lounge_scene()
+
+
+## Куда бежит брат: по коридору прямо к Саману; если Саман заехал в комнату — к её двери по коридору.
+func _hunt_target(b, side: float) -> Vector3:
+	var p: Vector3 = ppos()
+	if p.z > -9.5 and p.z < -6.7:
+		return Vector3(p.x, 7.8, clampf(p.z + side, -9.2, -7.0))
+	var c := Vector3(p.x, 7.8, -8.1 + side * 0.5)
+	if absf(b.global_position.x - p.x) > 0.8 or absf(b.global_position.z + 8.1) > 0.6:
+		return c
+	return Vector3(p.x, 7.8, p.z)
+
+
+## Поймали: старший бьёт, Саман падает, темнота.
+func _brothers_catch() -> void:
+	freeze(true)
+	objective("")
+	younger.face(ppos(), true)
+	younger.play("idle_loop", 0.2)
+	psycho.face(ppos(), true)
+	psycho.play_once("hit", 0.05)
+	look_at_point(psycho.head_pos(), 0.3)
+	snd("laugh_evil", younger.head_pos(), 3.0, 1.15)
+	await wait(0.62)
+	snd("punch", null, 4.0, 0.8)
+	ui.flash(Color(0.8, 0.0, 0.0, 0.85), 0.6)
+	var fall := create_tween()
+	fall.tween_property(player, "view_offset", Transform3D(Basis.from_euler(Vector3(0.5, 0.3, 0.6)), Vector3(0.1, -0.3, 0.2)), 0.35)
+	fall.tween_property(player, "view_offset", Transform3D(Basis.from_euler(Vector3(0.35, 0.2, 1.35)), Vector3(0.25, -0.95, 0.3)), 0.45).set_ease(Tween.EASE_IN)
+	await fall.finished
+	snd("body_fall", null, 2.0, 0.7)
+	shake(0.5, 0.3)
+	ui.set_damage(0.6)
+	await GameState.fade_to(1.0, 1.4)
+	ui.set_damage(0.0)
+	player.view_offset = Transform3D.IDENTITY
+	# в темноте: тащат коляску по коридору, младший хихикает
+	snd("gurney_roll", null, -4.0, 0.55)
+	await wait(1.2)
+	await say("younger", "Хи-хи… Тяжёлый. Он живой, братик?")
+	snd("gurney_roll", null, -6.0, 0.5)
+	await say("elder", "Живой. Пока.")
+	await wait(1.0)
+
+
+## Холл отдыха: стиральные машины, Саман привязан, братья.
+func _setup_lounge() -> void:
+	for wp in WASHERS:
+		var w: Node3D = Props.washer()
+		game.add_child(w)
+		w.global_position = wp
+		_lounge_props.append(w)
+	var dg = door(DOOR_LOUNGE)
+	if dg:
+		dg.set_angle(90.0)
+	game.lights.set_room(LOUNGE, true)
+	game.lights.set_room("L2.C", true)
+
+
+func _tie(on: bool) -> void:
+	_tied = on
+	for b in _bandages:
+		if is_instance_valid(b):
+			b.queue_free()
+	_bandages.clear()
+	if on:
+		var cloth := Props.mat(Color(0.8, 0.78, 0.7), 0.95)
+		var stain := Props.mat(Color(0.35, 0.05, 0.03), 0.6)
+		for w in WRISTS:
+			var b := Node3D.new()
+			player.add_child(b)
+			b.position = w
+			for i in 3:                                                  # витки бинта вокруг запястья и подлокотника
+				Props.cyl(b, Vector3(0, -0.012 * i, -0.04 + 0.045 * i), 0.047 - 0.004 * i, 0.04, cloth, Vector3(PI * 0.5, 0, 0.15 * (i - 1)))
+			Props.box(b, Vector3(0.0, 0.044, 0.0), Vector3(0.035, 0.006, 0.03), stain)
+			Props.box(b, Vector3(0.0, -0.06, 0.02), Vector3(0.07, 0.04, 0.12), cloth)    # узел под подлокотником
+			for gi in b.find_children("*", "GeometryInstance3D", true, false):
+				(gi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			_bandages.append(b)
+		player.input_override = Vector2.ZERO
+	else:
+		player.input_override = null
+
+
+func _wrist_world() -> Vector3:
+	return player.global_transform * WRISTS[0]
+
+
+func _lounge_scene() -> void:
+	act = "lounge"
+	scares.stop()
+	_setup_lounge()
+	place_player(TIED_POS, TIED_YAW)
+	younger.stop()
+	psycho.stop()
+	younger.global_position = YOUNGER_ROOM[0]
+	younger.face(ppos(), true)
+	younger.set_look(null)
+	psycho.global_position = ELDER_ROOM
+	psycho.face(ppos(), true)
+	psycho.set_look(player.head.global_position)
+	_tie(true)
+	await wait(0.8)
+	player.story_lock = false
+	await GameState.fade_to(0.0, 3.0)
+	await say("thought", "Голова… Где я?")
+	ui.alert("Руки привязаны к коляске — не пошевелиться", 3.0)
+	await look_at_point(_wrist_world(), 0.9)
+	await wait(0.8)
+	await say("thought", "Бинты… Они привязали мне руки.")
+	# младший: стиральная машина
+	younger.set_look(player.head.global_position)
+	await look_at_point(younger.head_pos(), 0.8)
+	snd("laugh_evil", younger.head_pos(), 2.0, 1.0)
+	await wait(0.6)
+	var hatch: Node3D = (_lounge_props[0] as Node3D).get_node_or_null("Hatch")
+	if hatch:
+		snd("door_creak_slow", WASHERS[0] + Vector3(0, 0.5, -0.3), -2.0, 1.4, 20.0)
+		create_tween().tween_property(hatch, "rotation:y", deg_to_rad(105.0), 1.6).set_trans(Tween.TRANS_SINE)
+	younger.set_arm(WASHERS[0] + Vector3(0, 0.5, -0.4))           # показывает рукой на люк
+	await say("younger", "Нужно убить его внутри стиральной машины. Будет красиво.")
+	younger.set_arm(null)
+	snd("laugh_evil", younger.head_pos(), 3.0, 0.92)
+	await wait(1.2)
+	await say("elder", "Нет. Не сразу.")
+	# младший медленно идёт к коляске, останавливается, снова идёт
+	await younger.go_and_wait([YOUNGER_ROOM[1]], 0.75)
+	younger.face(ppos())
+	snd("laugh_evil", younger.head_pos(), 0.0, 1.2)
+	await say("elder", "Нет, не убьём сразу — даже не представляй!")
+	await younger.go_and_wait([YOUNGER_ROOM[2]], 0.75)
+	younger.face(ppos())
+	younger.set_arm(player.head.global_position + Vector3(0, -0.1, 0))   # тянется к лицу
+	await say("younger", "Тш-ш-ш… Он поместится. Я его сложу. Аккуратно.")
+	# старший — «Я сказал — НЕТ!!» и бросается
+	player.story_lock = true
+	_track = func() -> Vector3: return younger.head_pos() + Vector3(0, -0.6, 0)
+	snd("psycho_roar", psycho.head_pos(), 8.0, 0.85, 40.0)
+	psycho.set_look(null)
+	ui.say("elder", "Я сказал — НЕТ!!", 2.4)
+	younger.set_arm(null)
+	younger.set_look(null)
+	younger.face(psycho.global_position)                          # оборачивается на крик
+	younger.play("idle_loop", 0.15)
+	await wait(0.35)
+	# старший подлетает со стороны стиральных машин; удар разворачивает младшего, и тот падает от него
+	var strike: Vector3 = younger.global_position + Vector3(0, 0, 0.7)
+	await psycho.go_and_wait([strike], 3.6, "run_loop")
+	younger.face(strike, true)
+	psycho.face(younger.global_position, true)
+	psycho.play_once("hit", 0.05)
+	await wait(0.6)
+	snd("punch_flesh", younger.head_pos(), 6.0, 0.8)
+	snd("scream_pain", younger.head_pos(), -2.0, 1.25)
+	shake(0.2, 0.25)
+	younger.play_once("fall", 0.05)
+	var y0: float = younger.rotation.y
+	var spin := create_tween()
+	spin.tween_method(younger.set_yaw, y0, y0 + PI, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await wait(3.0)
+	snd("body_fall", younger.global_position + Vector3(0, 0, -0.9), 4.0, 0.8)
+	shake(0.15, 0.2)
+	younger.play("lie_loop", 0.15)
+	await wait(0.6)
+	await _beat_down()
+	await _elder_stare_and_run()
+	await _bite_free()
+
+
+## Старший садится младшему на живот и бьёт по лицу ~12 секунд.
+## Где и как старшему сесть на лежащего младшего: верхом на живот, лицом к его голове.
+func _kneel_frame() -> Dictionary:
+	var yb := Basis(Vector3.UP, younger.rotation.y + PI)
+	var belly: Vector3 = younger.global_position + yb * LIE_BELLY
+	var axis: Vector3 = (yb * LIE_AXIS).normalized()
+	var ye: float = atan2(-axis.x, -axis.z)
+	var eb := Basis(Vector3.UP, ye + PI)
+	var kneel_at: Vector3 = belly - eb * Vector3(0.004, 0.0, -0.059) + Vector3(0, -0.06, 0)
+	var er := Basis(Vector3.UP, ye)
+	var face_p: Vector3 = younger.head_pos() + Vector3(0, 0.08, 0)
+	return {"belly": belly, "axis": axis, "ye": ye, "at": kneel_at, "face": face_p,
+		"chest": belly + axis * 0.2 + Vector3(0, 0.32, 0), "hit": face_p + Vector3(0, 0.1, 0),
+		"raised": [kneel_at + er * Vector3(0.24, 1.04, 0.12), kneel_at + er * Vector3(-0.24, 1.04, 0.12)]}   # кулак у плеча
+
+
+func _beat_down() -> void:
+	var k: Dictionary = _kneel_frame()
+	var belly: Vector3 = k["belly"]
+	var axis: Vector3 = k["axis"]
+	var ye: float = k["ye"]
+	var kneel_at: Vector3 = k["at"]
+	# подходит сбоку и садится
+	var approach: Vector3 = kneel_at + Basis(Vector3.UP, ye) * Vector3(-0.55, 0, 0.15)
+	approach.y = 7.8
+	await psycho.go_and_wait([approach], 1.3)
+	psycho.face(kneel_at)
+	await wait(0.25)
+	var drop := create_tween()
+	drop.tween_property(psycho, "global_position", kneel_at, 0.45).set_trans(Tween.TRANS_SINE)
+	psycho.set_yaw(ye)
+	psycho.play("kneel_loop", 0.45)
+	await drop.finished
+	snd("body_fall", belly, 0.0, 1.2)
+	snd("choke", younger.head_pos(), -2.0, 1.1)
+	var face_p: Vector3 = k["face"]
+	var chest: Vector3 = k["chest"]
+	_track = func() -> Vector3: return face_p.lerp(psycho.head_pos(), 0.35)
+	psycho.set_look(face_p)
+	var raised: Array = k["raised"]
+	var hit_p: Vector3 = k["hit"]
+	var lean_tw := create_tween()
+	lean_tw.tween_method(psycho.set_lean, 0.0, 0.62, 0.6)
+	await lean_tw.finished
+	# кровь под головой растёт
+	var pool := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 1.0
+	cm.bottom_radius = 1.0
+	cm.height = 0.004
+	cm.radial_segments = 20
+	pool.mesh = cm
+	pool.material_override = Props.mat(Color(0.18, 0.0, 0.0), 0.12)
+	game.add_child(pool)
+	pool.global_position = Vector3(face_p.x, 7.803, face_p.z) + axis * 0.08
+	pool.scale = Vector3(0.05, 1.0, 0.05)
+	_lounge_props.append(pool)
+	var hands := [chest, chest]                    # [правая, левая]
+	var ybase: Vector3 = younger.global_position
+	var t := 0.0
+	var n := 0
+	while t < 12.0:
+		var r: int = n % 2                         # 0 — правой, 1 — левой
+		var other: int = 1 - r
+		var dur: float = randf_range(0.36, 0.5) if t < 9.0 else randf_range(0.55, 0.8)   # к концу — реже, тяжелее
+		var phase := 0.0
+		while phase < 1.0:
+			await get_tree().process_frame
+			var dt: float = get_process_delta_time()
+			if get_tree().paused:
+				continue
+			phase += dt / dur
+			t += dt
+			var fist: Vector3
+			if phase < 0.6:
+				fist = (hands[r] as Vector3).lerp(raised[r], sin(phase / 0.6 * PI * 0.5))
+			elif phase < 0.78:
+				var q: float = (phase - 0.6) / 0.18
+				fist = (raised[r] as Vector3).lerp(hit_p, q * q)
+			else:
+				fist = hit_p
+			hands[r] = fist
+			younger.global_position = younger.global_position.lerp(ybase, clampf(dt * 12.0, 0.0, 1.0))
+			hands[other] = (hands[other] as Vector3).lerp(chest, clampf(dt * 8.0, 0.0, 1.0))  # другой рукой прижимает грудь
+			psycho.set_hands(hands[0], hands[1], 1.0)
+			psycho.set_lean(0.62 + 0.16 * clampf((phase - 0.45) * 3.0, 0.0, 1.0) * (1.0 if phase < 0.85 else 0.5))
+			if phase >= 0.78 and phase - dt / dur < 0.78:
+				snd("punch_flesh", face_p, randf_range(2.0, 6.0), randf_range(0.8, 1.1), 25.0)
+				younger.global_position = ybase + Vector3(randf_range(-0.015, 0.015), -0.012, randf_range(-0.015, 0.015))
+				if n % 4 == 1 and t < 7.0:
+					snd("choke", face_p, -6.0, randf_range(1.0, 1.25))
+				if n % 3 == 0:
+					_blood_spot(face_p, axis)
+				var rr: float = lerpf(0.05, 0.42, clampf(t / 11.0, 0.0, 1.0))
+				pool.scale = Vector3(rr, 1.0, rr * 0.85)
+		n += 1
+	younger.global_position = ybase
+	# встаёт
+	var up := create_tween()
+	up.tween_method(func(w: float) -> void: psycho.set_hands(hands[0], hands[1], w), 1.0, 0.0, 0.6)
+	up.parallel().tween_method(psycho.set_lean, 0.62, 0.0, 0.8)
+	await up.finished
+	psycho.set_hands(null, null, 0.0)
+	psycho.set_look(null)
+	await wait(1.5)                                  # тяжело дышит, сидя на нём
+	var stand_at: Vector3 = kneel_at + Vector3(0, 0.06, 0)
+	stand_at.y = 7.8
+	var st := create_tween()
+	st.tween_property(psycho, "global_position", stand_at, 0.9).set_trans(Tween.TRANS_SINE)
+	psycho.play("idle_loop", 0.9)
+	await st.finished
+
+
+func _blood_spot(at: Vector3, axis: Vector3) -> void:
+	var spot := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = randf_range(0.015, 0.04)
+	cm.bottom_radius = cm.top_radius
+	cm.height = 0.003
+	cm.radial_segments = 8
+	spot.mesh = cm
+	spot.material_override = Props.mat(Color(0.22, 0.0, 0.0), 0.2)
+	game.add_child(spot)
+	var side := Vector3(axis.z, 0, -axis.x)
+	spot.global_position = Vector3(at.x, 7.804, at.z) + axis * randf_range(0.05, 0.35) + side * randf_range(-0.35, 0.35)
+	_lounge_props.append(spot)
+
+
+## Старший встаёт и долго смотрит на Самана… и вдруг убегает из комнаты.
+func _elder_stare_and_run() -> void:
+	await psycho.go_and_wait([ELDER_STARE], 0.9)
+	psycho.face(ppos())
+	psycho.set_look(player.head.global_position)
+	_track = func() -> Vector3: return psycho.head_pos() + Vector3(0, -0.05, 0)
+	var breath := AudioStreamPlayer3D.new()
+	breath.stream = stream("breathing", true)
+	breath.unit_size = 2.0
+	breath.volume_db = 2.0
+	game.add_child(breath)
+	breath.global_position = psycho.head_pos()
+	breath.play()
+	_drone.volume_db = -10.0
+	var t := 0.0
+	var stepped := false
+	while t < 14.0:
+		await wait(0.5)
+		t += 0.5
+		if int(t * 2.0) % 2 == 0:
+			snd("heartbeat", null, -4.0 + t * 0.3, 1.0)
+		if t >= 7.0 and not stepped:
+			stepped = true
+			var close: Vector3 = ELDER_STARE + (ppos() - ELDER_STARE).normalized() * 0.3
+			close.y = 7.8
+			psycho.go([close], 0.5)
+		if t >= 10.0:
+			psycho.set_look(player.head.global_position + Vector3(0.25, 0.1, 0))   # склоняет голову набок
+	breath.queue_free()
+	# резко: разворот и бегом из комнаты
+	psycho.set_look(null)
+	snd("whoosh", psycho.head_pos(), 2.0, 0.8)
+	_track = null
+	var run: Node3D = snd("run_steps", psycho.global_position, 4.0, 1.2, 40.0) as Node3D
+	psycho.go(ELDER_EXIT, 5.2, "run_loop")
+	await wait(1.2)
+	await until(func(): return not psycho.is_moving(), 6.0)
+	psycho.visible = false
+	psycho.stop()
+	if run and is_instance_valid(run):
+		run.queue_free()
+	_drone.volume_db = -16.0
+	player.story_lock = false
+
+
+## Перегрызть бинты: держать E. Каждый рывок — треск ткани.
+func _bite_free() -> void:
+	await wait(1.2)
+	await say("thought", "Он… он его убил. Из-за меня.")
+	await say("thought", "Он вернётся. Руки… Зубами. Давай.")
+	objective("Освободи руки — перегрызи бинты")
+	player.story_lock = true
+	var lean_xf := Transform3D(Basis(Vector3.RIGHT, -0.12), Vector3(0.05, -0.06, -0.03))   # наклонился к руке
+	var bite := create_tween()
+	bite.tween_property(player, "view_offset", lean_xf, 0.6).set_trans(Tween.TRANS_SINE)
+	_track = _wrist_world
+	var on_tug := func(_ok: bool) -> void:
+		snd("cloth_tear", _wrist_world(), randf_range(-2.0, 2.0), randf_range(0.85, 1.15), 10.0)
+		player.view_offset = lean_xf * Transform3D(Basis.from_euler(Vector3(randf_range(-0.05, 0.05), randf_range(-0.08, 0.08),
+			randf_range(-0.06, 0.06))), Vector3.ZERO)
+		create_tween().tween_property(player, "view_offset", lean_xf, 0.22)
+	minigame.hit.connect(on_tug)
+	await minigame.hold("Перегрызи бинты", 7.0)
+	minigame.hit.disconnect(on_tug)
+	snd("cloth_tear", _wrist_world(), 4.0, 0.8, 10.0)
+	_track = null
+	var back := create_tween()
+	back.tween_property(player, "view_offset", Transform3D.IDENTITY, 0.5)
+	await back.finished
+	_tie(false)
+	player.story_lock = false
+	ui.alert("Руки свободны", 2.0)
+	objective("")
+	await wait(1.0)
+	GameState.checkpoint = "floor3b"
+	await say("thought", "Мама. Мне нужно найти маму.")
+	objective("Найди маму на 3-м этаже")
+
+
 func _set_flag(flag: Array) -> void:
 	flag[0] = true
 
 
 func _on_leave_floor3() -> void:
 	act = "floor3_down"
+	younger.visible = false
+	younger.stop()
+	for n in _lounge_props:
+		if is_instance_valid(n):
+			n.queue_free()
+	_lounge_props.clear()
 	sets.build_real2()
 
 
@@ -1622,6 +2107,16 @@ func _physics_process(dt: float) -> void:
 func _process(dt: float) -> void:
 	if game == null:
 		return
+	if _track != null and not get_tree().paused:
+		player.aim_at((_track as Callable).call(), clampf(dt * 3.5, 0.0, 1.0))
+	if _tied:
+		_tied_msg_t -= dt
+		var tries: bool = Input.is_action_pressed("drive_forward") or Input.is_action_pressed("drive_back") \
+				or Input.is_action_pressed("turn_left") or Input.is_action_pressed("turn_right")
+		if tries and _tied_msg_t <= 0.0 and not get_tree().paused:
+			_tied_msg_t = 2.4
+			ui.alert("Руки привязаны — коляска не двигается", 2.0)
+			snd("metal_creak", ppos() + Vector3(0, 0.6, 0), -12.0, 1.7, 8.0)
 	if act == "scream" and not _scream_door_open:
 		_flick_t -= dt
 		if _flick_t <= 0.0:

@@ -349,4 +349,20 @@ save("drone_low", (np.sin(2 * math.pi * 55 * _d) + np.sin(2 * math.pi * 55.7 * _
      + lp(noise(8.0), 300) * 0.3, 0.5)
 save("door_creak_slow", reverb(np.sin(2 * math.pi * np.cumsum(240 + 120 * np.sin(2 * math.pi * 0.6 * t_(2.5)) + 30 * lp(noise(2.5), 15) * 30) / SR)
                               * (0.5 + 0.5 * np.sign(np.sin(2 * math.pi * 21 * t_(2.5)))) * env(int(2.5 * SR), 0.3, 0, r=0.5), 0.5, 1.0), 0.6)
+# ---------------------------------------------------------------------------- v6: братья
+# бинт рвётся под зубами: сухой треск ткани (короткие щелчки нитей) + выдох носом
+_ct = 0.9
+save("cloth_tear", hits(_ct, np.cumsum(rng.uniform(0.004, 0.02, 60)), lambda: bp(noise(0.012), 1800, 6500) * decay(0.012, 0.003) * rng.uniform(0.2, 1.0))
+     * env(int(_ct * SR), 0.05, 0, r=0.3) + bp(noise(_ct), 300, 1400) * env(int(_ct * SR), 0.1, 0, r=0.4) * 0.25, 0.55)
+# глухой удар кулаком по лицу (мясо, без «звона»)
+save("punch_flesh", thump(95, 0.05, 0.35, 0.8) + lp(noise(0.35), 900) * decay(0.35, 0.03) * 0.7, 0.85)
+# злой смех младшего: ниже, медленнее, с хрипом
+def laugh_evil(sec):
+    n = int(sec * SR)
+    v = voice(sec, glide(sec, 150, 105), A, breath=0.6, jitter=0.045, rough=0.35)
+    v *= syllables(n, 3.6, 0.5, 0.3) * env(n, 0.08, 0, r=0.8)
+    return lp(v, 1000)
+
+
+save("laugh_evil", reverb(laugh_evil(3.2), 0.5, 1.4), 0.65)
 print("written to", OUT, len([f for f in os.listdir(OUT) if f.endswith(".wav")]), "files")

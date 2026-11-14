@@ -5,7 +5,7 @@ config_version=5
 
 [application]
 
-config/name="The Last Shake v5"
+config/name="The Last Shake v6"
 config/description="Психологический инди-хоррор: автобус через лес, заброшенный санаторий «Оромгох», 1975 год."
 run/main_scene="res://story/menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")

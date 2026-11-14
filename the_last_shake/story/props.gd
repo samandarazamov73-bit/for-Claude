@@ -160,3 +160,31 @@ static func glb(path: String, scale_k: float, lift_half := 0.0) -> Node3D:
 		m.position.y = lift_half * scale_k
 		holder.add_child(m)
 	return holder
+
+
+## Старая фронтальная стиральная машина (эмаль, круглый люк на петле). Начало — на полу посередине,
+## люк смотрит в −Z. Люк — узел «Hatch»: rotation.y > 0 — открыт наружу.
+static func washer() -> Node3D:
+	var root := Node3D.new()
+	var enamel := mat(Color(0.72, 0.7, 0.62), 0.45)
+	var panel := mat(Color(0.58, 0.56, 0.49), 0.55)
+	var steel := mat(Color(0.55, 0.56, 0.57), 0.3, 0.8)
+	var dark := mat(Color(0.04, 0.05, 0.05), 0.15)
+	var rust := mat(Color(0.33, 0.2, 0.12), 0.95)
+	box(root, Vector3(0, 0.43, 0), Vector3(0.6, 0.86, 0.58), enamel)
+	box(root, Vector3(0, 0.79, -0.285), Vector3(0.58, 0.12, 0.03), panel)
+	for x in [-0.2, -0.1]:
+		cyl(root, Vector3(x, 0.79, -0.305), 0.025, 0.03, dark, Vector3(PI * 0.5, 0, 0))
+	box(root, Vector3(0.16, 0.79, -0.302), Vector3(0.14, 0.04, 0.01), mat(Color(0.2, 0.2, 0.18), 0.6))
+	box(root, Vector3(0, 0.035, -0.27), Vector3(0.6, 0.07, 0.06), rust)
+	cyl(root, Vector3(0, 0.42, -0.291), 0.17, 0.004, mat(Color(0.015, 0.015, 0.015), 0.9), Vector3(PI * 0.5, 0, 0))
+	var hatch := Node3D.new()
+	hatch.name = "Hatch"
+	root.add_child(hatch)
+	hatch.position = Vector3(-0.2, 0.42, -0.3)
+	cyl(hatch, Vector3(0.2, 0, -0.02), 0.19, 0.04, steel, Vector3(PI * 0.5, 0, 0))
+	cyl(hatch, Vector3(0.2, 0, -0.035), 0.15, 0.02, dark, Vector3(PI * 0.5, 0, 0))
+	box(hatch, Vector3(0.37, 0, -0.045), Vector3(0.04, 0.08, 0.03), steel)
+	for gi in root.find_children("*", "GeometryInstance3D", true, false):
+		(gi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return root

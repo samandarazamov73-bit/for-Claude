@@ -54,7 +54,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2":
+		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "liftmom":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -320,6 +320,10 @@ func _sanatorium() -> void:
 		cp = "void"
 	elif case_name == "fight":
 		cp = "maze"
+	elif case_name == "brothers" or case_name == "beatpose":
+		cp = "floor3"
+	elif case_name == "liftmom":
+		cp = "floor3b"
 	GameStateRef().checkpoint = cp
 	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
 	await secs(3.0)
@@ -339,6 +343,12 @@ func _sanatorium() -> void:
 		d.player.look_yaw = 1.5
 		await secs(3.0)
 		await shot("chase_psycho")
+	elif case_name == "brothers":
+		await _brothers_test(d)
+	elif case_name == "beatpose":
+		await _beatpose_test(g, d)
+	elif case_name == "liftmom":
+		await _liftmom_test(d)
 	elif case_name == "fight":
 		d.has_ward_key = true
 		var door = d.door(91)
@@ -559,6 +569,20 @@ func _playthrough() -> void:
 	await secs(4.0)
 	d.scares.elapsed = 400.0
 	d.scares.count = 10
+	await wait_for(func(): return d.act == "brothers", 60, "brothers")
+	step("brothers")
+	await wait_for(func(): return d.act == "lounge", 90, "caught by the brothers")
+	step("lounge: tied")
+	await secs(2.0)
+	if d.player.input_override != Vector2.ZERO:
+		step("FAIL: hands not tied")
+	await wait_for(func(): return d.minigame.running and d.minigame.mode == "hold", 240, "bite minigame")
+	step("bite minigame")
+	await wait_for(func(): return not d._tied, 60, "hands free")
+	step("hands free")
+	await secs(2.0)
+	d.scares.elapsed = 400.0
+	d.scares.count = 10
 	await secs(3.0)
 	await tp(d.MAN_POS + Vector3(0, 0, -1.3), PI)
 	await wait_for(func(): return d.act == "floor3_leave", 120, "man dialogue")
@@ -685,6 +709,122 @@ func _fair_test() -> void:
 	step("in cabin=%s after %.1f s, psycho %.1f m away" % [str(d.lift.player_in_cabin()), (Time.get_ticks_msec() - t0) / 1000.0, d.psycho.global_position.distance_to(pl.global_position)])
 	await wait_for(func(): return d.act == "void" or d.chase == "caught", 30, "result")
 	step("RESULT " + ("escaped" if d.act == "void" else "caught") + " after %.1f s" % ((Time.get_ticks_msec() - t0) / 1000.0))
+
+
+## Сцена с братьями: снимки в ключевые моменты (погоня, холл, удар, избиение, взгляд, бинты).
+func _brothers_test(d: Node) -> void:
+	pl = d.player
+	d.minigame.cheat = true
+	await secs(2.0)
+	d.scares.elapsed = 400.0
+	d.scares.count = 10
+	await tp(Vector3(30.0, 7.8, -8.1), -PI * 0.5)
+	await wait_for(func(): return d.act == "brothers" and d.younger.visible, 60, "brothers appear")
+	await secs(2.5)
+	await shot("bro_1_corridor")
+	await wait_for(func(): return d.act == "lounge", 90, "caught")
+	step("lounge")
+	await wait_for(func(): return GameStateRef().fade_target() < 0.5, 30, "fade in")
+	await secs(3.5)
+	await shot("bro_2_room")
+	await wait_for(func(): return d.younger.current == "walk_loop" or d.younger.is_moving(), 60, "younger creeps")
+	await secs(4.0)
+	await shot("bro_3_creep")
+	await wait_for(func(): return d.psycho.current == "hit", 60, "elder strikes")
+	await secs(0.62)
+	await shot("bro_4_hit")
+	await secs(1.4)
+	await shot("bro_5_fall")
+	await wait_for(func(): return d.psycho.current == "kneel_loop", 30, "kneel")
+	await secs(2.5)
+	await shot("bro_6_beat")
+	await secs(1.13)
+	await shot("bro_7_beat")
+	await secs(4.0)
+	await shot("bro_8_beat")
+	await wait_for(func(): return d.psycho.current == "idle_loop" and not d.psycho.is_moving() and d._track != null and d.psycho.global_position.distance_to(d.ELDER_STARE) < 0.5, 60, "stare")
+	await secs(3.0)
+	await shot("bro_9_stare")
+	await wait_for(func(): return d.minigame.running, 60, "bite")
+	await secs(1.5)
+	await shot("bro_10_bite")
+	await wait_for(func(): return not d._tied, 30, "free")
+	step("free")
+	await secs(2.0)
+	d.player.look_yaw = 0.3
+	await secs(0.5)
+	await shot("bro_11_after")
+
+
+## Поза «сидит верхом и бьёт»: младший лежит, старший на коленях; камера сбоку, при свете.
+func _beatpose_test(g: Node, d: Node) -> void:
+	pl = d.player
+	d.scares.stop()
+	d.set_process(false)
+	d._setup_lounge()
+	var y: Node = d.younger
+	var e: Node = d.psycho
+	y.visible = true
+	e.visible = true
+	y.global_position = Vector3(24.3, 7.8, -11.35)
+	y.set_yaw(0.0)
+	y.play("lie_loop", 0.0)
+	pl.global_position = Vector3(30, 7.85, -8.1)
+	await secs(1.0)
+	var k: Dictionary = d._kneel_frame()
+	e.global_position = k["at"]
+	e.set_yaw(k["ye"])
+	e.play("kneel_loop", 0.0)
+	var cam := Camera3D.new()
+	g.add_child(cam)
+	var ax: Vector3 = k["axis"]
+	var side := Vector3(-ax.z, 0, ax.x)
+	var lamp := OmniLight3D.new()
+	lamp.light_energy = 3.0
+	lamp.omni_range = 7.0
+	g.add_child(lamp)
+	var views := [k["belly"] + side * 2.2 + Vector3(0, 1.1, 0), k["belly"] - ax * 2.4 + side * 0.6 + Vector3(0, 1.3, 0)]
+	var cfgs := [[0.0, ""], [0.62, "chest"], [0.62, "raised"], [0.78, "hit"]]
+	for vi in views.size():
+		cam.global_position = views[vi]
+		cam.look_at(k["belly"] + Vector3(0, 0.45, 0) + ax * 0.15)
+		cam.current = true
+		lamp.global_position = views[vi] + Vector3(0, 0.6, 0)
+		for ci in cfgs.size():
+			var c: Array = cfgs[ci]
+			e.set_lean(c[0])
+			match c[1]:
+				"chest":
+					e.set_hands(k["chest"], k["chest"], 1.0)
+				"raised":
+					e.set_hands(k["raised"][0], k["chest"], 1.0)
+				"hit":
+					e.set_hands(k["hit"], k["chest"], 1.0)
+				_:
+					e.set_hands(null, null, 0.0)
+			await secs(0.6)
+			await shot("bp_v%d_%d" % [vi, ci])
+
+
+## Лифт на 3-м этаже: двери закрываются медленно, мама увозит человека в коляске.
+func _liftmom_test(dir: Node) -> void:
+	d = dir
+	pl = dir.player
+	await secs(2.0)
+	dir.scares.elapsed = 400.0
+	dir.scares.count = 10
+	await secs(1.0)
+	await tp(dir.MAN_POS + Vector3(0, 0, -1.3), PI)
+	await wait_for(func(): return dir.act == "floor3_leave", 120, "man dialogue")
+	await tp(Vector3(37.5, 7.8, -7.6), 0.0)
+	press_call(2)
+	await wait_for(func(): return dir.lift.state == "open" and dir.lift.floor_idx == 2, 30, "lift at 3")
+	await tp(Vector3(37.5, 7.8, -5.0), 0.0)
+	press_cab("2")
+	await wait_for(func(): return dir.mom.visible, 20, "mom appears")
+	for i in 4:
+		await secs(1.3)
+		await shot("lift_mom_%d" % i)
 
 
 func _caught_test() -> void:

@@ -26,6 +26,9 @@ var _flash := 0.0
 var _flash_col := Color.WHITE
 var _cool := 0.0                # после нажатия — короткая пауза (толчок)
 var _font: Font
+var mode := "ring"              # ring — поймать зелёную зону; hold — держать клавишу (полоса)
+var progress := 0.0             # hold: 0..1
+var _tug := 0.0
 
 
 func _ready() -> void:
@@ -55,6 +58,37 @@ func run(caption: String, need_hits: int, spd: float, zone: float, opts := {}) -
 	running = false
 	await get_tree().create_timer(0.35, false).timeout
 	visible = false
+
+
+## Держать E (или ЛКМ), пока полоса не заполнится: отпустил — понемногу откатывается назад.
+## Каждые ~0,9 с, пока держишь, — сигнал hit(true) (рывок: звук, дрожь).
+func hold(caption: String, seconds: float) -> void:
+	mode = "hold"
+	title = caption
+	progress = 0.0
+	visible = true
+	running = true
+	_tug = 0.5
+	while progress < 1.0:
+		await get_tree().process_frame
+		var dt: float = get_process_delta_time()
+		if get_tree().paused:
+			continue
+		var held: bool = cheat or Input.is_action_pressed("interact") or Input.is_action_pressed("attack")
+		if held:
+			progress = minf(progress + dt / seconds, 1.0)
+			_tug -= dt
+			if _tug <= 0.0:
+				_tug = randf_range(0.7, 1.1)
+				_flash_col = Color(1.0, 0.9, 0.6)
+				_flash = 0.25
+				hit.emit(true)
+		else:
+			progress = maxf(progress - dt * 0.12, 0.0)
+	running = false
+	await get_tree().create_timer(0.35, false).timeout
+	visible = false
+	mode = "ring"
 
 
 func press() -> void:
@@ -95,7 +129,7 @@ func _process(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not running:
+	if not running or mode == "hold":
 		return
 	if event.is_action_pressed("interact") or event.is_action_pressed("attack"):
 		press()
@@ -104,6 +138,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var c: Vector2 = get_viewport_rect().size * 0.5 + Vector2(0, 40)
+	if mode == "hold":
+		var w := 420.0
+		var r := Rect2(c + Vector2(-w * 0.5, -14), Vector2(w, 28))
+		draw_rect(r.grow(6), Color(0, 0, 0, 0.5))
+		draw_rect(r, Color(0.3, 0.3, 0.3, 0.8))
+		draw_rect(Rect2(r.position, Vector2(w * progress, r.size.y)), Color(0.85, 0.75, 0.55))
+		if _flash > 0.0:
+			var fc := _flash_col
+			fc.a = _flash / 0.25
+			draw_rect(r.grow(8), fc, false, 3.0)
+		var t1: Vector2 = _font.get_string_size(title, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
+		draw_string(_font, c + Vector2(-t1.x * 0.5, -40), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.95, 0.92, 0.85))
+		var hh := "Держи E — грызи. Отпустишь — узел затягивается"
+		var t2: Vector2 = _font.get_string_size(hh, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
+		draw_string(_font, c + Vector2(-t2.x * 0.5, 48), hh, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.78, 0.72))
+		return
 	draw_circle(c, R + W, Color(0, 0, 0, 0.45))
 	draw_arc(c, R, 0.0, TAU, 72, Color(0.75, 0.72, 0.66, 0.55), W, true)
 	var a0: float = deg_to_rad(zone_at - zone_deg * 0.5) - PI * 0.5

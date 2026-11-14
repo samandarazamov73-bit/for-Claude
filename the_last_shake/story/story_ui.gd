@@ -10,6 +10,8 @@ const SPEAKERS := {
 	"grandpa": ["Дед Анвар", Color(0.75, 0.95, 0.7)],
 	"psycho": ["Мужчина в белом", Color(1.0, 0.45, 0.4)],
 	"man": ["Человек в коляске", Color(0.85, 0.85, 0.8)],
+	"younger": ["Младший брат", Color(1.0, 0.62, 0.35)],
+	"elder": ["Старший брат", Color(1.0, 0.42, 0.38)],
 	"radio": ["Радио", Color(0.75, 0.75, 0.75)],
 	"doctor": ["Доктор", Color(0.9, 0.92, 1.0)],
 	"driver": ["Водитель", Color(0.9, 0.9, 0.75)],
@@ -33,6 +35,8 @@ var _sub_next: Label
 var _sub_wait := false
 var _sub_shown_ms := 0
 var _line_done := false
+var _alert: Label
+var _alert_t := 0.0
 var _obj_flash := 0.0
 var _hint_t := 0.0
 var _damage_v := 0.0
@@ -183,6 +187,22 @@ func _label(size: int, col: Color) -> Label:
 	l.add_theme_constant_override("shadow_offset_y", 2)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
+
+
+## Надпись вверху по центру (крупно, на пару секунд): «Руки связаны…».
+func alert(text: String, seconds := 2.0) -> void:
+	if _alert == null:
+		_alert = _label(30, Color(1.0, 0.78, 0.6))
+		_alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_alert.add_theme_constant_override("outline_size", 8)
+		_alert.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
+		_alert.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		_alert.position = Vector2(-500, 70)
+		_alert.size = Vector2(1000, 50)
+		add_child(_alert)
+	_alert.text = text
+	_alert.modulate.a = 1.0
+	_alert_t = seconds
 
 
 ## Записка на весь экран (лист бумаги). Ждёт пробел / E / Esc.
@@ -403,6 +423,9 @@ func _process(dt: float) -> void:
 		_obj_flash -= dt
 		var k: float = 0.5 + 0.5 * cos(_obj_flash * 9.0)
 		_objective.modulate = Color(1, 1, 1).lerp(Color(1.0, 0.75, 0.3), k * minf(_obj_flash, 1.0))
+	if _alert_t > 0.0 and _alert:
+		_alert_t -= dt
+		_alert.modulate.a = clampf(_alert_t / 0.5, 0.0, 1.0)
 	if _hint_t > 0.0:
 		_hint_t -= dt
 		_hint.modulate.a = clampf(_hint_t, 0.0, 1.0)
