@@ -822,8 +822,8 @@ func _liftmom_test(dir: Node) -> void:
 	await tp(Vector3(37.5, 7.8, -5.0), 0.0)
 	press_cab("2")
 	await wait_for(func(): return dir.mom.visible, 20, "mom appears")
-	for i in 6:
-		await secs(0.9)
+	for i in 10:
+		await secs(1.1)
 		await shot("lift_mom_%d" % i)
 
 

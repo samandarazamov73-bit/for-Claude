@@ -1144,6 +1144,14 @@ func _act4(after_brothers := false) -> void:
 	var man := Props.glb("res://characters/wheelchair_man_static.glb", 1.4, 0.476)
 	game.add_child(man)
 	man.global_position = MAN_POS
+	# тусклая лампа над ним: из лифта должно быть видно, как мама его увозит
+	var man_lamp := OmniLight3D.new()
+	man_lamp.light_color = Color(1.0, 0.82, 0.6)
+	man_lamp.light_energy = 0.9
+	man_lamp.omni_range = 4.5
+	man_lamp.shadow_enabled = true
+	game.add_child(man_lamp)
+	man_lamp.global_position = MAN_POS + Vector3(-0.5, 2.6, 0.4)
 	snd("metal_creak", MAN_POS + Vector3(0, 0.6, 0), 4.0, 1.0, 40.0)
 	objective("Проверь коридор у лифта", MAN_POS, Vector3(0, 1.4, 0))
 	var talk_area: Area3D = Interactable.new()
@@ -1205,6 +1213,7 @@ func _act4(after_brothers := false) -> void:
 	mom.visible = false
 	mom.stop()
 	man.queue_free()
+	man_lamp.queue_free()
 
 
 # ------------------------------------------------------------------------------- братья
