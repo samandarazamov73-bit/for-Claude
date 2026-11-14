@@ -78,6 +78,8 @@ var _snd_cache := {}
 var _bang_t := 0.0
 var _mom_cd := 0.0
 var _punch_cd := 0.0
+var _dodge_open := false
+var _dodged := false
 var _fight_t := 0.0
 var _debris_t := 0.0
 var _dust: GPUParticles3D
@@ -239,13 +241,8 @@ func say(who: String, text: String, sec := 0.0) -> void:
 			and (speaker.current == "idle_loop" or speaker.current == "talk_loop")
 	if gestures and speaker.current != "talk_loop":
 		speaker.play("talk_loop", 0.35)
-	var t: float = ui.say(who, text, sec)
-	while t > 0.0 and not _skip:
-		await get_tree().process_frame
-		if not get_tree().paused:
-			t -= get_process_delta_time()
+	await ui.line(who, text, sec)
 	_skip = false
-	ui.hide_line()
 	if gestures and speaker.current == "talk_loop" and not speaker.is_moving():
 		speaker.play("idle_loop", 0.45)
 
@@ -999,6 +996,13 @@ func _act3() -> void:
 	await say("thought", "Где… где всё? Тут же были палаты… Осталась одна дверь.")
 	objective("Найди комнату деда — дверь с лампой вдалеке", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	await until(func(): return room_id() == "L1.F2")
+	# в палате — бумаги деда: про маму, про него самого и его записка про это место
+	objective("Осмотри палату деда — на столах лежат бумаги")
+	_place_notes()
+	await until(func(): return _notes_read.has("diary") or (_notes_read.size() >= 2 and not _note_open), 240.0)
+	while _note_open:
+		await get_tree().process_frame
+	objective("")
 	await wait(2.0)
 	var radio_pos := ROOM204_DOOR + Vector3(-1.4, 0.7, 5.6)
 	var rn: Node = game.node("radio_F2")
@@ -1025,6 +1029,70 @@ func _act3() -> void:
 	lift.locked = false
 	lift.forced_floor = 2
 	act = "void_done"
+
+
+const NOTES := {
+	"mom": ["Заключение психиатра (копия)", Vector3(6.36, 5.26, -3.43),
+		"Пациентка: Барно Анваровна, 34 года.\n\n" +
+		"В 1959 году сын пациентки родился мёртвым. Имя ему дали заранее — Саман.\n\n" +
+		"Через два года муж, Рустам, ушёл из семьи. Со слов отца пациентки: «Он не смог жить в доме, " +
+		"где каждый вечер стелют постель мальчику, которого нет».\n\n" +
+		"С тех пор пациентка убеждена, что сын жив и растёт. Разговаривает с ним, покупает ему одежду " +
+		"«на вырост», ставит на стол третью тарелку. Когда ей напоминают о смерти ребёнка — приступы ярости.\n\n" +
+		"От лечения отказывается."],
+	"anvar": ["Направление в санаторий «Оромгох»", Vector3(7.5, 5.23, -0.93),
+		"Анвар Каримович, 74 года.\n\n" +
+		"После смерти жены — бессонница, отказывается от еды, неделями не выходит из комнаты. " +
+		"По ночам зовёт внука и разговаривает с ним. Внуков у пациента нет.\n\n" +
+		"Направлен на длительное наблюдение. Родственники (дочь) навещают редко.\n\n" +
+		"Особая отметка: острые предметы из палаты убрать."],
+	"diary": ["Записка карандашом на обороте меню (почерк деда)", Vector3(11.7, 5.13, -2.57),
+		"Здесь никто не спит. Ночью кто-то идёт по коридору и стучит в каждую дверь — три раза. " +
+		"Я считаю двери. До моей он ещё не дошёл.\n\n" +
+		"Санитар говорит, в 139-й давно никого нет. Я спросил, кто же там тогда кричит. Он засмеялся " +
+		"и выключил мне свет.\n\n" +
+		"Опять снился мальчик. Он звал меня «дедушка», и я ему ответил. Здесь я его больше не слышу.\n\n" +
+		"Я устал. Если утром меня найдут — не будите. Мне там лучше. Там у меня хотя бы есть внук.\n\n" +
+		"— А."],
+}
+var _notes_read := {}
+var _note_open := false
+
+
+func _place_notes() -> void:
+	for key in NOTES:
+		var n: Array = NOTES[key]
+		var holder := Node3D.new()
+		game.add_child(holder)
+		holder.global_position = n[1]
+		var sheet := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.21, 0.004, 0.29)
+		sheet.mesh = bm
+		sheet.material_override = Props.mat(Color(0.85, 0.82, 0.72), 0.9)
+		holder.add_child(sheet)
+		sheet.rotation.y = randf_range(-0.5, 0.5)
+		var glow := OmniLight3D.new()
+		glow.light_color = Color(1.0, 0.92, 0.75)
+		glow.light_energy = 0.12
+		glow.omni_range = 0.8
+		holder.add_child(glow)
+		glow.position.y = 0.3
+		var it: Area3D = Interactable.new()
+		holder.add_child(it)
+		it.setup(Vector3(0.45, 0.3, 0.45), "[E] Прочитать", _read_note.bind(key))
+
+
+func _read_note(key: String) -> void:
+	if _note_open:
+		return
+	_note_open = true
+	freeze(true)
+	game.play_at("button", NOTES[key][1], -14.0, 1.8, 6.0)
+	await ui.note(NOTES[key][0], NOTES[key][2])
+	_notes_read[key] = true
+	freeze(false)
+	_note_open = false
 
 
 # ================================================================================ АКТ 4: третий этаж, звуки, человек в коляске
@@ -1067,19 +1135,44 @@ func _act4() -> void:
 	lift.locked = false
 	lift.forced_floor = 1
 	act = "floor3_leave"
-	# когда двери начнут закрываться — за ними мама увозит этого человека в другую сторону
+	# двери закрываются медленно: сбоку подходит мама, берётся за спинку его коляски и увозит в другую сторону
 	await until(func(): return lift.player_in_cabin() and lift.state == "closing")
-	man.visible = false
-	var pair := Props.glb("res://characters/mom_confused_static.glb", 2.1, 0.384)
-	pair.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
-	game.add_child(pair)
-	pair.global_position = MAN_POS + Vector3(0.42, 0, 0)
-	pair.rotation.y = -PI * 0.5
-	var away := create_tween()
-	away.tween_property(pair, "global_position", MAN_POS + Vector3(-9.0, 0, 0), 11.0)
-	look_at_point(MAN_POS + Vector3(0.6, 1.3, 0), 0.5)
-	await wait(4.0)
-	pair.queue_free()
+	lift.door_slow = 4.0                              # ~6 секунд вместо полутора
+	look_at_point(MAN_POS + Vector3(0, 1.0, 0), 0.6)
+	snd("metal_creak", MAN_POS + Vector3(0, 0.5, 0), 0.0, 0.9, 30.0)
+	var turn := create_tween()                        # он сам разворачивается — уезжать
+	turn.tween_property(man, "rotation:y", PI * 0.5, 1.4).set_trans(Tween.TRANS_SINE)
+	mom.visible = true
+	mom.set_look(null)
+	mom.global_position = MAN_POS + Vector3(-4.6, 0, 0.1)
+	mom.face(MAN_POS, true)
+	var behind: Vector3 = MAN_POS + Vector3(-0.95, 0, 0)
+	await mom.go_and_wait([behind], 1.35)
+	mom.face(MAN_POS + Vector3(3, 0, 0), true)
+	# руки на верх спинки (коляска смотрит в +X: спинка — со стороны −X)
+	var grip := func(w: float) -> void:
+		var c: Vector3 = man.global_position
+		mom.set_hands(c + Vector3(-0.45, 0.86, 0.2), c + Vector3(-0.45, 0.86, -0.2), w)
+	var gt := create_tween()
+	gt.tween_method(grip, 0.0, 1.0, 0.45)
+	await gt.finished
+	mom.set_look(player.head.global_position)         # на миг смотрит прямо на Самана
+	await wait(0.9)
+	mom.set_look(null)
+	var go := 6.5
+	mom.play("walk_loop", 0.3, 0.75)
+	var t := 0.0
+	while t < go / 0.9 and act == "floor3_leave":
+		await get_tree().process_frame
+		var dt: float = get_process_delta_time()
+		t += dt
+		man.global_position.x += 0.9 * dt
+		mom.global_position.x += 0.9 * dt
+		grip.call(1.0)
+	lift.door_slow = 1.0
+	mom.set_hands(null, null, 0.0)
+	mom.visible = false
+	mom.stop()
 	man.queue_free()
 
 
@@ -1200,10 +1293,15 @@ func _grandpa_at_door() -> void:
 	mom.face(ppos())
 	await look_at_point(mom.head_pos(), 0.5)
 	mom.set_look(player.head.global_position)
-	await say("hero", "Мама!.. Мам, это я! Это же я!")
+	await say("hero", "Мама?! Ты где была? Там дедушка… он какой-то не такой. Пошли отсюда, а?")
+	await wait(1.8)                                   # молчит и смотрит, будто не узнаёт
+	await say("mom", "…Ты кто?")
+	await say("hero", "Мам… ты чего?")
+	await wait(1.0)
+	await say("mom", "Я тебя не знаю. У меня нет сына.")
 	snd("mom_scream", mom.head_pos(), 4.0)
 	mom.play("talk_loop", 0.1, 1.5)
-	await say("mom", "Ты не мой сын!! Не подходи! Убирайся, или я тебя убью!", 4.0)
+	await say("mom", "Убирайся отсюда! Не подходи ко мне — убью!!", 3.0)
 	_start_fight()
 
 
@@ -1215,7 +1313,7 @@ func _start_fight() -> void:
 	_mom_cd = 0.8
 	freeze(false)
 	objective("Отбивайся!")
-	ui.hint("ЛКМ — ударить, W A S D — уворачиваться", 6.0)
+	ui.hint("ЛКМ — ударить   ·   когда она замахивается — ПРОБЕЛ, увернуться", 7.0)
 	_drone.volume_db = -8.0
 	fight = "on"
 
@@ -1267,12 +1365,26 @@ func _clamp_room204(p: Vector3) -> Vector3:
 	return Vector3(x, 4.5, z)
 
 
+## Замах: на экране «ПРОБЕЛ — увернись!» — успел за 0,6 с — коляска рывком уходит вбок, удар мимо.
 func _mom_attack() -> void:
 	_mom_cd = 2.0
 	mom.play("attack", 0.1, 1.15)
 	snd("whoosh", mom.head_pos(), 0.0, 0.9)
-	await wait(0.55)
+	_dodge_open = true
+	_dodged = false
+	ui.set_prompt("ПРОБЕЛ — увернись!")
+	ui.flash(Color(1.0, 0.85, 0.3, 0.18), 0.25)
+	var t := 0.0
+	while t < 0.6 and not _dodged:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+	_dodge_open = false
+	ui.set_prompt("")
 	if fight != "on":
+		return
+	if _dodged:
+		await wait(maxf(0.6 - t, 0.0))
+		snd("whoosh", ppos() + Vector3(0, 1.2, 0), 2.0, 1.3)
 		return
 	var to: Vector3 = ppos() - mom.global_position
 	to.y = 0.0
@@ -1283,6 +1395,20 @@ func _mom_attack() -> void:
 		ui.flash(Color(0.7, 0.0, 0.0, 0.6), 0.4)
 		ui.set_damage(1.0 - hp / 100.0)
 		shake(0.8, 0.35)
+
+
+func _dodge() -> void:
+	_dodged = true
+	var away: Vector3 = ppos() - mom.global_position
+	away.y = 0.0
+	away = away.normalized() if away.length() > 0.01 else Vector3(1, 0, 0)
+	var side := Vector3(-away.z, 0.0, away.x) * (1.0 if randf() < 0.5 else -1.0)
+	var goal: Vector3 = _clamp_room204(ppos() + side * 0.6 + away * 0.25)
+	goal.y = ppos().y
+	game.play_at("bump", ppos() + Vector3(0, 0.3, 0), -8.0, 1.3, 8.0)
+	var tw := create_tween()
+	tw.tween_property(player, "global_position", goal, 0.18).set_ease(Tween.EASE_OUT)
+	shake(0.3, 0.15)
 
 
 func _hide_fist() -> void:
@@ -1534,3 +1660,5 @@ func _drop_debris() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("attack") and fight == "on":
 		_punch()
+	elif event.is_action_pressed("skip_line") and _dodge_open and not _dodged:
+		_dodge()

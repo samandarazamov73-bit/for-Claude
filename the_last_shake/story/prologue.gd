@@ -14,6 +14,7 @@ const StoryUI = preload("res://story/story_ui.gd")
 const Actor = preload("res://story/actor.gd")
 const Props = preload("res://story/props.gd")
 const ChairModel = preload("res://story/chair_model.gd")
+const ChairDrive = preload("res://story/chair_drive.gd")
 const EntranceDoor = preload("res://story/entrance_door.gd")
 
 const RIDE_DISTANCE := 1900.0       # метров до остановки (~2,5 минуты)
@@ -24,14 +25,12 @@ const LAT_ACC := 1.4                # боковое ускорение в по�
 const LANE := 1.85                  # правая полоса (в forest_drive «плюс» — вправо по ходу)
 const STOP_LANE := 2.85             # у остановки прижимается к обочине
 const FAST := 6.0                   # Tab — перемотка поездки
-const WALK_SPEED := 1.6             # по тропинке (Shift — 2.4)
-const PATH_HALF := 1.6
+const PATH_HALF := 1.6             # по лесной тропинке можно отъехать от середины на 1,6 м
 const EYE := Vector3(0.0, 1.19, 0.20)
 const MOUSE_SENS := 0.0022
-const MOM_IN_BUS := Vector3(-0.5, 0.8, 4.6)     # Барно спокойно стоит слева от Самана (руки опущены)
-const HERO_IN_BUS := Vector3(-0.6, 0.8, 3.85)   # задняя площадка, лицом к левому окну
+const MOM_IN_BUS := Vector3(0.28, 0.8, 3.9)     # Барно стоит справа от Самана (руки опущены), смотрит в окно
+const HERO_IN_BUS := Vector3(-0.6, 0.8, 3.85)   # задняя площадка, лицом вперёд по ходу, окно слева
 # вход в санаторий (координаты здания, как в sanatorium/assets/level.json)
-const RAMP_SPEED := 1.05                        # м/с по пандусу (W — вверх, S — назад)
 const DOOR_STOP_X := 26.75                      # пока дверь закрыта, центр коляски — не дальше
 const DOOR_POINT := Vector3(27.55, 1.2, 4.27)   # середина входной двери «А»
 const MOM_DOOR := Vector3(26.55, 1.2, 2.95)     # мама ждёт сбоку от двери
@@ -88,13 +87,16 @@ var forest_count := 0             # сколько точек в лесной т
 var forest_end_s := 0.0
 var door_stop_s := 0.0
 var mom_stop_s := 0.0             # тут мама сходит с маршрута к своему месту у двери
-var guided := false               # на пандусе коляска едет по маршруту сама (W / S), руль не нужен
-var _g_off := Vector3.ZERO        # плавный переход с тропинки на маршрут
+var guided := false               # уже не лесная тропинка, а маршрут к двери (пандус)
+var drive_model                   # story/chair_drive.gd — та же езда, что в здании
+var path_half: Array = []         # насколько можно отъехать от середины маршрута в каждой точке, м
 var entrance                      # story/entrance_door.gd
 var door_open := false
 var _door_busy := false
 var _preload := false
 var _mom_aside := false
+var _mom_v := 0.0                 # скорость мамы по тропинке (плавная)
+var _mom_still := 0.0
 
 
 func _ready() -> void:
@@ -147,6 +149,8 @@ func _build_world() -> void:
 	for p in site["path"]:
 		path.append(Vector3(float(p[0]), float(p[1]), float(p[2])))
 	forest_count = path.size()
+	for i in forest_count:
+		path_half.append(PATH_HALF)
 	var b: Dictionary = site["building"]
 	site_xf = Transform3D(Basis(Vector3.UP, float(b["yaw"])), Vector3(float(b["origin"][0]), float(b["origin"][1]), float(b["origin"][2])))
 	# дальше тропинка продолжается маршрутом коляски: вдоль пандуса, вверх с разворотом, к двери и в тамбур
@@ -158,6 +162,7 @@ func _build_world() -> void:
 				w.y = terrain.height_at(w.x, w.z)
 			if w.distance_to(path[-1]) > 0.05:
 				path.append(w)
+				path_half.append(_route_half(Vector3(float(q[0]), float(q[1]), float(q[2])), int(q[3]) == 1))
 	var acc := 0.0
 	path_cum.append(0.0)
 	for i in range(1, path.size()):
@@ -257,10 +262,25 @@ func _build_world() -> void:
 	set_day(0.0)
 
 
+## Ширина коридора маршрута (координаты здания): марши пандуса узкие — между бортиками 1,4 м, коляска 0,72 м.
+func _route_half(lp: Vector3, ground: bool) -> float:
+	if ground:
+		return 0.8
+	if lp.x > 27.15 and lp.x < 27.95:
+		return 0.12                                    # дверной проём
+	if lp.x >= 27.95:
+		return 0.4                                     # тамбур
+	if lp.y > 1.15 and lp.x > 22.0:
+		return 0.7                                     # площадка у входа
+	if lp.x < 10.3:
+		return 0.5                                     # средняя площадка (разворот)
+	return 0.3                                         # марш пандуса
+
+
 # время: [t, высота солнца/луны °, цвет света, сила, верх неба, горизонт, туман, конец тумана м, рассеянный, насыщенность]
 const DAY_KEYS := [
-	[0.0, 17.0, Color(1.0, 0.95, 0.88), 1.15, Color(0.46, 0.51, 0.56), Color(0.70, 0.72, 0.72), Color(0.62, 0.65, 0.66), 175.0, 1.0, 0.72],
-	[0.38, 7.0, Color(1.0, 0.74, 0.5), 1.0, Color(0.42, 0.45, 0.53), Color(0.78, 0.64, 0.54), Color(0.62, 0.56, 0.52), 150.0, 1.05, 0.72],
+	[0.0, 17.0, Color(1.0, 0.95, 0.88), 1.35, Color(0.5, 0.55, 0.6), Color(0.74, 0.76, 0.76), Color(0.66, 0.69, 0.7), 240.0, 1.15, 0.78],
+	[0.38, 7.0, Color(1.0, 0.74, 0.5), 1.15, Color(0.44, 0.47, 0.55), Color(0.8, 0.66, 0.56), Color(0.64, 0.58, 0.54), 190.0, 1.1, 0.75],
 	[0.6, 3.0, Color(1.0, 0.58, 0.4), 0.65, Color(0.40, 0.44, 0.56), Color(0.74, 0.6, 0.55), Color(0.56, 0.51, 0.5), 125.0, 0.9, 0.68],
 	# дальше не ночь, а поздние синие сумерки: небо светлее земли, лес и здание видно без фонаря.
 	# Небо почти целиком закрыто туманом (fog_sky_affect), поэтому его цвет задаёт в основном цвет тумана.
@@ -293,7 +313,10 @@ func set_day(t: float) -> void:
 	sky_mat.ground_bottom_color = hor.darkened(0.6)
 	sky_mat.sun_angle_max = 35.0 if not moon else 3.0
 	env.fog_light_color = (a[6] as Color).lerp(b[6], k)
-	env.fog_depth_begin = 10.0
+	# в автобусе (днём) лес за окном виден дальше и светлее; к вечеру туман гуще
+	var ride: float = 1.0 - smoothstep(0.3, 0.6, day)
+	env.fog_depth_begin = lerpf(10.0, 18.0, ride)
+	env.volumetric_fog_density = lerpf(0.008, 0.0045, ride)
 	env.fog_depth_end = lerpf(float(a[7]), float(b[7]), k)
 	env.fog_density = 0.94
 	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
@@ -437,8 +460,9 @@ func _build_hero() -> void:
 	hero.name = "Hero"
 	bus.body.add_child(hero)
 	hero.position = HERO_IN_BUS
-	hero.rotation.y = PI * 0.5                       # лицом к окну (за окном туман), мама — слева
+	hero.rotation.y = 0.0                            # лицом вперёд по ходу автобуса; левое окно — слева, мама — справа
 	# своя коляска (джойстик наклоняется при езде); тени не отбрасывает — иначе рука закрывает луч фонаря
+	drive_model = ChairDrive.new()
 	chair_model = ChairModel.new()
 	chair_model.build(hero)
 	head = Node3D.new()
@@ -577,6 +601,29 @@ func _build_building() -> void:
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	building.add_child(probe)
 	probe.position = Vector3(31.6, 2.7, 6.0)
+	# окна снаружи — старое мутное стекло: внутри пусто (интерьер — отдельная сцена), и сквозь чистое стекло
+	# видно «пустое здание». Тамбур и вестибюль за входной дверью остаются видны (Lobby_CurtainWall_Doors).
+	var frosted := StandardMaterial3D.new()
+	frosted.albedo_color = Color(0.16, 0.18, 0.18)
+	frosted.roughness = 0.32
+	frosted.metallic_specular = 0.7
+	frosted.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for gname in ["EntranceBlock_Window_Glass", "MainWing_Window_Glass"]:
+		var g: Node = building.find_child(gname, true, false)
+		if g is MeshInstance3D:
+			(g as MeshInstance3D).material_override = frosted
+	# палата деда (2-й этаж): в окне за мутным стеклом тёплый свет
+	var glow := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.96, 1.95)
+	glow.mesh = qm
+	var gmat := StandardMaterial3D.new()
+	gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gmat.albedo_color = Color(0.95, 0.68, 0.38)
+	glow.material_override = gmat
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	building.add_child(glow)
+	glow.position = Vector3(10.5, 6.425, -0.125)        # поверх стекла окна x 9,5–11,5, y 5,43–7,42 (z = −0,14)
 	# одно горящее окно на 2-м этаже (палата деда)
 	var l := OmniLight3D.new()
 	l.light_color = Color(1.0, 0.78, 0.45)
@@ -593,13 +640,8 @@ func say(who: String, text: String, sec := 0.0) -> void:
 	mom_speaking = who == "mom"
 	if mom_speaking and (phase == "ride" or phase == "arrive"):
 		mom.play("talk_loop", 0.35)
-	var t: float = ui.say(who, text, sec)
-	while t > 0.0 and not _skip:
-		await get_tree().process_frame
-		if not get_tree().paused:
-			t -= get_process_delta_time()
+	await ui.line(who, text, sec)
 	_skip = false
-	ui.hide_line()
 	talking = false
 	if mom_speaking and (phase == "ride" or phase == "arrive"):
 		mom.play("idle_loop", 0.45)
@@ -680,6 +722,7 @@ func _go_outside() -> void:
 	mom.set_arm(null)
 	mom.set_look(null)
 	walk_s = 0.0
+	drive_model.stop()
 	set_day(0.45)
 	audio.set_forest(0.0, 0.2)
 	await wait(0.6)
@@ -687,7 +730,7 @@ func _go_outside() -> void:
 	_depart_bus()
 	await say("mom", "Тут недалеко. Не отставай.")
 	ui.set_objective("Езжай за мамой по тропинке к санаторию")
-	ui.hint("W / S — ехать   ·   A / D — повернуть   ·   Shift — быстрее   ·   F — фонарик", 7.0)
+	ui.hint("W / S — ехать   ·   A / D — поворот   ·   Q / R — скорость   ·   F — фонарик", 7.0)
 
 
 func _depart_bus() -> void:
@@ -717,7 +760,8 @@ func _path_nearest(p: Vector3) -> Array:
 	var bs := 0.0
 	var bp: Vector3 = path[0]
 	var lo: int = maxi(1, path_cum.bsearch(walk_s) - 12)
-	var hi: int = mini(forest_count, lo + 30)                  # только лесная тропинка (дальше — маршрут)
+	var hi: int = mini(path.size(), lo + 30)
+	var bi: int = lo
 	for i in range(lo, hi):
 		var a: Vector3 = path[i - 1]
 		var b: Vector3 = path[i]
@@ -729,7 +773,8 @@ func _path_nearest(p: Vector3) -> Array:
 			best = dd
 			bs = path_cum[i - 1] + (path_cum[i] - path_cum[i - 1]) * t
 			bp = q
-	return [bs, bp]
+			bi = i
+	return [bs, bp, bi]
 
 
 func _walk_events() -> void:
@@ -837,12 +882,7 @@ func _update_ride(dt: float) -> void:
 func _update_walk(dt: float) -> void:
 	if phase == "end":
 		return
-	var drive: float = Input.get_action_strength("drive_forward") - Input.get_action_strength("drive_back")
-	var turn: float = Input.get_action_strength("turn_left") - Input.get_action_strength("turn_right")
-	if guided:
-		_drive_guided(dt, drive)
-	else:
-		_drive_free(dt, drive, turn)
+	_drive(dt)
 	# темнеет по мере продвижения по лесу (и просто со временем)
 	set_day(maxf(day, lerpf(0.45, 0.88, minf(walk_s / maxf(forest_end_s, 1.0), 1.0))))
 	set_day(day + dt * 0.0006)
@@ -855,77 +895,71 @@ func _update_walk(dt: float) -> void:
 			_open_entrance()
 	elif not _door_busy:
 		ui.set_prompt("")
-	if guided and door_open and walk_s >= path_cum[-1] - 0.03:
+	if guided and door_open and walk_s >= path_cum[-1] - 0.15:
 		_enter_building()
 		return
 	if not talking and not _event_busy:
 		_walk_events()
 
 
-## По тропинке: едешь сам (W A S D), но не дальше 1,6 м от неё.
-func _drive_free(dt: float, drive: float, turn: float) -> void:
-	var spd: float = WALK_SPEED * (1.5 if Input.is_key_pressed(KEY_SHIFT) else 1.0)
-	hero.rotation.y += turn * 1.5 * dt
-	hero.rotation.x = lerpf(hero.rotation.x, 0.0, 1.0 - exp(-8.0 * dt))
+## Езда как в здании (story/chair_drive.gd): W/S, A/D, Q/R — скорость. Не дальше коридора от середины
+## маршрута (тропинка — 1,6 м, марши пандуса — 0,3 м), у края коляска упирается. На пандусе — по высоте
+## пандуса и с наклоном. Маму впереди не обогнать; закрытую дверь не проехать.
+func _drive(dt: float) -> void:
+	if drive_model.handle_speed_keys():
+		ui.hint("Скорость %d из 5" % (drive_model.speed_level + 1), 1.5)
+	var j: Vector2 = drive_model.joystick()
+	hero.rotation.y += drive_model.step(j, dt)
 	var fwd: Vector3 = -hero.global_transform.basis.z
-	var p: Vector3 = hero.global_position + Vector3(fwd.x, 0, fwd.z).normalized() * drive * spd * (0.5 if drive < 0.0 else 1.0) * dt
-	var near: Array = _path_nearest(p)
-	walk_s = float(near[0])
+	fwd = Vector3(fwd.x, 0.0, fwd.z).normalized()
+	var want: Vector3 = hero.global_position + fwd * drive_model.v * dt
+	var near: Array = _path_nearest(want)
+	var s_new: float = float(near[0])
 	var q: Vector3 = near[1]
-	var off := Vector3(p.x - q.x, 0, p.z - q.z)
-	if off.length() > PATH_HALF:
-		off = off.normalized() * PATH_HALF
-	p = Vector3(q.x + off.x, 0.0, q.z + off.z)
-	p.y = lerpf(q.y, terrain.height_at(p.x, p.z), clampf(off.length() / PATH_HALF, 0.0, 1.0))
-	# маму не обогнать: тропинка узкая, сквозь неё не проехать — едешь следом
-	if not _mom_aside and walk_s > mom_s - 1.1:
-		walk_s = maxf(mom_s - 1.1, 0.0)
-		var q2: Vector3 = _path_at(walk_s)
-		p = Vector3(q2.x + off.x, 0.0, q2.z + off.z)
-		p.y = lerpf(q2.y, terrain.height_at(p.x, p.z), clampf(off.length() / PATH_HALF, 0.0, 1.0))
+	var i: int = int(near[2])
+	var half: float = minf(float(path_half[i - 1]), float(path_half[i]))
+	var off := Vector3(want.x - q.x, 0.0, want.z - q.z)
+	var hit := false
+	if off.length() > half:
+		off = off.normalized() * half
+		hit = true
+	# дальше нельзя: мама впереди (пока идёт с нами), закрытая дверь, конец маршрута
+	var limit: float = path_cum[-1]
+	if not _mom_aside:
+		limit = minf(limit, mom_s - 1.1)
+	if not door_open:
+		limit = minf(limit, door_stop_s)
+	if s_new > limit:
+		s_new = maxf(limit, 0.0)
+		q = _path_at(s_new)
+		hit = true
+	walk_s = s_new
+	var p := Vector3(q.x + off.x, 0.0, q.z + off.z)
+	if i < forest_count:
+		p.y = lerpf(q.y, terrain.height_at(p.x, p.z), clampf(off.length() / PATH_HALF, 0.0, 1.0))
+	else:
+		p.y = q.y
+	if hit and absf(drive_model.v) > 0.3:
+		drive_model.blocked(0.35)
 	hero.global_position = p
-	chair_model.set_input(drive, -turn, dt)
-	audio.set_motor(absf(drive) * 0.8 + absf(turn) * 0.3)
-	# конец тропинки: дальше — пандус, коляска поедет по маршруту
-	if walk_s >= forest_end_s - 0.35 and drive > 0.05:
-		guided = true
-		_g_off = Vector3(p.x - q.x, 0.0, p.z - q.z)
+	guided = walk_s > forest_end_s - 0.3
+	# уклон: нос вверх, если едешь вверх по пандусу
+	var up: Vector3 = _path_at(walk_s + 0.5) - _path_at(walk_s - 0.5)
+	var flat := Vector2(up.x, up.z)
+	var slope := 0.0
+	if guided and flat.length() > 0.05:
+		slope = atan2(up.y, flat.length()) * Vector2(fwd.x, fwd.z).dot(flat.normalized())
+	hero.rotation.x = lerpf(hero.rotation.x, slope, 1.0 - exp(-6.0 * dt))
+	chair_model.set_input(j.x, j.y, dt)
+	audio.set_motor(clampf(absf(drive_model.v) / 2.4 + absf(drive_model.w) * 0.25, 0.0, 1.0) * 0.85)
+	# конец тропинки: дальше — пандус
+	if guided and not _events.has("ramp"):
+		_events["ramp"] = true
 		ui.set_objective("Поднимись по пандусу ко входу", site_xf * DOOR_POINT, Vector3(0, 0.6, 0))
-		ui.hint("W — ехать по пандусу   ·   S — назад   ·   мышь — смотреть", 6.0)
+		ui.hint("Пандус узкий: веди коляску ровно, на средней площадке — разворот", 6.0)
 		if not _preload:
 			_preload = true
 			ResourceLoader.load_threaded_request(GameState.SANATORIUM)     # здание грузится заранее
-
-
-## По пандусу: коляска едет по маршруту (W — вперёд, S — назад) и сама поворачивает на развороте,
-## наклоняясь по уклону. Мышью можно смотреть по сторонам.
-func _drive_guided(dt: float, drive: float) -> void:
-	var limit: float = path_cum[-1] if door_open else door_stop_s
-	if not _mom_aside:
-		limit = minf(limit, mom_s - 1.2)                 # мама впереди на пандусе — не наехать на неё
-	limit = maxf(limit, forest_end_s - 1.2)
-	var spd: float = RAMP_SPEED * (0.6 if drive < 0.0 else 1.0)
-	var ns: float = clampf(walk_s + drive * spd * dt, forest_end_s - 1.2, limit)
-	var moved: float = absf(ns - walk_s)
-	walk_s = ns
-	_g_off *= exp(-moved * 1.4)
-	var p: Vector3 = _path_at(walk_s) + _g_off
-	hero.global_position = p
-	# куда смотрит коляска: по касательной к маршруту чуть впереди (плавно, только пока едет)
-	var ahead: Vector3 = _path_at(walk_s + 0.8) - _path_at(walk_s - 0.2)
-	var yaw0: float = hero.rotation.y
-	if Vector2(ahead.x, ahead.z).length() > 0.05:
-		var want: float = atan2(-ahead.x, -ahead.z)
-		hero.rotation.y = lerp_angle(yaw0, want, 1.0 - exp(-moved * 3.2))
-	# уклон пандуса: нос вверх, когда едем вверх
-	var up: Vector3 = _path_at(walk_s + 0.5) - _path_at(walk_s - 0.5)
-	var slope: float = atan2(up.y, maxf(Vector2(up.x, up.z).length(), 0.05))
-	hero.rotation.x = lerpf(hero.rotation.x, slope, 1.0 - exp(-6.0 * dt))
-	var yaw_rate: float = angle_difference(yaw0, hero.rotation.y) / maxf(dt, 0.001)
-	chair_model.set_input(signf(drive) * minf(absf(drive), 1.0) if moved > 0.0001 else 0.0, clampf(-yaw_rate / 1.5, -1.0, 1.0), dt)
-	audio.set_motor(minf(moved / maxf(dt, 0.001) / RAMP_SPEED, 1.0) * 0.85)
-	if walk_s < forest_end_s - 0.6 and drive < 0.0:
-		guided = false                                   # съехал обратно на тропинку — снова руль
 
 
 ## Мама идёт на ~3 м впереди и ждёт, если отстал; наверху пандуса отходит к двери и ждёт там.
@@ -940,14 +974,24 @@ func _update_mom_walk(_dt: float) -> void:
 		_mom_hold = true
 		_mom_to_door()
 		return
-	if mom_s < want - 0.3:
-		mom_s = minf(mom_s + 1.25 * get_process_delta_time(), want)
+	# плавно: скорость растёт и падает постепенно, идёт/стоит — с запасом (без дёрганья туда-сюда),
+	# к сыну поворачивается, только когда постоит
+	var dt: float = get_process_delta_time()
+	var gap: float = want - mom_s
+	var target_v: float = clampf(gap * 0.9, 0.0, 1.25) if gap > 0.15 else 0.0
+	_mom_v = move_toward(_mom_v, target_v, 1.6 * dt)
+	mom_s = minf(mom_s + _mom_v * dt, want)
+	if _mom_v > 0.02:
 		mom.global_position = _path_at(mom_s)
 		mom.face(_path_at(mom_s + 1.5))
-		mom.play("walk_loop", 0.25)
-	else:
-		mom.play("talk_loop" if mom_speaking else "idle_loop", 0.4)
-		mom.face(hero.global_position)
+	if _mom_v > 0.25:
+		_mom_still = 0.0
+		mom.play("walk_loop", 0.35, clampf(_mom_v / 1.24, 0.55, 1.1))
+	elif _mom_v < 0.08:
+		_mom_still += dt
+		mom.play("talk_loop" if mom_speaking else "idle_loop", 0.45)
+		if _mom_still > 1.2:
+			mom.face(hero.global_position)
 
 
 func _mom_to_door() -> void:
@@ -971,6 +1015,7 @@ func _open_entrance() -> void:
 ## В тамбуре: мама заходит следом, Саман оглядывается — дверь закрывается — дальше санаторий с этого места.
 func _enter_building() -> void:
 	phase = "end"
+	drive_model.stop()
 	ui.set_objective("")
 	ui.set_prompt("")
 	chair_model.set_input(0.0, 0.0, 0.05)

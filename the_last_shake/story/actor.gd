@@ -114,6 +114,19 @@ func set_arm(target: Variant) -> void:
 		look.arm_target = target
 
 
+func set_lean(a: float) -> void:
+	if look:
+		look.lean = a
+
+
+## Обе руки к точкам (мировые), weight — насколько (0..1).
+func set_hands(right: Variant, left: Variant, weight := 1.0) -> void:
+	if look:
+		look.arm_target = right
+		look.arm_target_left = left
+		look.arm_weight = weight
+
+
 ## Голова (для «навести взгляд и нажать E» и камер).
 func head_pos() -> Vector3:
 	if skel and look and look._head >= 0:

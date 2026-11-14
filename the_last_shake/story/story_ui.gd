@@ -29,6 +29,10 @@ var _damage: ColorRect
 var _flash: ColorRect
 var _dot: ColorRect
 var _sub_t := 0.0
+var _sub_next: Label
+var _sub_wait := false
+var _sub_shown_ms := 0
+var _line_done := false
 var _obj_flash := 0.0
 var _hint_t := 0.0
 var _damage_v := 0.0
@@ -80,10 +84,8 @@ func _ready() -> void:
 	root.add_child(_dot)
 	# субтитры
 	_sub_box = PanelContainer.new()
-	var st := StyleBoxFlat.new()
-	st.bg_color = Color(0, 0, 0, 0.55)
-	st.set_content_margin_all(14)
-	st.set_corner_radius_all(4)
+	var st := StyleBoxEmpty.new()                  # без тёмной плашки: текст с чёрной обводкой
+	st.set_content_margin_all(10)
 	_sub_box.add_theme_stylebox_override("panel", st)
 	_sub_box.anchor_left = 0.5
 	_sub_box.anchor_right = 0.5
@@ -106,7 +108,17 @@ func _ready() -> void:
 	_sub_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_sub_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_sub_text.custom_minimum_size = Vector2(1000, 0)
+	for l in [_sub_name, _sub_text]:
+		(l as Label).add_theme_constant_override("outline_size", 8)
+		(l as Label).add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
 	v.add_child(_sub_text)
+	_sub_next = _label(16, Color(0.85, 0.82, 0.75, 0.8))
+	_sub_next.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sub_next.add_theme_constant_override("outline_size", 6)
+	_sub_next.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_sub_next.text = "Пробел — далее"
+	_sub_next.visible = false
+	v.add_child(_sub_next)
 	# задание
 	_objective = _label(22, Color(1.0, 0.92, 0.7))
 	_objective.position = Vector2(30, 70)
@@ -173,22 +185,96 @@ func _label(size: int, col: Color) -> Label:
 	return l
 
 
-## Показать реплику. seconds = 0 — по длине текста. Возвращает длительность.
-func say(who: String, text: String, seconds := 0.0) -> float:
+## Записка на весь экран (лист бумаги). Ждёт пробел / E / Esc.
+func note(title: String, text: String) -> void:
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(dim)
+	var paper := PanelContainer.new()
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(0.86, 0.82, 0.72)
+	st.set_content_margin_all(34)
+	st.shadow_color = Color(0, 0, 0, 0.6)
+	st.shadow_size = 14
+	paper.add_theme_stylebox_override("panel", st)
+	paper.set_anchors_preset(Control.PRESET_CENTER)
+	paper.custom_minimum_size = Vector2(760, 0)
+	paper.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(paper)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	paper.add_child(v)
+	var h := Label.new()
+	h.text = title
+	h.add_theme_font_size_override("font_size", 24)
+	h.add_theme_color_override("font_color", Color(0.2, 0.15, 0.1))
+	h.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	h.custom_minimum_size = Vector2(690, 0)
+	v.add_child(h)
+	var body := Label.new()
+	body.text = text
+	body.add_theme_font_size_override("font_size", 19)
+	body.add_theme_color_override("font_color", Color(0.16, 0.13, 0.1))
+	body.add_theme_constant_override("line_spacing", 4)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size = Vector2(690, 0)
+	v.add_child(body)
+	var foot := Label.new()
+	foot.text = "Пробел — отложить"
+	foot.add_theme_font_size_override("font_size", 15)
+	foot.add_theme_color_override("font_color", Color(0.35, 0.3, 0.25))
+	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	v.add_child(foot)
+	await get_tree().process_frame
+	paper.position = (get_viewport().get_visible_rect().size - paper.size) * 0.5
+	await get_tree().create_timer(0.4).timeout
+	if GameState.auto_lines:
+		await get_tree().create_timer(1.0).timeout
+	else:
+		while not (Input.is_action_just_pressed("skip_line") or Input.is_action_just_pressed("interact")):
+			await get_tree().process_frame
+	paper.queue_free()
+	dim.queue_free()
+
+
+## Реплика диалога: висит, пока не нажмёшь пробел / Enter (автотест — по времени: GameState.auto_lines).
+func line(who: String, text: String, seconds := 0.0) -> void:
+	var t: float = say(who, text, seconds, not GameState.auto_lines)
+	_line_done = false
+	while not _line_done:
+		await get_tree().process_frame
+		if GameState.auto_lines and not get_tree().paused:
+			t -= get_process_delta_time()
+			if t <= 0.0:
+				break
+	hide_line()
+
+
+## Показать реплику. seconds = 0 — по длине текста; wait — не убирать сама, ждать пробел (line()).
+## Без wait — короткий выкрик во время действия: пропадает сам.
+func say(who: String, text: String, seconds := 0.0, wait := false) -> float:
 	var sp: Array = SPEAKERS.get(who, ["", Color.WHITE])
 	_sub_name.text = sp[0]
 	_sub_name.add_theme_color_override("font_color", sp[1])
 	_sub_name.visible = sp[0] != ""
 	_sub_text.text = text
 	_sub_box.visible = true
+	_sub_wait = wait
+	_sub_next.visible = wait
+	_sub_shown_ms = Time.get_ticks_msec()
 	var t: float = seconds if seconds > 0.0 else clampf(1.6 + text.length() * 0.055, 2.2, 7.5)
-	_sub_t = t
+	_sub_t = 0.0 if wait else t
 	return t
 
 
 func hide_line() -> void:
 	_sub_t = 0.0
+	_sub_wait = false
+	_sub_next.visible = false
 	_sub_box.visible = false
+	_line_done = true
 
 
 func line_visible() -> bool:
@@ -324,4 +410,7 @@ func _process(dt: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("skip_line") and _sub_box.visible:
+		if _sub_wait and Time.get_ticks_msec() - _sub_shown_ms < 250:
+			return                                  # нажатие для прошлой реплики — не проскочить эту
+		_line_done = true
 		line_skipped.emit()

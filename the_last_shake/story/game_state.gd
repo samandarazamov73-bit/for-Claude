@@ -23,6 +23,7 @@ const CHAPTERS := [
 
 var checkpoint := "start"       # где начать санаторий: start, key, chase, void, floor3, maze
 var deaths := 0
+var auto_lines := false          # автотест: реплики идут сами по времени (в игре — только по пробелу)
 var entry := {}                  # откуда заехали в здание (пролог → санаторий): pos, yaw, mom — координаты здания
 var _fade: ColorRect
 var _layer: CanvasLayer

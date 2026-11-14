@@ -160,10 +160,12 @@ func _box(parent: Node3D, center: Vector3, size: Vector3, mat: Material, collide
 ## holes — проёмы [[a, b], ...] вдоль стены. Возвращает тела кусков.
 func _wall(parent: Node3D, x0: float, z0: float, x1: float, z1: float, side: int, holes: Array) -> Array:
 	var along_x: bool = absf(z1 - z0) < 0.001
-	var a0: float = minf(x0, x1) if along_x else minf(z0, z1)
-	var a1: float = maxf(x0, x1) if along_x else maxf(z0, z1)
+	# концы стены заходят за угол на 0,4 м: соседние стены (они сдвинуты от линии блока) перекрываются,
+	# и в углах нет щелей, сквозь которые видны лестницы и пустота здания
+	var a0: float = (minf(x0, x1) if along_x else minf(z0, z1)) - 0.4
+	var a1: float = (maxf(x0, x1) if along_x else maxf(z0, z1)) + 0.4
 	var c: float = z0 if along_x else x0
-	var th: float = 0.16 if side == 0 else 0.12
+	var th: float = 0.2 if side == 0 else 0.16
 	var off: float = 0.0 if side == 0 else float(side) * 0.16
 	var pieces: Array = [[a0, a1]]
 	for h in holes:

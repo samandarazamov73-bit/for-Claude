@@ -9,6 +9,7 @@ var _log: Array = []
 
 
 func _ready() -> void:
+	GameStateRef().auto_lines = true           # реплики в тесте идут сами
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--case="):
 			case_name = a.get_slice("=", 1)
@@ -53,7 +54,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap":
+		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -112,7 +113,7 @@ func _prologue() -> void:
 			await secs(30.0)
 			print("LOD2 ", p.forest.lod_manager.stats, " cam ", p.cam.global_position, " s ", p.s)
 			await shot("bus_window_later")
-			p.look_yaw = 1.35
+			p.look_yaw = -1.3
 			p.look_pitch = 0.12
 			await secs(1.5)
 			await shot("bus_left_mom")
@@ -121,7 +122,7 @@ func _prologue() -> void:
 			await secs(1.5)
 			await shot("bus_front")
 		"bus_mom":
-			p.look_yaw = 1.35
+			p.look_yaw = -1.3
 			p.look_pitch = 0.15
 			await secs(8.0)
 			await shot("bus_mom_window")
@@ -198,13 +199,11 @@ func _entrance() -> void:
 	p.walk_s = p.forest_end_s - 0.5
 	p.hero.global_position = p._path_at(p.walk_s)
 	p.mom_s = p.walk_s + 3.0
-	Input.action_press("drive_forward")
 	await secs(1.5)
 	print("ENT guided=", p.guided, " walk_s=", p.walk_s, " forest_end=", p.forest_end_s, " door_stop=", p.door_stop_s, " end=", p.path_cum[-1])
 	for spot in [["ent_ramp_foot", 18.5], ["ent_ramp_lower", 24.0], ["ent_ramp_turn", 30.6], ["ent_ramp_upper", 38.0]]:
-		p.walk_s = p.forest_end_s + float(spot[1]) - 1.2
-		p.mom_s = minf(p.walk_s + 3.2, p.mom_stop_s)
-		p._g_off = Vector3.ZERO
+		p.mom_s = minf(p.forest_end_s + float(spot[1]) + 3.2, p.mom_stop_s)
+		tp_route(p, p.forest_end_s + float(spot[1]))
 		await secs(1.4)
 		await shot(spot[0])
 		if spot[0] == "ent_ramp_turn" or spot[0] == "ent_ramp_lower":
@@ -215,10 +214,9 @@ func _entrance() -> void:
 			await shot(spot[0] + "_tp")
 			p.cam.position = keep
 			p.cam.rotation = Vector3.ZERO
-	p.walk_s = p.door_stop_s - 1.5
 	p.mom_s = p.mom_stop_s
-	await secs(4.0)
-	Input.action_release("drive_forward")
+	await secs(2.0)
+	tp_route(p, p.door_stop_s - 0.05)
 	await secs(3.0)
 	print("ENT at door: walk_s=", p.walk_s, " mom_aside=", p._mom_aside, " door_open=", p.door_open)
 	await shot("ent_door")
@@ -234,12 +232,13 @@ func _entrance() -> void:
 	await shot("ent_door_opening")
 	await secs(1.5)
 	await shot("ent_door_open")
-	Input.action_press("drive_forward")
-	await secs(1.5)
+	for k in 8:
+		tp_route(p, minf(p.door_stop_s + k * 0.25, p.path_cum[-1]))
+		await secs(0.2)
 	await shot("ent_threshold")
+	tp_route(p, p.path_cum[-1])
 	while is_instance_valid(p) and p.phase != "end":
 		await get_tree().process_frame
-	Input.action_release("drive_forward")
 	await secs(2.6)
 	if is_instance_valid(p):
 		await shot("ent_lookback")
@@ -297,6 +296,16 @@ func _skytest() -> void:
 	await shot("sky_e_linear")
 
 
+## Пролог: поставить коляску на маршрут (s — метры от начала тропинки), лицом по ходу.
+func tp_route(p: Node, s: float) -> void:
+	var a: Vector3 = p._path_at(s)
+	var b: Vector3 = p._path_at(s + 0.6)
+	p.walk_s = s
+	p.hero.global_position = a
+	p.hero.rotation.y = atan2(-(b.x - a.x), -(b.z - a.z))
+	p.drive_model.stop()
+
+
 func GameStateRef() -> Node:
 	return get_tree().root.get_node("GameState")
 
@@ -307,6 +316,8 @@ func _sanatorium() -> void:
 		cp = "start"
 	elif case_name == "chase2":
 		cp = "chase"
+	elif case_name == "void2":
+		cp = "void"
 	elif case_name == "fight":
 		cp = "maze"
 	GameStateRef().checkpoint = cp
@@ -352,6 +363,21 @@ func _sanatorium() -> void:
 			await get_tree().process_frame
 		await secs(3.0)
 		await shot("quake")
+	elif case_name == "void2":
+		# пустой этаж: виды из разных точек во все стороны (ищем дыры)
+		var spots := [Vector3(37.5, 4.55, -8.5), Vector3(20.0, 4.55, -8.0), Vector3(50.0, 4.55, -8.0), Vector3(8.8, 4.55, -8.5),
+			Vector3(66.0, 4.55, -4.0)]
+		var n := 0
+		for sp in spots:
+			for yaw in [0.0, PI * 0.5, PI, -PI * 0.5]:
+				d.player.global_position = sp
+				d.player.rotation.y = yaw
+				d.player.look_yaw = 0.0
+				d.player.look_pitch = 0.1
+				d.player.torch_on = true
+				await secs(0.6)
+				await shot("void2_%02d" % n)
+				n += 1
 	elif case_name == "trap":
 		var dr = d.door(74)
 		dr.set_angle(90.0)
@@ -517,6 +543,8 @@ func _playthrough() -> void:
 	step("void")
 	await wait_for(func(): return d.lift.state == "open", 30, "doors open at 2")
 	await tp(Vector3(9.0, 4.5, -3.5), 0.0)
+	await wait_for(func(): return d.objective_text().contains("бумаги"), 60, "notes")
+	d._read_note("diary")
 	await wait_for(func(): return d.act == "void_done", 120, "void_done")
 	step("void_done")
 	await tp(Vector3(37.5, 4.5, -7.3), 0.0)
@@ -594,15 +622,21 @@ func _prologue_play() -> void:
 		p.hero.global_position = p._path_at(dist)
 		await secs(0.3)
 	print("STEP forest end  walk_s=", p.walk_s, " of ", p.forest_end_s)
-	Input.action_press("drive_forward")
-	await wait_for_p(func(): return p.walk_s >= p.door_stop_s - 0.05, 200, "door", p)
+	while is_instance_valid(p) and dist < p.door_stop_s - 0.05:
+		var cap: float = p.door_stop_s - 0.05 if p._mom_aside else maxf(p.mom_s - 1.5, dist)
+		dist = minf(dist + 1.0, cap)
+		tp_route(p, dist)
+		await secs(0.2)
 	print("STEP at door  guided=", p.guided, " mom_aside=", p._mom_aside)
 	await secs(1.0)
 	p._open_entrance()
 	await wait_for_p(func(): return p.door_open, 30, "door open", p)
 	print("STEP door open")
+	for k in 12:
+		if is_instance_valid(p) and p.phase != "end":
+			tp_route(p, minf(p.door_stop_s + k * 0.2, p.path_cum[-1]))
+		await secs(0.15)
 	await wait_for_p(func(): return not is_instance_valid(p) or p.phase == "end", 60, "inside", p)
-	Input.action_release("drive_forward")
 	print("STEP end of path  phase=", p.phase if is_instance_valid(p) else "freed")
 	for i in 6:
 		await secs(0.12)

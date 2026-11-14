@@ -5,7 +5,10 @@ extends SkeletonModifier3D
 ## Модели Mixamo смотрят в +Z своего скелета.
 
 var look_target: Variant = null      # Vector3 (мировые координаты) или null
-var arm_target: Variant = null       # Vector3 (мировые) или null
+var arm_target: Variant = null       # Vector3 (мировые) или null — правая рука
+var arm_target_left: Variant = null  # левая рука
+var arm_weight := 1.0                # 0..1: насколько рука тянется к цели (плавно взяться/отпустить)
+var lean := 0.0                      # рад: наклон корпуса вперёд от поясницы (бьёт сверху, тянется вниз)
 var max_yaw := 1.2
 var max_pitch := 0.5
 var follow_rate := 4.0
@@ -15,6 +18,10 @@ var _head := -1
 var _arm := -1
 var _fore := -1
 var _hand := -1
+var _larm := -1
+var _lfore := -1
+var _lhand := -1
+var _spine := -1
 var _yaw := 0.0
 var _pitch := 0.0
 var _last_us := 0
@@ -34,6 +41,10 @@ func find_bones(sk: Skeleton3D) -> void:
 			"RightArm": _arm = i
 			"RightForeArm": _fore = i
 			"RightHand": _hand = i
+			"LeftArm": _larm = i
+			"LeftForeArm": _lfore = i
+			"LeftHand": _lhand = i
+			"Spine": _spine = i
 
 
 func _process_modification() -> void:
@@ -44,8 +55,17 @@ func _process_modification() -> void:
 	var dt: float = clampf(float(now - _last_us) / 1000000.0, 0.0, 0.1) if _last_us > 0 else 0.016
 	_last_us = now
 	var inv: Transform3D = sk.global_transform.affine_inverse()
+	if absf(lean) > 0.001 and _spine >= 0:
+		# поворот вокруг оси «вправо» скелета у поясницы: всё, что выше, наклоняется вперёд (+Z — лицо)
+		var sg: Transform3D = sk.get_bone_global_pose(_spine)
+		var par: int = sk.get_bone_parent(_spine)
+		var pb: Basis = sk.get_bone_global_pose(par).basis if par >= 0 else Basis.IDENTITY
+		var bent: Basis = Basis(Vector3.RIGHT, lean) * sg.basis
+		sk.set_bone_pose_rotation(_spine, (pb.inverse() * bent).get_rotation_quaternion())
 	if arm_target != null and _arm >= 0 and _fore >= 0 and _hand >= 0:
-		_reach(sk, inv * (arm_target as Vector3))
+		_reach(sk, inv * (arm_target as Vector3), _arm, _fore, _hand, Vector3(-0.6, -1.0, -0.3))
+	if arm_target_left != null and _larm >= 0 and _lfore >= 0 and _lhand >= 0:
+		_reach(sk, inv * (arm_target_left as Vector3), _larm, _lfore, _lhand, Vector3(0.6, -1.0, -0.3))
 	if _neck >= 0 and _head >= 0:
 		_look(sk, inv, dt)
 
@@ -75,10 +95,11 @@ func _look(sk: Skeleton3D, inv: Transform3D, dt: float) -> void:
 
 
 ## Две кости (плечо — предплечье): кисть в точку t (координаты скелета), локоть вниз и наружу.
-func _reach(sk: Skeleton3D, t: Vector3) -> void:
-	var arm_g: Transform3D = sk.get_bone_global_pose(_arm)
-	var fore_g: Transform3D = sk.get_bone_global_pose(_fore)
-	var hand_g: Transform3D = sk.get_bone_global_pose(_hand)
+func _reach(sk: Skeleton3D, t_full: Vector3, arm: int, fore: int, hand: int, pole0: Vector3) -> void:
+	var arm_g: Transform3D = sk.get_bone_global_pose(arm)
+	var fore_g: Transform3D = sk.get_bone_global_pose(fore)
+	var hand_g: Transform3D = sk.get_bone_global_pose(hand)
+	var t: Vector3 = hand_g.origin.lerp(t_full, clampf(arm_weight, 0.0, 1.0))
 	var s: Vector3 = arm_g.origin
 	var a: float = s.distance_to(fore_g.origin)
 	var b: float = fore_g.origin.distance_to(hand_g.origin)
@@ -87,7 +108,7 @@ func _reach(sk: Skeleton3D, t: Vector3) -> void:
 	var to: Vector3 = t - s
 	var d: float = clampf(to.length(), absf(a - b) + 0.01, a + b - 0.01)
 	var u: Vector3 = to.normalized()
-	var pole: Vector3 = Vector3(-0.6, -1.0, -0.3)        # локоть: вниз, наружу (вправо = -X), чуть назад
+	var pole: Vector3 = pole0                             # локоть: вниз, наружу, чуть назад
 	pole = (pole - u * pole.dot(u)).normalized()
 	var cos_a: float = clampf((a * a + d * d - b * b) / (2.0 * a * d), -1.0, 1.0)
 	var elbow: Vector3 = s + (u * cos_a + pole * sqrt(1.0 - cos_a * cos_a)) * a
@@ -97,7 +118,7 @@ func _reach(sk: Skeleton3D, t: Vector3) -> void:
 	var fore_dir: Vector3 = Basis(q1) * (hand_g.origin - fore_g.origin)
 	var q2 := Quaternion(fore_dir.normalized(), (wrist - elbow).normalized())
 	var fore_new: Basis = Basis(q2) * Basis(q1) * fore_g.basis
-	var parent: int = sk.get_bone_parent(_arm)
+	var parent: int = sk.get_bone_parent(arm)
 	var parent_b: Basis = sk.get_bone_global_pose(parent).basis if parent >= 0 else Basis.IDENTITY
-	sk.set_bone_pose_rotation(_arm, (parent_b.inverse() * arm_new).get_rotation_quaternion())
-	sk.set_bone_pose_rotation(_fore, (arm_new.inverse() * fore_new).get_rotation_quaternion())
+	sk.set_bone_pose_rotation(arm, (parent_b.inverse() * arm_new).get_rotation_quaternion())
+	sk.set_bone_pose_rotation(fore, (arm_new.inverse() * fore_new).get_rotation_quaternion())

@@ -33,6 +33,7 @@ var cab_light: OmniLight3D
 const SPEED := 0.85
 const ACC := 0.55
 const DOOR_TIME := 1.5
+var door_slow := 1.0           # сюжет: >1 — двери закрываются медленнее (сцена с мамой на 3-м этаже)
 const AUTO_CLOSE := 9.0
 const ROPE_TOP := 13.95               # under the overhead pulley beam in the shaft
 const ROPE_X := [37.44, 37.56]
@@ -280,7 +281,7 @@ func _physics_process(dt: float) -> void:
 		"closing":
 			if _player_in_doorway() and open_f > 0.15:
 				state = "opening"
-			open_f = move_toward(open_f, 0.0, dt / DOOR_TIME)
+			open_f = move_toward(open_f, 0.0, dt / (DOOR_TIME * door_slow))
 			_apply_doors()
 			if open_f <= 0.0:
 				state = "closed"
