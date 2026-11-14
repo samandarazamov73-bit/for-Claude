@@ -319,6 +319,8 @@ func build_void() -> void:
 	lamp(root_set, Vector3(8.8, 6.9, -7.3), 1.1, 7.0)
 	lamp(root_set, Vector3(37.5, 6.9, -7.6), 0.25, 3.5, Color(0.7, 0.8, 1.0))
 	game.lights.set_room("L1.F2", true)
+	game.hud.hidden_level = 1                     # в пустоте нет комнат — подписи не нужны (кроме палаты деда)
+	game.hud.hidden_except = ["L1.F2", "L1.F2b"]
 	var d = door(DOOR_204)
 	if d:
 		d.locked = false
@@ -350,6 +352,7 @@ func restore_floor2() -> void:
 
 func build_real2() -> void:
 	mode = "real"
+	game.hud.hidden_level = -1
 	_clear()
 	restore_floor2()
 	# свет: в комнатах темно, в коридоре горит, но то и дело гаснет; в процедурной 213 горит (там ключ)

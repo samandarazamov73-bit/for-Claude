@@ -47,7 +47,7 @@ const PSYCHO_FAR := Vector3(52.0, 1.2, -8.1)       # погоня: стоит в
 const PSYCHO_NEAR := Vector3(45.5, 1.2, -8.1)      # …свет гаснет на миг — он уже в 8 м
 const CHASE_RESTART := Vector3(43.5, 1.2, -7.7)
 const PSYCHO_SPEED := 3.3         # м/с; после каждой поимки чуть медленнее
-const MAN_POS := Vector3(37.0, 7.8, -8.5)          # человек в коляске у лифта на 3-м этаже
+const MAN_POS := Vector3(37.85, 7.8, -9.0)         # человек в коляске напротив лифта (виден в проёме дверей)
 # братья: холл отдыха 309 (L2.R7) — сюда притаскивают Самана; старший брат — тот самый мужчина в белом
 const LOUNGE := "L2.R7"
 const DOOR_LOUNGE := 165
@@ -1166,17 +1166,18 @@ func _act4(after_brothers := false) -> void:
 	act = "floor3_leave"
 	# двери закрываются медленно: сбоку подходит мама, берётся за спинку его коляски и увозит в другую сторону
 	await until(func(): return lift.player_in_cabin() and lift.state == "closing")
-	lift.door_slow = 4.0                              # ~6 секунд вместо полутора
+	lift.door_slow = 14.0                             # пока мама подходит — двери почти стоят
 	look_at_point(MAN_POS + Vector3(0, 1.0, 0), 0.6)
 	snd("metal_creak", MAN_POS + Vector3(0, 0.5, 0), 0.0, 0.9, 30.0)
 	var turn := create_tween()                        # он сам разворачивается — уезжать
 	turn.tween_property(man, "rotation:y", PI * 0.5, 1.4).set_trans(Tween.TRANS_SINE)
+	# мама входит в проём слева (из-за края дверей), встаёт за его коляской
+	var behind: Vector3 = MAN_POS + Vector3(-0.95, 0, 0)
 	mom.visible = true
 	mom.set_look(null)
-	mom.global_position = MAN_POS + Vector3(-4.6, 0, 0.1)
-	mom.face(MAN_POS, true)
-	var behind: Vector3 = MAN_POS + Vector3(-0.95, 0, 0)
-	await mom.go_and_wait([behind], 1.35)
+	mom.global_position = behind + Vector3(-2.2, 0, 0.1)
+	mom.face(behind, true)
+	await mom.go_and_wait([behind], 1.2)
 	mom.face(MAN_POS + Vector3(3, 0, 0), true)
 	# руки на верх спинки (коляска смотрит в +X: спинка — со стороны −X)
 	var grip := func(w: float) -> void:
@@ -1186,8 +1187,9 @@ func _act4(after_brothers := false) -> void:
 	gt.tween_method(grip, 0.0, 1.0, 0.45)
 	await gt.finished
 	mom.set_look(player.head.global_position)         # на миг смотрит прямо на Самана
-	await wait(0.9)
+	await wait(1.1)
 	mom.set_look(null)
+	lift.door_slow = 3.0                              # теперь двери закрываются, а она увозит его вправо
 	var go := 6.5
 	mom.play("walk_loop", 0.3, 0.75)
 	var t := 0.0

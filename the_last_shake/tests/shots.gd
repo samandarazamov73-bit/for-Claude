@@ -584,7 +584,7 @@ func _playthrough() -> void:
 	d.scares.elapsed = 400.0
 	d.scares.count = 10
 	await secs(3.0)
-	await tp(d.MAN_POS + Vector3(0, 0, -1.3), PI)
+	await tp(d.MAN_POS + Vector3(-1.4, 0, 0.4), -PI * 0.5)
 	await wait_for(func(): return d.act == "floor3_leave", 120, "man dialogue")
 	step("floor3_leave")
 	await tp(Vector3(37.5, 7.8, -7.6), 0.0)
@@ -814,7 +814,7 @@ func _liftmom_test(dir: Node) -> void:
 	dir.scares.elapsed = 400.0
 	dir.scares.count = 10
 	await secs(1.0)
-	await tp(dir.MAN_POS + Vector3(0, 0, -1.3), PI)
+	await tp(dir.MAN_POS + Vector3(-1.4, 0, 0.4), -PI * 0.5)
 	await wait_for(func(): return dir.act == "floor3_leave", 120, "man dialogue")
 	await tp(Vector3(37.5, 7.8, -7.6), 0.0)
 	press_call(2)
@@ -822,8 +822,8 @@ func _liftmom_test(dir: Node) -> void:
 	await tp(Vector3(37.5, 7.8, -5.0), 0.0)
 	press_cab("2")
 	await wait_for(func(): return dir.mom.visible, 20, "mom appears")
-	for i in 4:
-		await secs(1.3)
+	for i in 6:
+		await secs(0.9)
 		await shot("lift_mom_%d" % i)
 
 

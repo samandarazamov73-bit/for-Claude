@@ -97,10 +97,14 @@ func _build_room() -> void:
 	Props.box(self, Vector3(-0.6, 0.66, -0.2), Vector3(0.96, 0.08, 1.2), _mat(Color(0.8, 0.82, 0.85)))
 	for z in [-0.75, 1.35]:
 		Props.box(self, Vector3(-0.6, 0.75, z), Vector3(1.05, 0.9, 0.05), metal)
-	var sheet := _mat(Color(0.9, 0.9, 0.88), 0.95)
-	Props.box(self, Vector3(-0.6, 0.78, 0.4), Vector3(0.62, 0.22, 1.55), sheet)     # тело
-	Props.box(self, Vector3(-0.6, 0.8, -0.45), Vector3(0.36, 0.24, 0.3), sheet)     # голова
-	Props.box(self, Vector3(-0.6, 0.7, 0.3), Vector3(0.98, 0.04, 2.0), sheet)       # свисающая простыня
+	# тело под простынёй — округлые формы, чтобы читался силуэт: голова, грудь, ноги, стопы приподнимают ткань
+	var sheet := _mat(Color(0.84, 0.85, 0.86), 0.95)
+	_blob(_capsule(0.2, 0.8), Vector3(-0.6, 0.8, -0.02), Vector3(PI * 0.5, 0, 0), Vector3(1.2, 1.0, 0.62), sheet)   # грудь, живот
+	_blob(_sphere(0.115), Vector3(-0.6, 0.84, -0.55), Vector3.ZERO, Vector3(1.0, 0.9, 1.1), sheet)                  # голова
+	for x in [-0.1, 0.1]:
+		_blob(_capsule(0.085, 0.95), Vector3(-0.6 + x, 0.76, 0.72), Vector3(PI * 0.5, 0, 0), Vector3(1.0, 1.0, 0.8), sheet)   # ноги
+		_blob(_capsule(0.05, 0.2), Vector3(-0.6 + x * 1.2, 0.84, 1.17), Vector3(0.2, 0, 0), Vector3.ONE, sheet)            # стопы
+	Props.box(self, Vector3(-0.6, 0.7, 0.3), Vector3(0.98, 0.03, 2.0), sheet)       # простыня свисает с краёв
 	# монитор сердца с зелёной линией и капельница
 	var mon := Node3D.new()
 	add_child(mon)
@@ -153,6 +157,34 @@ func _build_room() -> void:
 	cam.make_current()
 	doctor.face(Vector3(0.55, 0, 2.05), true)
 	barno.face(doctor.global_position, true)
+
+
+func _capsule(r: float, h: float) -> Mesh:
+	var m := CapsuleMesh.new()
+	m.radius = r
+	m.height = h
+	m.radial_segments = 16
+	m.rings = 6
+	return m
+
+
+func _sphere(r: float) -> Mesh:
+	var m := SphereMesh.new()
+	m.radius = r
+	m.height = r * 2.0
+	m.radial_segments = 16
+	m.rings = 8
+	return m
+
+
+func _blob(mesh: Mesh, pos: Vector3, rot: Vector3, scl: Vector3, m: Material) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = m
+	mi.position = pos
+	mi.rotation = rot
+	mi.scale = scl
+	add_child(mi)
 
 
 func stream(sound: String, loop := false) -> AudioStream:

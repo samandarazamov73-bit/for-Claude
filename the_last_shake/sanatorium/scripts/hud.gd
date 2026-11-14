@@ -270,7 +270,16 @@ func message(s: String, t := 2.2) -> void:
 	_msg_t = t
 
 
+## Сюжет: на этом этаже (level) названия комнат не показывать — кроме комнат из hidden_except
+## (пустой 2-й этаж: комнат там нет, видна только палата деда).
+var hidden_level := -1
+var hidden_except: Array = []
+
+
 func show_room(r: Dictionary) -> void:
+	if int(r.get("level", -9)) == hidden_level and not hidden_except.has(String(r.get("id", ""))):
+		room_label.text = ""
+		return
 	var num: String = r.get("num", "")
 	room_label.text = (num + "  " if num != "" else "") + String(r.get("name", ""))
 	room_label.modulate.a = 1.0
