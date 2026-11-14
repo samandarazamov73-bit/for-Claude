@@ -156,7 +156,10 @@ func _build_room() -> void:
 
 
 func stream(sound: String, loop := false) -> AudioStream:
-	var s: AudioStream = load("res://story/sfx/%s.wav" % sound)
+	var path: String = "res://story/sfx/%s.wav" % sound
+	if not ResourceLoader.exists(path):
+		path = "res://sanatorium/assets/sfx/%s.wav" % sound       # щелчок кнопки — из звуков здания
+	var s: AudioStream = load(path)
 	if loop and s is AudioStreamWAV:
 		var w: AudioStreamWAV = (s as AudioStreamWAV).duplicate()
 		w.loop_mode = AudioStreamWAV.LOOP_FORWARD
