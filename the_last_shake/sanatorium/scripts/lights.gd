@@ -245,27 +245,34 @@ func _storey_for(room: String, y: float) -> int:
 
 ## На каждой площадке лестницы — тихий рассеянный свет (как отражённый от стен): без него нижняя сторона
 ## и бок верхнего марша, на которые лампы не светят, были сплошной чёрной стеной.
+# над каждым из двух маршей (x — середина клетки, z — 0,55 м от щели между маршами)
+const STAIR_FILL := {
+	"L0.STAIR1": [Vector2(33.0, -5.6), Vector2(33.0, -4.4)],
+	"L0.STAIR2": [Vector2(6.0, -11.75), Vector2(6.0, -10.6)],
+	"L0.STAIR3": [Vector2(69.0, -11.75), Vector2(69.0, -10.6)],
+}
+
+
 func _stair_fill() -> void:
-	for room in game.rooms:
-		var r: Dictionary = game.rooms[room]
-		if not String(r.get("kind", "")).begins_with("stair"):
+	for room in STAIR_FILL:
+		if not game.rooms.has(room):
 			continue
-		var rc: Array = r["rects"][0]
 		for s in 4:
-			var l := OmniLight3D.new()
-			l.light_color = Color(1.0, 0.9, 0.78)
-			l.light_energy = 0.32
-			l.omni_range = 4.5
-			l.omni_attenuation = 0.8
-			l.light_specular = 0.0
-			l.light_volumetric_fog_energy = 0.0
-			l.shadow_enabled = false
-			add_child(l)
-			l.global_position = Vector3((float(rc[0]) + float(rc[1])) * 0.5, 1.2 + s * 3.3 + 1.2, (float(rc[2]) + float(rc[3])) * 0.5)
-			l.set_meta("base_energy", l.light_energy)
-			l.set_meta("no_shadow", true)
-			confine(l, s)
-			_group(room)["lights"].append(l)
+			for xz in STAIR_FILL[room]:
+				var l := OmniLight3D.new()
+				l.light_color = Color(1.0, 0.9, 0.78)
+				l.light_energy = 0.22
+				l.omni_range = 3.2
+				l.omni_attenuation = 0.9
+				l.light_specular = 0.0
+				l.light_volumetric_fog_energy = 0.0
+				l.shadow_enabled = false
+				add_child(l)
+				l.global_position = Vector3(xz.x, 1.2 + s * 3.3 + 1.7, xz.y)
+				l.set_meta("base_energy", l.light_energy)
+				l.set_meta("no_shadow", true)
+				confine(l, s)
+				_group(room)["lights"].append(l)
 
 
 static func storey_of(y: float) -> int:
