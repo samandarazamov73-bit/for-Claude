@@ -79,6 +79,7 @@ func _ready() -> void:
 	lift = Lift.new()
 	add_child(lift)
 	lift.setup(self)
+	_assign_storey_layers()
 	critters = Critters.new()
 	critters.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF   # they move in _process
 	add_child(critters)
@@ -232,34 +233,38 @@ func _setup_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	# a darker, dirtier night than before: less fill light, dusty greenish air, washed-out sickly colours
-	env.ambient_light_color = Color(0.3, 0.34, 0.32)
-	env.ambient_light_energy = 0.07
+	# реалистично: ночь, свет только от ламп; почти нейтральный слабый рассеянный свет, без зелени
+	env.ambient_light_color = Color(0.34, 0.35, 0.38)
+	env.ambient_light_energy = 0.06
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
-	env.tonemap_exposure = 0.9
+	env.tonemap_exposure = 1.0
 	env.ssao_enabled = true
-	env.ssao_radius = 1.2
-	env.ssao_intensity = 2.2
+	env.ssao_radius = 0.9
+	env.ssao_intensity = 1.6
+	env.ssao_power = 1.6
+	env.ssao_detail = 0.6
 	env.ssil_enabled = true
-	env.ssil_intensity = 0.8
+	env.ssil_radius = 4.0
+	env.ssil_intensity = 1.0
 	env.glow_enabled = true
-	env.glow_intensity = 0.5
-	env.glow_bloom = 0.05
-	env.glow_hdr_threshold = 1.2
+	env.glow_intensity = 0.35
+	env.glow_bloom = 0.02
+	env.glow_hdr_threshold = 1.4
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.02
-	env.volumetric_fog_albedo = Color(0.74, 0.77, 0.68)
+	env.volumetric_fog_density = 0.012
+	env.volumetric_fog_albedo = Color(0.8, 0.8, 0.78)
+	env.volumetric_fog_anisotropy = 0.25
 	env.volumetric_fog_emission = Color(0, 0, 0)
 	env.volumetric_fog_length = 40.0
 	env.volumetric_fog_ambient_inject = 0.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 0.7
-	env.adjustment_contrast = 1.14
-	# colour grade: shadows pulled towards green, highlights towards old yellowed paper (less blue)
+	env.adjustment_saturation = 0.95
+	env.adjustment_contrast = 1.06
+	# цветокоррекция как у плёнки: тени чуть холоднее, света чуть теплее — без зелёного «фильтра»
 	var grade := Gradient.new()
-	grade.set_color(0, Color(0.0, 0.012, 0.0))
-	grade.set_color(1, Color(1.0, 0.97, 0.86))
-	grade.add_point(0.5, Color(0.49, 0.5, 0.45))
+	grade.set_color(0, Color(0.0, 0.004, 0.012))
+	grade.set_color(1, Color(1.0, 0.985, 0.95))
+	grade.add_point(0.5, Color(0.5, 0.5, 0.49))
 	var lut := GradientTexture1D.new()
 	lut.gradient = grade
 	lut.width = 256
@@ -307,6 +312,48 @@ func _grime(m: BaseMaterial3D, tex: Texture2D, scale: Vector3, offset: Vector3) 
 ## Indoors there is no sky to reflect, so fully metallic atlas regions would render black: tone metal down.
 ## Walls, floors and ceilings get grime laid over them in world space (so it never repeats tile by tile),
 ## lamp glass glows less, and window glass is a little dirty, so it no longer reads as an invisible wall.
+## Новые текстуры (tools/godot_assets/make_hospital_textures.py: фото Poly Haven, CC0) в той же раскладке UV,
+## что старые: имя материала → [цвет, нормаль, ORM (R — затенение, G — шероховатость)].
+const TEX_SET := {
+	"M_Paint_WallBeige": ["wall_beige_albedo", "wall_paint_normal", "wall_paint_orm"],
+	"M_Paint_WallBlue": ["wall_blue_albedo", "wall_paint_normal", "wall_paint_orm"],
+	"M_Paint_WallPeach": ["wall_peach_albedo", "wall_paint_normal", "wall_paint_orm"],
+	"M_Tile_WallWhite": ["wall_tile_albedo", "wall_tile_normal", "wall_tile_orm"],
+	"M_Wallpaper_Floral": ["wallpaper_floral_albedo", "wallpaper_normal", "wallpaper_orm"],
+	"M_Wallpaper_Geometric": ["wallpaper_geometric_albedo", "wallpaper_normal", "wallpaper_orm"],
+	"M_Ceiling_Paint": ["ceiling_albedo", "plaster_normal", "plaster_orm"],
+	"M_Plaster_White": ["plaster_albedo", "plaster_normal", "plaster_orm"],
+	"M_Linoleum_Brown": ["linoleum_albedo", "linoleum_normal", "linoleum_orm"],
+	"M_Linoleum_Parquet": ["parquet_albedo", "parquet_normal", "parquet_orm"],
+	"M_Tile_FloorCeramic": ["floor_ceramic_albedo", "floor_ceramic_normal", "floor_ceramic_orm"],
+	"M_Terrazzo": ["terrazzo_albedo", "terrazzo_normal", "terrazzo_orm"],
+	"M_Wood_DoorDark": ["door_albedo", "door_normal", "door_orm"],
+}
+
+
+func _retexture(m: BaseMaterial3D, files: Array) -> void:
+	var dir := "res://sanatorium/assets/tex/%s.jpg"
+	if not ResourceLoader.exists(dir % files[0]):
+		return
+	m.albedo_texture = load(dir % files[0])
+	m.albedo_color = Color.WHITE
+	m.normal_enabled = true
+	m.normal_texture = load(dir % files[1])
+	m.normal_scale = 1.0
+	var orm: Texture2D = load(dir % files[2])
+	m.roughness_texture = orm
+	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+	m.roughness = 1.0
+	m.metallic_texture = null
+	m.metallic = 0.0
+	m.metallic_specular = 0.5
+	m.ao_enabled = true
+	m.ao_texture = orm
+	m.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+	m.ao_light_affect = 0.0
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+
+
 func _tune_materials() -> void:
 	var seen := {}
 	var g_wall: Texture2D = load("res://sanatorium/assets/grime_wall.png")
@@ -322,6 +369,8 @@ func _tune_materials() -> void:
 				continue
 			seen[m] = true
 			var nm: String = m.resource_name
+			if TEX_SET.has(nm):
+				_retexture(m, TEX_SET[nm])
 			if nm in ["M_Atlas_Furniture", "M_Metal_Painted", "M_Metal_DarkSteel"]:
 				m.metallic = 0.35
 				m.metallic_specular = 0.5
@@ -345,6 +394,42 @@ func _tune_materials() -> void:
 					m.albedo_color = Color(m.albedo_color.r * 0.85, m.albedo_color.g * 0.88, m.albedo_color.b * 0.8,
 						maxf(m.albedo_color.a, 0.3))
 	stats["materials"] = seen.size()
+
+
+## Каждый этаж здания — на своём слое отрисовки (11…14), высокие общие части (лестничные марши, шахта лифта,
+## фасад) — на слое 15. Лампы светят только свой этаж (lights.gd): без этого свет ламп, у которых нет тени,
+## проходил сквозь перекрытия и подсвечивал стены соседних этажей там, где никакой лампы нет.
+const STOREY_NODES := ["Floor1_Ground", "Floor2", "Floor3", "Floor4"]
+const STOREY_BIT0 := 10
+const SHARED_BIT := 14
+
+
+func _assign_storey_layers() -> void:
+	# марши лестниц касались стены лестничной клетки той же плоскостью — тень на стене «рябила»: на 4 мм от стены
+	for nm in ["Stair1_Flights", "Stair2_Flights", "Stair3_Flights"]:
+		var fl3: Node = building.find_child(nm, true, false)
+		if fl3 is Node3D:
+			(fl3 as Node3D).position.z += 0.004
+	var inter: Node = building.find_child("Interior", true, false)
+	var shared := 1 << SHARED_BIT
+	var n := 0
+	if inter:
+		for fl in inter.get_children():
+			var s: int = STOREY_NODES.find(String(fl.name))
+			for gi in fl.find_children("*", "GeometryInstance3D", true, false):
+				var g3: GeometryInstance3D = gi
+				var box: AABB = g3.global_transform * g3.get_aabb()
+				g3.layers = shared if (s < 0 or box.size.y > 3.7) else (1 << (STOREY_BIT0 + s))
+				n += 1
+	for gi in building.find_children("*", "GeometryInstance3D", true, false):
+		if inter and inter.is_ancestor_of(gi):
+			continue
+		(gi as GeometryInstance3D).layers = shared
+	# кабина лифта ездит между этажами — её освещает тот этаж, где игрок
+	if lift and lift.cabin:
+		for gi in lift.cabin.find_children("*", "GeometryInstance3D", true, false):
+			(gi as GeometryInstance3D).layers = 1
+	stats["storey_layered"] = n
 
 
 func _build_static_colliders() -> void:

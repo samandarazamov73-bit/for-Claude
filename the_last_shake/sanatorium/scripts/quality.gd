@@ -10,7 +10,9 @@ const SAVE_PATH := "user://settings.cfg"
 # per level: Low, Medium, High
 const PIXEL_BUDGET := [1280 * 720, 1700 * 960, 0]   # max 3D pixels per frame, 0 = native resolution
 const SSAO := [false, true, true]
-const SSIL := [false, false, true]
+# отражённый свет (стены подсвечивают друг друга) — без него стороны, повёрнутые от лампы, были чёрными
+# (например, марш лестницы); на «Среднем» — в половинном разрешении и самом простом качестве
+const SSIL := [false, true, true]
 const FOG_SIZE := [[40, 48], [52, 56], [64, 64]]       # volumetric fog froxel grid (xy, depth)
 const SHADOWED_LAMPS := [3, 5, 8]
 const SHADOW_ATLAS := [2048, 2048, 4096]
@@ -80,6 +82,9 @@ func apply() -> void:
 	env.volumetric_fog_enabled = fog_supported()
 	env.ssao_enabled = SSAO[level]
 	env.ssil_enabled = SSIL[level]
+	RenderingServer.environment_set_ssil_quality(
+		RenderingServer.ENV_SSIL_QUALITY_VERY_LOW if level < 2 else RenderingServer.ENV_SSIL_QUALITY_MEDIUM,
+		level < 2, 0.5, 4, 50.0, 300.0)
 	env.ssr_enabled = SSR[level]
 	env.ssr_max_steps = 40
 	env.ssr_fade_in = 0.15

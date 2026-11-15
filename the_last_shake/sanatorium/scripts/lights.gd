@@ -24,6 +24,12 @@ const DIM := 0.5              # the whole building darker than the fixtures' nom
 const LIGHT_PER_M2 := 0.2     # light_energy per square metre of an average room (per storey)
 const SHADOW_FADE := 2.5      # shadow opacity per second when a lamp starts or stops casting shadows
 var _fade := {}               # light -> target shadow opacity while it fades in or out
+# Свет по этажам (см. game._assign_storey_layers): лампа светит только свой этаж. Лампы того этажа, где игрок,
+# освещают ещё и всё подвижное (людей, коляску, предметы сюжета); лампы других этажей — только свои стены
+# и не светят в тумане (иначе сквозь пол видно светящуюся дымку).
+var confined := []
+var _cur_storey := -99
+const STOREY_BITS := 0xF << 10
 
 
 func _group(room: String) -> Dictionary:
@@ -83,14 +89,14 @@ func setup(g) -> void:
 			_:
 				l.light_energy = e / 44.0
 				l.omni_range = 7.0
-		# old tubes give a sickly greenish white, old ceiling lights a dirty yellow
+		# лампы накаливания — тёплые (~2700 K), старые люминесцентные трубки — холодно-белые с лёгкой зеленью
 		if kind == "fluo":
-			l.light_color = Color(col[0], col[1], col[2]).lerp(Color(0.84, 1.0, 0.8), 0.35)
+			l.light_color = Color(col[0], col[1], col[2]).lerp(Color(0.9, 1.0, 0.94), 0.25)
 		elif kind == "plafond":
-			l.light_color = Color(col[0], col[1], col[2]).lerp(Color(1.0, 0.85, 0.6), 0.18)
+			l.light_color = Color(col[0], col[1], col[2]).lerp(Color(1.0, 0.8, 0.58), 0.25)
 		l.light_energy *= DIM
 		l.omni_attenuation = 1.0
-		l.light_specular = 0.35
+		l.light_specular = 0.5
 		l.light_volumetric_fog_energy = 0.5
 		l.shadow_enabled = false
 		l.omni_shadow_mode = OmniLight3D.SHADOW_CUBE
@@ -102,6 +108,7 @@ func setup(g) -> void:
 		add_child(l)
 		l.global_position = game._v3(f["pos"])
 		l.set_meta("base_energy", l.light_energy)
+		confine(l, int(game.rooms.get(f["room"], {}).get("level", storey_of(l.global_position.y))))
 		# table lamps, floor lamps and sconces never get a shadow: inside their shade it only cut sharp
 		# wedges and stray lines of light on the walls and ceiling (and beams in the fog)
 		l.set_meta("no_shadow", kind == "lamp")
@@ -143,6 +150,7 @@ func setup(g) -> void:
 			l.global_position = m.global_transform * (box.position + box.size * Vector3(0.5, 0.75, 0.5))
 			l.set_meta("base_energy", l.light_energy)
 			l.set_meta("no_shadow", true)
+			confine(l, int(game.rooms.get(gl["room"], {}).get("level", storey_of(l.global_position.y))))
 			_group(gl["room"])["lights"].append(l)
 			all_lights.append({"light": l, "room": gl["room"]})
 			desk_lamps += 1
@@ -226,9 +234,47 @@ func set_room(room: String, on: bool, _sound := true) -> void:
 	# broken fixtures keep their dark glass (baked into the mesh)
 
 
+static func storey_of(y: float) -> int:
+	return clampi(floori((y - 1.2 + 0.4) / 3.3), 0, 3)
+
+
+## Лампа светит только этаж storey (любой свет сюжета на этаже — сюда же).
+func confine(l: Light3D, storey: int) -> void:
+	l.set_meta("storey", storey)
+	if not l.has_meta("fog_energy"):
+		l.set_meta("fog_energy", l.light_volumetric_fog_energy)
+	confined.append(l)
+	_apply_mask(l)
+
+
+func _apply_mask(l: Light3D) -> void:
+	var s: int = l.get_meta("storey")
+	var own: int = 1 << (10 + s)
+	if s == _cur_storey or _cur_storey == -99:
+		l.light_cull_mask = (0xFFFFF & ~STOREY_BITS) | own
+		l.light_volumetric_fog_energy = l.get_meta("fog_energy")
+	else:
+		l.light_cull_mask = own
+		l.light_volumetric_fog_energy = 0.0
+
+
+func _update_storey(pp: Vector3) -> void:
+	var s: int = storey_of(pp.y)
+	if s == _cur_storey:
+		return
+	_cur_storey = s
+	var alive := []
+	for l in confined:
+		if is_instance_valid(l):
+			_apply_mask(l)
+			alive.append(l)
+	confined = alive
+
+
 func _process(dt: float) -> void:
 	_t += dt
 	var pp: Vector3 = game.player.global_position if game.player else Vector3.ZERO
+	_update_storey(pp)
 	for f in flickers:
 		var l: OmniLight3D = f["light"]
 		if not is_on(f["room"]):

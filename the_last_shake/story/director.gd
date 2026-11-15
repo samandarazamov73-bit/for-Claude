@@ -54,8 +54,8 @@ const DOOR_LOUNGE := 165
 const TIED_POS := Vector3(25.9, 7.8, -11.3)        # коляска с привязанными руками, лицом к двери (−X)
 const TIED_YAW := PI * 0.5
 const WASHERS := [Vector3(24.35, 7.8, -10.02), Vector3(25.05, 7.8, -10.02)]
-const YOUNGER_ROOM := [Vector3(22.95, 7.8, -11.05), Vector3(23.65, 7.8, -11.2), Vector3(24.3, 7.8, -11.35)]
-const ELDER_ROOM := Vector3(23.25, 7.8, -10.4)     # старший стоит у двери — сторожит выход
+const YOUNGER_ROOM := [Vector3(22.9, 7.8, -11.55), Vector3(23.65, 7.8, -11.45), Vector3(24.3, 7.8, -11.35)]
+const ELDER_ROOM := Vector3(23.4, 7.8, -10.45)     # старший — у закрытой двери, сторожит выход, на виду
 const ELDER_STARE := Vector3(24.65, 7.8, -10.75)
 const ELDER_EXIT := [Vector3(23.3, 7.8, -10.45), Vector3(22.88, 7.8, -9.8), Vector3(22.88, 7.8, -8.1), Vector3(6.0, 7.8, -8.1)]
 const WRISTS := [Vector3(0.307, 0.8, 0.02), Vector3(-0.307, 0.8, 0.02)]   # кисти Самана (координаты коляски)
@@ -112,6 +112,7 @@ var _tied_msg_t := 0.0
 var _bandages: Array = []
 var _track: Variant = null       # Callable → Vector3: куда сюжет держит взгляд Самана (сцена в холле)
 var _lounge_props: Array = []
+var _lift_thought := false       # Саман говорит сам с собой в лифте — 2-й этаж ждёт конца реплики
 
 
 # ================================================================================ запуск
@@ -278,9 +279,10 @@ func objective_text() -> String:
 	return _objective_text
 
 
-func objective(text: String, target: Variant = null, offset := Vector3(0, 1.0, 0)) -> void:
+## Маркеров «куда ехать» нет: игрок сам ищет комнату по названию (вверху экрана — название комнаты, где он).
+func objective(text: String, _target: Variant = null, _offset := Vector3(0, 1.0, 0)) -> void:
 	_objective_text = text
-	ui.set_objective(text, target, offset)
+	ui.set_objective(text, null)
 	if text != "":
 		snd("monitor_beep", null, -16.0, 0.6)
 
@@ -512,7 +514,7 @@ func _act2_scream() -> void:
 	snd("stinger", null, -10.0)
 	await wait(1.5)
 	await say("thought", "Кто это кричал?..")
-	objective("Проверь, что это было — крик из процедурного кабинета 139 (в конце коридора, справа)", SCREAM_DOOR)
+	objective("Проверь, откуда крик — процедурный кабинет 139", SCREAM_DOOR)
 	var d = door(DOOR_SCREAM)
 	_moan_t = 10.0
 	# пока не откроет дверь — изредка из комнаты слышен стон
@@ -527,7 +529,7 @@ func _act2_scream() -> void:
 	await _locked_in_room()
 	await until(func(): return ppos().x < 40.5 and ppos().z < -0.5 and ppos().z > -10.0)
 	await say("thought", "Лифт… Надо уехать отсюда наверх, к маме. Пока он не вернулся.")
-	objective("Поднимись на лифте на 2-й этаж — лифт рядом с лестницей, вызови его кнопкой (E)", LIFT_CALL)
+	objective("Поднимись на лифте на 2-й этаж", LIFT_CALL)
 	act = "need_key"
 
 
@@ -575,10 +577,10 @@ func _locked_in_room() -> void:
 	freeze(false)
 	# 2) другой способ: скальпель на столике
 	var holder := _place_scalpel()
-	objective("Найди, чем поддеть замок — инструментальный столик", SCALPEL_POS + Vector3(0, -0.3, 0), Vector3(0, 0.5, 0))
+	objective("Найди, чем поддеть замок", SCALPEL_POS + Vector3(0, -0.3, 0), Vector3(0, 0.5, 0))
 	await until(func(): return has_scalpel)
 	holder.queue_free()
-	objective("Вернись к двери и поддень язычок замка", SCREAM_DOOR + Vector3(0, 0, -0.9), Vector3(0, 1.0, 0))
+	objective("Поддень язычок замка", SCREAM_DOOR + Vector3(0, 0, -0.9), Vector3(0, 1.0, 0))
 	await until(func(): return room_id() == "L0.R17" and ppos().distance_to(TRAP_SPOT) < 1.0)
 	freeze(true)
 	place_player(TRAP_SPOT, PI)
@@ -634,12 +636,6 @@ func _place_scalpel() -> Node3D:
 	blade.material_override = Props.mat(Color(0.75, 0.77, 0.8), 0.25, 0.9)
 	holder.add_child(blade)
 	blade.rotation.y = 0.5
-	var shine := OmniLight3D.new()
-	shine.light_color = Color(0.9, 0.95, 1.0)
-	shine.light_energy = 0.2
-	shine.omni_range = 0.9
-	holder.add_child(shine)
-	shine.position.y = 0.25
 	var it: Area3D = Interactable.new()
 	holder.add_child(it)
 	it.setup(Vector3(0.5, 0.35, 0.5), "[E] Взять скальпель", func():
@@ -660,14 +656,14 @@ func _on_lift_locked() -> void:
 func _act2_key() -> void:
 	act = "find_admin"
 	await say("thought", "Заперт. Ключи обычно у администратора…")
-	objective("Найди комнату Администратора — кабинет 134, по коридору направо от лифта", ADMIN_DOOR)
+	objective("Найди кабинет 134 «Администрация»", ADMIN_DOOR)
 	_build_nightstand()
 	# каталка: выкатывается из тёмного кабинета прямо перед коляской
 	await until(func(): return ppos().x > 40.6 and ppos().z < -6.6 and ppos().z > -9.6 and ppos().y < 2.5)
 	_gurney_scare()
 	await until(func(): return room_id() == "L0.F14" or has_lift_key)
 	if not has_lift_key:
-		objective("Обыщи тумбочку у левой стены (E)", NIGHTSTAND_POS, Vector3(0, 0.8, 0))
+		objective("Найди ключ от лифта", NIGHTSTAND_POS, Vector3(0, 0.8, 0))
 
 
 func _build_nightstand() -> void:
@@ -1017,10 +1013,10 @@ func _act3() -> void:
 		await GameState.fade_to(0.0, 1.5)
 	await wait(1.2)
 	await say("thought", "Где… где всё? Тут же были палаты… Осталась одна дверь.")
-	objective("Найди комнату деда — дверь с лампой вдалеке", ROOM204_DOOR + Vector3(0, 0, -0.3))
+	objective("Найди палату деда — №204", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	await until(func(): return room_id() == "L1.F2")
 	# в палате — бумаги деда: про маму, про него самого и его записка про это место
-	objective("Осмотри палату деда — на столах лежат бумаги")
+	objective("Осмотри палату деда")
 	_place_notes()
 	await until(func(): return _notes_read.has("diary") or (_notes_read.size() >= 2 and not _note_open), 240.0)
 	while _note_open:
@@ -1095,12 +1091,6 @@ func _place_notes() -> void:
 		sheet.material_override = Props.mat(Color(0.85, 0.82, 0.72), 0.9)
 		holder.add_child(sheet)
 		sheet.rotation.y = randf_range(-0.5, 0.5)
-		var glow := OmniLight3D.new()
-		glow.light_color = Color(1.0, 0.92, 0.75)
-		glow.light_energy = 0.12
-		glow.omni_range = 0.8
-		holder.add_child(glow)
-		glow.position.y = 0.3
 		var it: Area3D = Interactable.new()
 		holder.add_child(it)
 		it.setup(Vector3(0.45, 0.3, 0.45), "[E] Прочитать", _read_note.bind(key))
@@ -1152,6 +1142,7 @@ func _act4(after_brothers := false) -> void:
 	man_lamp.shadow_enabled = true
 	game.add_child(man_lamp)
 	man_lamp.global_position = MAN_POS + Vector3(-0.5, 2.6, 0.4)
+	game.lights.confine(man_lamp, 2)
 	snd("metal_creak", MAN_POS + Vector3(0, 0.6, 0), 4.0, 1.0, 40.0)
 	objective("Проверь коридор у лифта", MAN_POS, Vector3(0, 1.4, 0))
 	var talk_area: Area3D = Interactable.new()
@@ -1194,10 +1185,13 @@ func _act4(after_brothers := false) -> void:
 	var gt := create_tween()
 	gt.tween_method(grip, 0.0, 1.0, 0.45)
 	await gt.finished
-	mom.set_look(player.head.global_position)         # на миг смотрит прямо на Самана
-	await wait(1.1)
-	mom.set_look(null)
-	lift.door_slow = 3.0                              # теперь двери закрываются, а она увозит его вправо
+	await wait(0.5)
+	# Саман окликает её — она даже не оборачивается; двери идут дальше
+	_lift_thought = true
+	ui.say("hero", "Мам!", 1.8)
+	look_at_point(mom.head_pos(), 0.4)
+	await wait(0.9)
+	lift.door_slow = 2.2                              # двери закрываются, а она увозит его вправо
 	var go := 6.5
 	mom.play("walk_loop", 0.3, 0.75)
 	var t := 0.0
@@ -1214,6 +1208,9 @@ func _act4(after_brothers := false) -> void:
 	mom.stop()
 	man.queue_free()
 	man_lamp.queue_free()
+	await wait(0.6)
+	await say("thought", "Она даже не обернулась… Мама, кого ты увезла? Куда?")
+	_lift_thought = false
 
 
 # ------------------------------------------------------------------------------- братья
@@ -1309,7 +1306,14 @@ func _brothers_catch() -> void:
 	objective("")
 	younger.face(ppos(), true)
 	younger.play("idle_loop", 0.2)
+	# старший подходит вплотную (удар рукой достаёт ~0,8 м), только потом бьёт
+	var to_me: Vector3 = ppos() - psycho.global_position
+	to_me.y = 0.0
+	var reach: Vector3 = ppos() - to_me.normalized() * 0.78
+	reach.y = psycho.global_position.y
 	psycho.face(ppos(), true)
+	var step_in := create_tween()
+	step_in.tween_property(psycho, "global_position", reach, 0.22)
 	psycho.play_once("hit", 0.05)
 	look_at_point(psycho.head_pos(), 0.3)
 	snd("laugh_evil", younger.head_pos(), 3.0, 1.15)
@@ -1344,7 +1348,7 @@ func _setup_lounge() -> void:
 		_lounge_props.append(w)
 	var dg = door(DOOR_LOUNGE)
 	if dg:
-		dg.set_angle(90.0)
+		dg.set_angle(0.0)                         # закрыли за собой: створка не загораживает никого
 	game.lights.set_room(LOUNGE, true)
 	game.lights.set_room("L2.C", true)
 
@@ -1622,6 +1626,11 @@ func _elder_stare_and_run() -> void:
 	_track = null
 	var run: Node3D = snd("run_steps", psycho.global_position, 4.0, 1.2, 40.0) as Node3D
 	psycho.go(ELDER_EXIT, 5.2, "run_loop")
+	await wait(0.35)
+	var dg = door(DOOR_LOUNGE)
+	if dg:
+		dg.set_angle(92.0)                        # с размаху распахивает дверь
+		snd("door_burst", Vector3(22.88, 8.8, -9.7), 2.0, 1.0, 30.0)
 	await wait(1.2)
 	await until(func(): return not psycho.is_moving(), 6.0)
 	psycho.visible = false
@@ -1687,6 +1696,7 @@ func _act5() -> void:
 	GameState.checkpoint = "maze"
 	if GameState.fade_target() > 0.5:
 		await GameState.fade_to(0.0, 1.5)
+	await until(func(): return not _lift_thought, 30.0)   # дослушать, что Саман говорит себе в лифте
 	if game.critters:
 		game.critters.visible = false
 	lift.forced_floor = -1
@@ -1695,12 +1705,12 @@ func _act5() -> void:
 	_drone.volume_db = -12.0
 	await wait(1.0)
 	await say("thought", "Второй этаж… Тут же только что была пустота. Как?..")
-	objective("Найди комнату деда (Палата №204)", ROOM204_DOOR + Vector3(0, 0, -0.3))
+	objective("Найди палату деда — №204", ROOM204_DOOR + Vector3(0, 0, -0.3))
 	_place_ward_key()
 	await until(func(): return near(ROOM204_DOOR + Vector3(0, 0, -1.0), 2.2) or has_ward_key)
 	if not has_ward_key:
 		await say("thought", "Заперто. Ключ… может, в процедурной?")
-		objective("Найди ключ от палаты — процедурный кабинет 213", ROOM213_DOOR)
+		objective("Найди ключ от палаты 204", ROOM213_DOOR)
 		await until(func(): return has_ward_key)
 	objective("Открой палату №204 и заезжай", ROOM204_DOOR + Vector3(0, 0, 0.6))
 	await until(func(): return room_id() == "L1.F2" and ppos().z > -5.3)
@@ -1714,12 +1724,6 @@ func _place_ward_key() -> void:
 	var key := Props.glb("res://props/key_ward.glb", 0.018)
 	holder.add_child(key)
 	key.rotation = Vector3(0, 0.6, 0)
-	var shine := OmniLight3D.new()
-	shine.light_color = Color(1.0, 0.85, 0.55)
-	shine.light_energy = 0.25
-	shine.omni_range = 1.2
-	holder.add_child(shine)
-	shine.position.y = 0.3
 	var it: Area3D = Interactable.new()
 	holder.add_child(it)
 	it.setup(Vector3(0.45, 0.35, 0.45), "[E] Взять ключ от палаты №204", _take_ward_key.bind(holder))
@@ -1760,13 +1764,31 @@ func _grandpa_at_door() -> void:
 	await say("grandpa", "Внучок… Приехал. Как ты?")
 	grandpa.play("idle_loop")
 	await say("hero", "Д-дедушка?.. А где мама?")
-	await wait(1.2)
-	# дед молча делает шаг вперёд, Саман пятится, дверь захлопывается перед лицом деда
-	grandpa.go([Vector3(8.85, 4.5, -6.9)], 0.35, "walk_loop")
-	player.input_override = Vector2(-0.7, 0.0)
-	await wait(0.9)
-	player.input_override = Vector2.ZERO
+	await wait(1.0)
+	# из-за спины деда по коридору подходит мама — и спрашивает у него, кто это
+	mom.visible = true
+	mom.set_look(null)
+	mom.global_position = Vector3(12.4, 4.5, -8.15)
+	snd("footstep_slow", Vector3(11.0, 4.6, -8.1), -4.0, 1.1, 20.0)
+	await mom.go_and_wait([Vector3(10.2, 4.5, -8.1), Vector3(9.55, 4.5, -7.95)], 1.0)
+	mom.face(ppos())
+	mom.set_look(player.head.global_position)
+	await look_at_point(mom.head_pos(), 0.5)
+	await wait(1.2)                                    # смотрит на Самана — без узнавания
+	grandpa.face(mom.global_position)
+	grandpa.set_look(mom.head_pos())
+	await say("mom", "Кто это, папа?")
+	await wait(0.8)
+	await say("thought", "…Мама?")
+	# проходит мимо деда в палату и закрывает дверь у него перед лицом
+	mom.set_look(null)
+	var inside := Vector3(8.83, 4.5, minf(-6.05, ppos().z - 1.2))   # за дверью, не вплотную к коляске
+	await mom.go_and_wait([Vector3(9.2, 4.5, -7.05), Vector3(8.83, 4.5, -6.45), inside], 1.1)
 	var d = door(Sets.DOOR_204)
+	mom.face(ROOM204_DOOR)
+	grandpa.set_look(null)
+	grandpa.go([Vector3(8.85, 4.5, -7.0)], 0.4, "walk_loop")      # дед делает шаг к двери — поздно
+	await wait(0.5)
 	if d:
 		await until(func(): return not d._blocked(0.0), 3.0)
 		await d.slam()
@@ -1775,28 +1797,16 @@ func _grandpa_at_door() -> void:
 	shake(0.6, 0.3)
 	grandpa.visible = false
 	grandpa.stop()
-	await wait(1.4)
-	# из тени палаты выходит мама
-	var bath = door(Sets.DOOR_204_BATH)
-	mom.visible = true
-	mom.global_position = Vector3(7.0, 4.5, -5.2)
-	mom.face(Vector3(9.0, 4.5, -5.0), true)
-	if bath:
-		snd("door_creak_slow", bath.center, -2.0, 0.8)
-		bath.swing_to(90.0, 1.6)
-	await wait(1.2)
-	await mom.go_and_wait([Vector3(8.6, 4.5, -5.0)], 0.7)
+	await wait(1.0)
 	mom.face(ppos())
 	await look_at_point(mom.head_pos(), 0.5)
 	mom.set_look(player.head.global_position)
-	await say("hero", "Мама?! Ты где была? Там дедушка… он какой-то не такой. Пошли отсюда, а?")
-	await wait(1.8)                                   # молчит и смотрит, будто не узнаёт
-	await say("mom", "…Ты кто?")
+	await wait(1.0)
+	await say("mom", "Ты кто такой? Что ты делаешь в палате моего отца?")
 	await say("hero", "Мам… ты чего?")
 	await wait(1.0)
 	await say("mom", "Я тебя не знаю. У меня нет сына.")
 	snd("mom_scream", mom.head_pos(), 4.0)
-	mom.play("talk_loop", 0.1, 1.5)
 	await say("mom", "Убирайся отсюда! Не подходи ко мне — убью!!", 3.0)
 	_start_fight()
 

@@ -50,6 +50,7 @@ func setup(path: String, scale_k := 1.0) -> void:
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).extra_cull_margin = 1.5     # анимация уводит руки за рамки покоя — не пропадать
 	_yaw = rotation.y
+	_mix_stand()
 	play(idle_anim)
 	_steps = AudioStreamPlayer3D.new()
 	_steps.stream = load("res://story/sfx/footstep_slow.wav")
@@ -57,6 +58,41 @@ func setup(path: String, scale_k := 1.0) -> void:
 	_steps.max_distance = 30.0
 	_steps.bus = "World" if AudioServer.get_bus_index("World") >= 0 else "Master"
 	add_child(_steps)
+
+
+## Спокойная стойка из двух поз (если в модели есть stand_ref, например у мамы): корпус, голова и ступни —
+## свои (ровная спина, ступни в туфлях на каблуке), а ноги, таз и руки — из спокойной стойки stand_ref
+## (ноги рядом, руки свободно вдоль тела). Без этого мама стояла как посреди шага, с разведёнными руками.
+const STAND_FROM_REF := ["UpLeg", "Leg", "Shoulder", "Arm", "ForeArm", "Hand"]
+
+
+func _mix_stand() -> void:
+	if anim == null:
+		return
+	var ref_name: String = anim_name("stand_ref")
+	var idle_name: String = anim_name(idle_anim)
+	if ref_name == "" or idle_name == "":
+		return
+	var ref: Animation = anim.get_animation(ref_name)
+	var idle: Animation = anim.get_animation(idle_name)
+	for i in ref.get_track_count():
+		var path: NodePath = ref.track_get_path(i)
+		var bone: String = String(path).get_slice(":", 1)
+		for prefix in ["mixamorig:", "mixamorig_", "mixamorig"]:
+			if bone.begins_with(prefix):
+				bone = bone.substr(prefix.length())
+				break
+		var take: bool = bone == "Hips" and ref.track_get_type(i) == Animation.TYPE_ROTATION_3D
+		for side in ["Left", "Right"]:
+			for part in STAND_FROM_REF:
+				if bone == side + part or (part == "Hand" and bone.begins_with(side + "Hand")):
+					take = true
+		if not take:
+			continue
+		var j: int = idle.find_track(path, ref.track_get_type(i))
+		if j >= 0:
+			idle.remove_track(j)
+		ref.copy_track(i, idle)
 
 
 ## Имя анимации в плеере. Godot при импорте отрезает окончание «_loop» (walk_loop → walk) и делает такую
@@ -79,6 +115,9 @@ func has_anim(n: String) -> bool:
 
 
 func play(n: String, blend := 0.25, spd := 1.0) -> void:
+	if n == "talk_loop":                    # жесты при разговоре убраны: говорят стоя спокойно
+		n = idle_anim
+		spd = 1.0
 	var real: String = anim_name(n)
 	if real == "":
 		return

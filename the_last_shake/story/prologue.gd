@@ -81,6 +81,8 @@ var _events := {}
 var _event_busy := false
 var chair_model
 var _drone: AudioStreamPlayer
+var _chair_motor: AudioStreamPlayer      # те же звуки коляски, что в здании (мотор и колёса)
+var _chair_wheels: AudioStreamPlayer
 var _mom_hold := false
 var site_xf: Transform3D          # координаты здания → мир
 var forest_count := 0             # сколько точек в лесной тропинке (дальше — маршрут к двери)
@@ -117,6 +119,8 @@ func _ready() -> void:
 	_build_building()
 	audio = Audio.new()
 	add_child(audio)
+	_chair_motor = _chair_loop("motor_loop")
+	_chair_wheels = _chair_loop("wheels_loop")
 	_drone = AudioStreamPlayer.new()
 	var ds: AudioStreamWAV = (load("res://story/sfx/drone_low.wav") as AudioStreamWAV).duplicate()
 	ds.loop_mode = AudioStreamWAV.LOOP_FORWARD
@@ -633,6 +637,31 @@ func _build_building() -> void:
 	l.position = Vector3(9.0, 6.0, -1.6)
 
 
+## Звуки коляски — как в здании (sanatorium/scripts/wheelchair.gd): мотор тянет громче на разгоне и повороте,
+## колёса шуршат по скорости.
+func _chair_loop(sound: String) -> AudioStreamPlayer:
+	var p := AudioStreamPlayer.new()
+	var st: AudioStreamWAV = (load("res://sanatorium/assets/sfx/%s.wav" % sound) as AudioStreamWAV).duplicate()
+	st.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	st.loop_begin = 0
+	st.loop_end = int(st.get_length() * st.mix_rate)
+	p.stream = st
+	p.volume_db = -80.0
+	add_child(p)
+	p.play()
+	return p
+
+
+func _chair_sound(v: float, w: float) -> void:
+	var vmax: float = ChairDrive.SPEEDS[-1]
+	var load_f: float = clampf(absf(v) / vmax + absf(w) * 0.25, 0.0, 1.2)
+	_chair_motor.volume_db = lerpf(_chair_motor.volume_db, -60.0 if load_f < 0.02 else linear_to_db(0.16 + 0.5 * load_f) - 6.0, 0.2)
+	_chair_motor.pitch_scale = 0.75 + 0.55 * clampf(absf(v) / vmax, 0.0, 1.0) + 0.15 * absf(w)
+	var roll: float = clampf(absf(v) / vmax, 0.0, 1.0)
+	_chair_wheels.volume_db = lerpf(_chair_wheels.volume_db, -60.0 if roll < 0.02 else linear_to_db(0.1 + 0.6 * roll) - 4.0, 0.2)
+	_chair_wheels.pitch_scale = 0.8 + 0.4 * roll
+
+
 # ================================================================================ сюжет поездки
 func say(who: String, text: String, sec := 0.0) -> void:
 	_skip = false
@@ -951,11 +980,11 @@ func _drive(dt: float) -> void:
 		slope = atan2(up.y, flat.length()) * Vector2(fwd.x, fwd.z).dot(flat.normalized())
 	hero.rotation.x = lerpf(hero.rotation.x, slope, 1.0 - exp(-6.0 * dt))
 	chair_model.set_input(j.x, j.y, dt)
-	audio.set_motor(clampf(absf(drive_model.v) / 2.4 + absf(drive_model.w) * 0.25, 0.0, 1.0) * 0.85)
+	_chair_sound(drive_model.v, drive_model.w)
 	# конец тропинки: дальше — пандус
 	if guided and not _events.has("ramp"):
 		_events["ramp"] = true
-		ui.set_objective("Поднимись по пандусу ко входу", site_xf * DOOR_POINT, Vector3(0, 0.6, 0))
+		ui.set_objective("Поднимись по пандусу ко входу")
 		ui.hint("Пандус узкий: веди коляску ровно, на средней площадке — разворот", 6.0)
 		if not _preload:
 			_preload = true
@@ -997,7 +1026,7 @@ func _update_mom_walk(_dt: float) -> void:
 func _mom_to_door() -> void:
 	await mom.go_and_wait([site_xf * MOM_DOOR], 1.1)
 	mom.face(hero.global_position)
-	ui.set_objective("Открой дверь (E)", site_xf * DOOR_POINT, Vector3(0, 0.6, 0))
+	ui.set_objective("Открой дверь (E)")
 
 
 func _open_entrance() -> void:
@@ -1009,7 +1038,7 @@ func _open_entrance() -> void:
 	await entrance.open(1.7)
 	door_open = true
 	_door_busy = false
-	ui.set_objective("Заезжай внутрь", site_xf * Vector3(28.75, 1.2, 4.27), Vector3(0, 0.9, 0))
+	ui.set_objective("Заезжай внутрь")
 
 
 ## В тамбуре: мама заходит следом, Саман оглядывается — дверь закрывается — дальше санаторий с этого места.

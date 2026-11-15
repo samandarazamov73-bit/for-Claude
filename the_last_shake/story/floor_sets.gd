@@ -16,7 +16,8 @@ const B_STAIR1 := [30.0, -6.6, 39.0, -0.3]
 const B_STAIR3 := [66.0, -15.8, 72.0, -9.6]
 const B_213 := [30.0, -15.8, 33.0, -9.6]
 const HOLE_204 := [8.15, 9.5]       # дверь палаты 204 (стена z = -6.6)
-const HOLE_LIFT := [36.75, 38.6]    # двери лифта и кнопка вызова (z = -6.6)
+const HOLE_LIFT := [36.8, 38.385]   # ровно по раме дверей лифта (кнопка вызова — на раме), z = -6.6
+const LIFT_FRAME_TOP := 6.96         # верх рамы: выше — перемычка, иначе видна шахта и кабина сбоку
 const HOLE_STAIR := [30.15, 31.7]   # дверь лестницы №1 (z = -6.6), открывается в землетрясение
 const HOLE_213 := [30.85, 32.15]    # дверь процедурной 213 (z = -9.6)
 const KEEP_ALWAYS := ["Lift_Landing_Floor2", "Lift_Signs_Floor2", "LiftDoor_F2_L", "LiftDoor_F2_R",
@@ -263,6 +264,7 @@ func lamp(parent: Node3D, pos: Vector3, energy := 0.7, rng := 5.5, col := Color(
 	l.set_meta("base", energy)
 	parent.add_child(l)
 	l.global_position = pos
+	game.lights.confine(l, game.lights.storey_of(pos.y))
 	var bulb := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 0.06
@@ -314,6 +316,8 @@ func build_void() -> void:
 	_block_walls(root_set, B_STAIR3, x_max, [], [])
 	_block_walls(root_set, B_204, x_max, [HOLE_204], [])
 	_block_walls(root_set, B_STAIR1, x_max, [HOLE_LIFT, HOLE_STAIR], [])
+	_box(root_set, Vector3((HOLE_LIFT[0] + HOLE_LIFT[1]) * 0.5, (LIFT_FRAME_TOP + Y1) * 0.5, -6.6 - 0.16),
+		Vector3(HOLE_LIFT[1] - HOLE_LIFT[0] + 0.04, Y1 - LIFT_FRAME_TOP, 0.16), _m_wall)
 	_stair_door_panel(root_set)
 	# одна лампа над дверью деда — как маяк в темноте; в палате горит свет
 	lamp(root_set, Vector3(8.8, 6.9, -7.3), 1.1, 7.0)

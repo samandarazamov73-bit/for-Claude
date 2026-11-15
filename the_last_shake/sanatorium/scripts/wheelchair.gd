@@ -56,7 +56,7 @@ var torch: SpotLight3D
 var torch_on := false
 var _torch_flick := 0.0
 var _torch_next := 60.0
-const TORCH_ENERGY := 4.2
+const TORCH_ENERGY := 5.0          # фонарь — тот же, что в лесу (story/prologue.gd); ярче там, потому что всё дальше
 const CHAIR_LAYER := 2       # visual layer of the chair's own meshes: they cast no shadow in the torch beam
 var t := 0.0
 var braked := true
@@ -415,9 +415,9 @@ func _update_view(dt: float) -> void:
 		stick.rotation = Vector3(-joystick().x * 0.35, 0, -joystick().y * 0.35)
 
 
-## Torch (F): an old hand torch held at chest height on the right. A warm beam with a hot centre, a ring
-## from the reflector and a yellower spill, that follows the view with a slight lag like a hand, lights up the
-## dust in the air and throws shadows (not on Low). The chair's own parts cast no shadow in it.
+## Torch (F): the same torch as in the forest (story/prologue.gd): held at chest height on the right, a warm
+## round beam a little below the view, lights up the dust in the air and throws shadows (not on Low).
+## The chair's own parts cast no shadow in it.
 func _build_torch() -> void:
 	for n in chair.find_children("*", "GeometryInstance3D", true, false):
 		n.layers = CHAIR_LAYER
@@ -426,13 +426,12 @@ func _build_torch() -> void:
 	torch.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	torch.light_color = Color(1.0, 0.9, 0.74)
 	torch.light_energy = TORCH_ENERGY
-	torch.light_specular = 0.6
-	torch.light_volumetric_fog_energy = 1.6
-	torch.spot_range = 17.0
-	torch.spot_attenuation = 1.1
-	torch.spot_angle = 31.0
-	torch.spot_angle_attenuation = 0.9
-	torch.light_projector = _torch_pattern()
+	torch.light_specular = 0.4
+	torch.light_volumetric_fog_energy = 1.2
+	torch.spot_range = 32.0
+	torch.spot_attenuation = 1.0
+	torch.spot_angle = 24.0
+	torch.spot_angle_attenuation = 0.8
 	torch.shadow_enabled = true
 	torch.shadow_bias = 0.05
 	torch.shadow_normal_bias = 1.2
@@ -441,27 +440,6 @@ func _build_torch() -> void:
 	torch.light_cull_mask = 0xFFFFF
 	torch.visible = false
 	add_child(torch)
-
-
-## The beam's light pattern: a hot centre, the reflector's brighter ring, a dimmer yellowish spill, and faint
-## smudges of a dirty lens.
-func _torch_pattern() -> ImageTexture:
-	var n := 128
-	var img := Image.create(n, n, false, Image.FORMAT_RGB8)
-	var noise := FastNoiseLite.new()
-	noise.seed = 7
-	noise.frequency = 0.06
-	for y in n:
-		for x in n:
-			var r: float = Vector2(x + 0.5 - n * 0.5, y + 0.5 - n * 0.5).length() / (n * 0.5)
-			var core: float = 1.0 - smoothstep(0.0, 0.34, r) * 0.38
-			var ring: float = exp(-pow((r - 0.36) / 0.035, 2.0)) * 0.22
-			var spill: float = 1.0 - smoothstep(0.42, 0.98, r)
-			var v: float = clampf((core + ring) * (0.35 + 0.65 * (1.0 - smoothstep(0.3, 0.5, r))) * spill, 0.0, 1.0)
-			v *= 0.9 + 0.1 * noise.get_noise_2d(x, y)
-			var warm: float = smoothstep(0.3, 0.8, r)
-			img.set_pixel(x, y, Color(v, v * (1.0 - 0.08 * warm), v * (1.0 - 0.22 * warm)))
-	return ImageTexture.create_from_image(img)
 
 
 func set_torch(on: bool) -> void:
@@ -476,14 +454,9 @@ func set_torch(on: bool) -> void:
 
 
 func _update_torch(dt: float) -> void:
+	# как в лесу: фонарь у груди справа, светит туда, куда смотришь, чуть ниже взгляда
 	var eye: Transform3D = cam.global_transform
-	var hand: Vector3 = eye * Vector3(0.17, -0.24, -0.12)
-	var aim: Vector3 = eye * Vector3(0.0, 0.0, -7.0)
-	var want := Transform3D(Basis.looking_at(aim - hand, eye.basis.y), hand)
-	# the hand follows the view a little late, so the beam swings a bit when you look around
-	var k: float = 1.0 - exp(-dt * 13.0)
-	var b: Basis = torch.global_basis.orthonormalized().slerp(want.basis, k) if dt < 0.5 else want.basis
-	torch.global_transform = Transform3D(b, hand)
+	torch.global_transform = eye * Transform3D(Basis(Vector3.RIGHT, -0.14), Vector3(0.18, -0.25, -0.1))
 	# an old battery: now and then the bulb dims and stutters for a moment
 	_torch_next -= dt
 	if _torch_next <= 0.0:

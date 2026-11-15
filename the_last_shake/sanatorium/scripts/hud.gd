@@ -16,8 +16,8 @@ var _focused := true
 
 const GRAIN_SHADER := """
 shader_type canvas_item;
-uniform float vignette = 0.66;
-uniform float grain = 0.055;
+uniform float vignette = 0.45;
+uniform float grain = 0.02;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void fragment() {
 	vec2 uv = UV - 0.5;
@@ -38,10 +38,10 @@ void fragment() {
 const LENS_SHADER := """
 shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, repeat_disable, filter_linear;
-uniform float vignette = 0.66;
-uniform float grain = 0.055;
-uniform float aberration = 0.0015;      // about 5 px in the corners of a 2K picture
-uniform float barrel = 0.035;           // corners stay where they are, the middle is 3.5 % larger
+uniform float vignette = 0.45;
+uniform float grain = 0.02;
+uniform float aberration = 0.0008;      // about 5 px in the corners of a 2K picture
+uniform float barrel = 0.02;           // corners stay where they are, the middle is 3.5 % larger
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void fragment() {
 	vec2 d = SCREEN_UV - 0.5;

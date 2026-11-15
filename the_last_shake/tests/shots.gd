@@ -54,7 +54,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "liftmom":
+		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "liftmom", "tour", "voidtour":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -324,6 +324,10 @@ func _sanatorium() -> void:
 		cp = "floor3"
 	elif case_name == "liftmom":
 		cp = "floor3b"
+	elif case_name == "tour":
+		cp = "start"
+	elif case_name == "voidtour":
+		cp = "void"
 	GameStateRef().checkpoint = cp
 	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
 	await secs(3.0)
@@ -349,6 +353,8 @@ func _sanatorium() -> void:
 		await _beatpose_test(g, d)
 	elif case_name == "liftmom":
 		await _liftmom_test(d)
+	elif case_name == "tour" or case_name == "voidtour":
+		await _tour_test(d, case_name == "voidtour")
 	elif case_name == "fight":
 		d.has_ward_key = true
 		var door = d.door(91)
@@ -825,6 +831,46 @@ func _liftmom_test(dir: Node) -> void:
 	for i in 10:
 		await secs(1.1)
 		await shot("lift_mom_%d" % i)
+
+
+## Кадры из разных мест здания: текстуры, свет, цвет (комнаты включены).
+## [точка, поворот (рад), наклон взгляда, комната со светом или ""]
+const TOUR := [
+	[Vector3(28.9, 1.2, 4.27), -PI * 0.5, -0.05, ""],
+	[Vector3(30.9, 1.2, -5.0), -PI * 0.5, 0.15, ""],
+	[Vector3(39.0, 1.2, -8.1), -PI * 0.5, -0.05, ""],
+	[Vector3(52.5, 1.2, -11.2), 0.0, -0.15, "L0.R17"],
+	[Vector3(44.0, 1.2, -6.8), PI, -0.25, "L0.F14"],
+	[Vector3(26.2, 7.8, -11.0), PI * 0.55, -0.12, "L2.R7"],
+	[Vector3(37.5, 7.8, -8.4), PI * 0.5, -0.05, ""],
+]
+const VOID_TOUR := [
+	[Vector3(37.5, 4.5, -8.9), PI, 0.05, ""],
+	[Vector3(34.5, 4.5, -8.6), PI * 0.8, 0.05, ""],
+	[Vector3(40.5, 4.5, -8.6), -PI * 0.8, 0.05, ""],
+	[Vector3(36.9, 4.5, -7.2), PI * 0.75, 0.0, ""],
+	[Vector3(38.2, 4.5, -7.2), -PI * 0.75, 0.0, ""],
+	[Vector3(30.9, 4.5, -8.4), PI, 0.1, ""],
+	[Vector3(44.0, 4.5, -3.0), PI * 0.5, 0.0, ""],
+	[Vector3(9.0, 4.5, -9.5), PI, 0.05, ""],
+]
+
+
+func _tour_test(dir: Node, void_floor: bool) -> void:
+	d = dir
+	pl = dir.player
+	dir.scares.stop()
+	await secs(2.0)
+	var spots: Array = VOID_TOUR if void_floor else TOUR
+	for i in spots.size():
+		var sp: Array = spots[i]
+		if sp[3] != "":
+			dir.game.lights.set_room(sp[3], true)
+		await tp(sp[0], sp[1])
+		pl.look_yaw = 0.0
+		pl.look_pitch = sp[2]
+		await secs(1.5)
+		await shot("%s_%02d" % ["voidtour" if void_floor else "tour", i])
 
 
 func _caught_test() -> void:
