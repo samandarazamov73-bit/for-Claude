@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://bh8mmfpjaf64b"
+path.s3tc="res://.godot/imported/wall_tile_albedo.jpg-bca8dd245ee179786e6bca56f70f54d9.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/wall_tile_albedo.jpg"
+dest_files=["res://.godot/imported/wall_tile_albedo.jpg-bca8dd245ee179786e6bca56f70f54d9.s3tc.ctex"]
 
 [params]
 

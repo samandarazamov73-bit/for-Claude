@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://bveo0d6ges7oy"
+path.s3tc="res://.godot/imported/linoleum_albedo.jpg-003985c20d1424517b7ab95b1d8e6c2a.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/linoleum_albedo.jpg"
+dest_files=["res://.godot/imported/linoleum_albedo.jpg-003985c20d1424517b7ab95b1d8e6c2a.s3tc.ctex"]
 
 [params]
 

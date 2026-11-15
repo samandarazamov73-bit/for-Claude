@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://dxs1wyrpke1ru"
+path.s3tc="res://.godot/imported/wall_tile_orm.jpg-2bc16311cd91d4fc9491bccdf1d03989.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/wall_tile_orm.jpg"
+dest_files=["res://.godot/imported/wall_tile_orm.jpg-2bc16311cd91d4fc9491bccdf1d03989.s3tc.ctex"]
 
 [params]
 

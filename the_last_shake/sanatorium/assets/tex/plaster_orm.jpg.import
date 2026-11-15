@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://cn4vdjtvmkd07"
+path.s3tc="res://.godot/imported/plaster_orm.jpg-f460d544979c21e1ff98c8eb008a6f1c.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/plaster_orm.jpg"
+dest_files=["res://.godot/imported/plaster_orm.jpg-f460d544979c21e1ff98c8eb008a6f1c.s3tc.ctex"]
 
 [params]
 

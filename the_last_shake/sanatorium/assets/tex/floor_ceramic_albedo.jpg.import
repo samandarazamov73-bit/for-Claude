@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://bpv7ncwqgw3fk"
+path.s3tc="res://.godot/imported/floor_ceramic_albedo.jpg-12570ec74437c9615ae03485a4f7871d.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/floor_ceramic_albedo.jpg"
+dest_files=["res://.godot/imported/floor_ceramic_albedo.jpg-12570ec74437c9615ae03485a4f7871d.s3tc.ctex"]
 
 [params]
 

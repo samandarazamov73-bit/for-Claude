@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://goinemmfiter"
+path.s3tc="res://.godot/imported/parquet_albedo.jpg-26c6fa5c329579258d3670d3fc0ce1ef.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/parquet_albedo.jpg"
+dest_files=["res://.godot/imported/parquet_albedo.jpg-26c6fa5c329579258d3670d3fc0ce1ef.s3tc.ctex"]
 
 [params]
 

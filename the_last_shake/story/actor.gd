@@ -196,7 +196,8 @@ func _update_strike(dt: float) -> void:
 	_strike_t += dt
 	var tgt: Vector3 = (_strike_target as Callable).call() if _strike_target is Callable else _strike_target
 	var b: Basis = global_transform.basis
-	var cock: Vector3 = global_position + b * Vector3(0.28, 1.42, 0.22)       # кулак у правого плеча, отведён назад
+	var shoulder_h: float = head_pos().y - global_position.y - 0.36          # высота плеча — по росту
+	var cock: Vector3 = global_position + b * Vector3(0.26, shoulder_h, 0.26)  # кулак у правого плеча, отведён назад
 	var a: float = _strike_t / _strike_impact
 	var w := 0.0
 	var p: Vector3 = cock

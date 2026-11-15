@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://cos734x1tuy1d"
+path.s3tc="res://.godot/imported/door_normal.jpg-ed482dec708c9a85fc2b6c3dc319f7a5.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/door_normal.jpg"
+dest_files=["res://.godot/imported/door_normal.jpg-ed482dec708c9a85fc2b6c3dc319f7a5.s3tc.ctex"]
 
 [params]
 

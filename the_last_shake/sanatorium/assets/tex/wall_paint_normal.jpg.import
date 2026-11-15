@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://dwgsonguxjwrd"
+path.s3tc="res://.godot/imported/wall_paint_normal.jpg-fb2cc4908d3a791f0e1b1e03b5edce06.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/wall_paint_normal.jpg"
+dest_files=["res://.godot/imported/wall_paint_normal.jpg-fb2cc4908d3a791f0e1b1e03b5edce06.s3tc.ctex"]
 
 [params]
 

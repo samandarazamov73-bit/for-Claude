@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://dk6t5ajnrawos"
+path.s3tc="res://.godot/imported/parquet_normal.jpg-b34ab2f4acacbca6f73eba7e91558d02.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/parquet_normal.jpg"
+dest_files=["res://.godot/imported/parquet_normal.jpg-b34ab2f4acacbca6f73eba7e91558d02.s3tc.ctex"]
 
 [params]
 

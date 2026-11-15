@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://dr474xdpp6y4t"
+path.s3tc="res://.godot/imported/linoleum_orm.jpg-44bf2e8d854c7b3d7d8f76c64bc1b25d.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/linoleum_orm.jpg"
+dest_files=["res://.godot/imported/linoleum_orm.jpg-44bf2e8d854c7b3d7d8f76c64bc1b25d.s3tc.ctex"]
 
 [params]
 

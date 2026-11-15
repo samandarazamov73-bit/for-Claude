@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://bvq3mq1s14rpa"
+path.s3tc="res://.godot/imported/wallpaper_floral_albedo.jpg-820ce1c018bfc59f00ecaf2da92ccde0.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/wallpaper_floral_albedo.jpg"
+dest_files=["res://.godot/imported/wallpaper_floral_albedo.jpg-820ce1c018bfc59f00ecaf2da92ccde0.s3tc.ctex"]
 
 [params]
 

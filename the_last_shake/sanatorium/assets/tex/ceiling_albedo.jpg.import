@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://kyesofseaq3q"
+path.s3tc="res://.godot/imported/ceiling_albedo.jpg-bcecee0201ccc9f244e4b7f7f4e4c9bb.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/ceiling_albedo.jpg"
+dest_files=["res://.godot/imported/ceiling_albedo.jpg-bcecee0201ccc9f244e4b7f7f4e4c9bb.s3tc.ctex"]
 
 [params]
 

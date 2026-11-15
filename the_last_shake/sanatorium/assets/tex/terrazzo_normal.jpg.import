@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://co3k5cnmps1lo"
+path.s3tc="res://.godot/imported/terrazzo_normal.jpg-4d2b1d431eb362160af780097bf705ca.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/terrazzo_normal.jpg"
+dest_files=["res://.godot/imported/terrazzo_normal.jpg-4d2b1d431eb362160af780097bf705ca.s3tc.ctex"]
 
 [params]
 

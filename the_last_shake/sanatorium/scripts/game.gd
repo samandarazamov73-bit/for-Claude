@@ -333,14 +333,19 @@ const TEX_SET := {
 
 static func retexture(m: BaseMaterial3D, files: Array) -> void:
 	var dir := "res://sanatorium/assets/tex/%s.jpg"
-	if not ResourceLoader.exists(dir % files[0]):
-		return
-	m.albedo_texture = load(dir % files[0])
+	for f in files:
+		if not ResourceLoader.exists(dir % f):
+			return
+	var alb: Texture2D = load(dir % files[0])
+	var nrm: Texture2D = load(dir % files[1])
+	var orm: Texture2D = load(dir % files[2])
+	if alb == null or nrm == null or orm == null:
+		return                                       # не загрузилось (не импортировано) — остаются старые текстуры
+	m.albedo_texture = alb
 	m.albedo_color = Color.WHITE
 	m.normal_enabled = true
-	m.normal_texture = load(dir % files[1])
+	m.normal_texture = nrm
 	m.normal_scale = 1.0
-	var orm: Texture2D = load(dir % files[2])
 	m.roughness_texture = orm
 	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
 	m.roughness = 1.0

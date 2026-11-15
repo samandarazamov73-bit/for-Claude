@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://deacrr57nevme"
+path.s3tc="res://.godot/imported/parquet_orm.jpg-a2b415466b9504d0e2abd5c40eb07adf.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/parquet_orm.jpg"
+dest_files=["res://.godot/imported/parquet_orm.jpg-a2b415466b9504d0e2abd5c40eb07adf.s3tc.ctex"]
 
 [params]
 

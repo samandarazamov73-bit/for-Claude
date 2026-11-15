@@ -418,7 +418,7 @@ func _sanatorium() -> void:
 		while d.minigame.running:
 			d.minigame.press()
 			await secs(0.3)
-		while not d.objective_text().contains("столик"):
+		while not d.objective_text().contains("поддеть"):
 			await get_tree().process_frame
 		d.player.look_yaw = 0.6
 		d.player.look_pitch = -0.35
@@ -568,7 +568,7 @@ func _playthrough() -> void:
 	while d.minigame.running:
 		d.minigame.press()
 		await secs(0.2)
-	await wait_for(func(): return d.objective_text().contains("столик"), 30, "scalpel objective")
+	await wait_for(func(): return d.objective_text().contains("поддеть"), 30, "scalpel objective")
 	step("door holds, look for scalpel")
 	for c in d.game.get_children():
 		for it in c.get_children():
@@ -605,7 +605,7 @@ func _playthrough() -> void:
 	step("void")
 	await wait_for(func(): return d.lift.state == "open", 30, "doors open at 2")
 	await tp(Vector3(9.0, 4.5, -3.5), 0.0)
-	await wait_for(func(): return d.objective_text().contains("бумаги"), 60, "notes")
+	await wait_for(func(): return d.objective_text().contains("палату деда"), 60, "notes")
 	d._read_note("diary")
 	await wait_for(func(): return d.act == "void_done", 120, "void_done")
 	step("void_done")

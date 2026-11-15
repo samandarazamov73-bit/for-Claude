@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://c5h00h5r0schg"
+path.s3tc="res://.godot/imported/door_orm.jpg-20fa8b8149a38846699deeade6280219.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/door_orm.jpg"
+dest_files=["res://.godot/imported/door_orm.jpg-20fa8b8149a38846699deeade6280219.s3tc.ctex"]
 
 [params]
 

@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://cwpa1bpekmljw"
+path.s3tc="res://.godot/imported/terrazzo_albedo.jpg-f8ae1bc644b33f85dc3979d0f09baf87.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/terrazzo_albedo.jpg"
+dest_files=["res://.godot/imported/terrazzo_albedo.jpg-f8ae1bc644b33f85dc3979d0f09baf87.s3tc.ctex"]
 
 [params]
 

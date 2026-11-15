@@ -2,6 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://cybp4yece6jdj"
+path.s3tc="res://.godot/imported/floor_ceramic_orm.jpg-a08b8c4bf76f6c6d52134da32e8175fa.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+
+[deps]
+
+source_file="res://sanatorium/assets/tex/floor_ceramic_orm.jpg"
+dest_files=["res://.godot/imported/floor_ceramic_orm.jpg-a08b8c4bf76f6c6d52134da32e8175fa.s3tc.ctex"]
 
 [params]
 
