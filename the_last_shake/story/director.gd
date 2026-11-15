@@ -1004,6 +1004,7 @@ func _on_lift_arrived(f: int) -> void:
 # ================================================================================ АКТ 3: пустая комната, радио
 func _act3() -> void:
 	act = "void"
+	mom.visible = false                               # мама появляется только по сюжету (и при старте с главы)
 	GameState.checkpoint = "void"
 	_drone.volume_db = -18.0
 	lift.forced_floor = -1
@@ -1111,6 +1112,7 @@ func _read_note(key: String) -> void:
 # ================================================================================ АКТ 4: третий этаж, звуки, человек в коляске
 func _act4(after_brothers := false) -> void:
 	act = "floor3_search"
+	mom.visible = false                               # мама появляется только по сюжету (и при старте с главы)
 	GameState.checkpoint = "floor3b" if after_brothers else "floor3"
 	if GameState.fade_target() > 0.5:
 		await GameState.fade_to(0.0, 1.5)
@@ -1693,6 +1695,7 @@ func _on_leave_floor3() -> void:
 # ================================================================================ АКТ 5: настоящий 2-й этаж, палата 204, дед, драка
 func _act5() -> void:
 	act = "maze"
+	mom.visible = false                               # мама появляется только по сюжету (и при старте с главы)
 	GameState.checkpoint = "maze"
 	if GameState.fade_target() > 0.5:
 		await GameState.fade_to(0.0, 1.5)

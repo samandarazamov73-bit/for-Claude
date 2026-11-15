@@ -362,8 +362,7 @@ func _sanatorium() -> void:
 		d.player.global_position = Vector3(8.8, 4.55, -4.6)
 		d.player.rotation.y = PI
 		await secs(2.0)
-		d._grandpa_at_door()
-		await wait_for_d(d, func(): return d.grandpa.visible, 20)
+		await wait_for_d(d, func(): return d.grandpa.visible, 60)     # сцену запускает сам сюжет: игрок в палате, ключ есть
 		await secs(2.5)
 		await shot("fight_grandpa")
 		await wait_for_d(d, func(): return d.mom.visible, 60)
@@ -765,8 +764,9 @@ func _fair_test() -> void:
 
 
 ## Сцена с братьями: снимки в ключевые моменты (погоня, холл, удар, избиение, взгляд, бинты).
-func _brothers_test(d: Node) -> void:
-	pl = d.player
+func _brothers_test(dd: Node) -> void:
+	d = dd
+	pl = dd.player
 	d.minigame.cheat = true
 	await secs(2.0)
 	d.scares.elapsed = 400.0
