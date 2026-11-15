@@ -331,7 +331,7 @@ const TEX_SET := {
 }
 
 
-func _retexture(m: BaseMaterial3D, files: Array) -> void:
+static func retexture(m: BaseMaterial3D, files: Array) -> void:
 	var dir := "res://sanatorium/assets/tex/%s.jpg"
 	if not ResourceLoader.exists(dir % files[0]):
 		return
@@ -370,7 +370,7 @@ func _tune_materials() -> void:
 			seen[m] = true
 			var nm: String = m.resource_name
 			if TEX_SET.has(nm):
-				_retexture(m, TEX_SET[nm])
+				retexture(m, TEX_SET[nm])
 			if nm in ["M_Atlas_Furniture", "M_Metal_Painted", "M_Metal_DarkSteel"]:
 				m.metallic = 0.35
 				m.metallic_specular = 0.5

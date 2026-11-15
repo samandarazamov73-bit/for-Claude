@@ -108,7 +108,7 @@ func setup(g) -> void:
 		add_child(l)
 		l.global_position = game._v3(f["pos"])
 		l.set_meta("base_energy", l.light_energy)
-		confine(l, int(game.rooms.get(f["room"], {}).get("level", storey_of(l.global_position.y))))
+		confine(l, _storey_for(f["room"], l.global_position.y))
 		# table lamps, floor lamps and sconces never get a shadow: inside their shade it only cut sharp
 		# wedges and stray lines of light on the walls and ceiling (and beams in the fog)
 		l.set_meta("no_shadow", kind == "lamp")
@@ -123,6 +123,7 @@ func setup(g) -> void:
 		if kind == "fluo":
 			fluo.append({"pos": l.global_position, "room": f["room"], "light": l})
 	_balance_rooms()
+	_stair_fill()
 	var unlit := {}
 	for room in groups:
 		if groups[room]["lights"].is_empty():
@@ -150,7 +151,7 @@ func setup(g) -> void:
 			l.global_position = m.global_transform * (box.position + box.size * Vector3(0.5, 0.75, 0.5))
 			l.set_meta("base_energy", l.light_energy)
 			l.set_meta("no_shadow", true)
-			confine(l, int(game.rooms.get(gl["room"], {}).get("level", storey_of(l.global_position.y))))
+			confine(l, _storey_for(gl["room"], l.global_position.y))
 			_group(gl["room"])["lights"].append(l)
 			all_lights.append({"light": l, "room": gl["room"]})
 			desk_lamps += 1
@@ -232,6 +233,39 @@ func set_room(room: String, on: bool, _sound := true) -> void:
 		if m is GeometryInstance3D:
 			m.material_override = null if on else off_mat
 	# broken fixtures keep their dark glass (baked into the mesh)
+
+
+## Этаж лампы: по комнате, но лестничная клетка в плане — одна комната на всю высоту, там — по высоте лампы.
+func _storey_for(room: String, y: float) -> int:
+	var r: Dictionary = game.rooms.get(room, {})
+	if r.is_empty() or String(r.get("kind", "")).begins_with("stair"):
+		return storey_of(y)
+	return int(r.get("level", storey_of(y)))
+
+
+## На каждой площадке лестницы — тихий рассеянный свет (как отражённый от стен): без него нижняя сторона
+## и бок верхнего марша, на которые лампы не светят, были сплошной чёрной стеной.
+func _stair_fill() -> void:
+	for room in game.rooms:
+		var r: Dictionary = game.rooms[room]
+		if not String(r.get("kind", "")).begins_with("stair"):
+			continue
+		var rc: Array = r["rects"][0]
+		for s in 4:
+			var l := OmniLight3D.new()
+			l.light_color = Color(1.0, 0.9, 0.78)
+			l.light_energy = 0.32
+			l.omni_range = 4.5
+			l.omni_attenuation = 0.8
+			l.light_specular = 0.0
+			l.light_volumetric_fog_energy = 0.0
+			l.shadow_enabled = false
+			add_child(l)
+			l.global_position = Vector3((float(rc[0]) + float(rc[1])) * 0.5, 1.2 + s * 3.3 + 1.2, (float(rc[2]) + float(rc[3])) * 0.5)
+			l.set_meta("base_energy", l.light_energy)
+			l.set_meta("no_shadow", true)
+			confine(l, s)
+			_group(room)["lights"].append(l)
 
 
 static func storey_of(y: float) -> int:

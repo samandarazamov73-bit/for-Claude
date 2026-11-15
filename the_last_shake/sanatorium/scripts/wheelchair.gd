@@ -285,10 +285,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("speed_up"):
 		speed_level = min(speed_level + 1, SPEEDS.size() - 1)
 		game.hud.set_speed(speed_level, SPEEDS.size())
+		if chair_model:
+			chair_model.set_speed(speed_level)
 		game.play_at("button", global_position + Vector3(0.27, 0.8, 0), -14.0, 1.4, 4.0)
 	elif event.is_action_pressed("speed_down"):
 		speed_level = max(speed_level - 1, 0)
 		game.hud.set_speed(speed_level, SPEEDS.size())
+		if chair_model:
+			chair_model.set_speed(speed_level)
 		game.play_at("button", global_position + Vector3(0.27, 0.8, 0), -14.0, 1.2, 4.0)
 	elif event.is_action_pressed("horn"):
 		game.play_at("horn", global_position + Vector3(0, 0.8, 0), -6.0, 1.0, 30.0)

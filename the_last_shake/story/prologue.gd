@@ -564,6 +564,16 @@ func _build_building() -> void:
 			if room:
 				room.reparent(building, true)
 		interior.queue_free()
+	# те же новые текстуры, что в здании (тамбур и вестибюль видны через входную дверь)
+	var Game: Script = load("res://sanatorium/scripts/game.gd")
+	for mi in building.find_children("*", "MeshInstance3D", true, false):
+		var mesh: Mesh = (mi as MeshInstance3D).mesh
+		if mesh == null:
+			continue
+		for si in mesh.get_surface_count():
+			var m: Material = mesh.surface_get_material(si)
+			if m is BaseMaterial3D and Game.TEX_SET.has(m.resource_name):
+				Game.retexture(m, Game.TEX_SET[m.resource_name])
 	var broken: Node = building.find_child("Fix_0029", true, false)      # этот плафон в здании перегорел
 	if broken:
 		broken.queue_free()
@@ -937,6 +947,7 @@ func _update_walk(dt: float) -> void:
 func _drive(dt: float) -> void:
 	if drive_model.handle_speed_keys():
 		ui.hint("Скорость %d из 5" % (drive_model.speed_level + 1), 1.5)
+		chair_model.set_speed(drive_model.speed_level)
 	var j: Vector2 = drive_model.joystick()
 	hero.rotation.y += drive_model.step(j, dt)
 	var fwd: Vector3 = -hero.global_transform.basis.z

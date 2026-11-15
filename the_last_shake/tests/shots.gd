@@ -362,15 +362,26 @@ func _sanatorium() -> void:
 		d.player.global_position = Vector3(8.8, 4.55, -4.6)
 		d.player.rotation.y = PI
 		await secs(2.0)
-		Engine.time_scale = 3.0
 		d._grandpa_at_door()
-		await secs(5.0)
+		await wait_for_d(d, func(): return d.grandpa.visible, 20)
+		await secs(2.5)
 		await shot("fight_grandpa")
+		await wait_for_d(d, func(): return d.mom.visible, 60)
+		await secs(2.0)
+		await shot("fight_mom_behind")
+		await wait_for_d(d, func(): return str(d.ui._sub_text.text).contains("папа") and d.ui.line_visible(), 60)
+		await secs(0.5)
+		await shot("fight_mom_asks")
+		await wait_for_d(d, func(): return str(d.ui._sub_text.text).contains("Ты кто такой"), 60)
+		await secs(0.5)
+		await shot("fight_mom_inside")
 		while d.act != "fight":
 			await get_tree().process_frame
-		Engine.time_scale = 1.0
 		await secs(2.0)
 		await shot("fight_mom")
+		await wait_for_d(d, func(): return d.mom.current == "attack", 30)
+		await secs(0.5)
+		await shot("fight_mom_strike")
 		while d.fight == "on":
 			await get_tree().process_frame
 		await secs(2.0)
@@ -450,6 +461,33 @@ func _sanatorium() -> void:
 		d.player.input_override = Vector2(0, 0)
 		d.player.chair_model.set_input(1.0, 1.0, 1.0)
 		await shot("chair_joystick")
+		d.player.chair_model.set_input(0.0, 0.0, 1.0)
+		d.player.look_pitch = -0.95
+		d.player.look_yaw = -0.75
+		d.player.speed_level = 3
+		d.player.chair_model.set_speed(3)
+		await secs(1.0)
+		await shot("chair_joystick2")
+		# крупный план пульта отдельной камерой
+		var ctl: Node3D = d.player.chair_model.root.find_child("Controller", true, false)
+		if ctl:
+			var cam := Camera3D.new()
+			cam.fov = 35.0
+			cam.near = 0.01
+			g.add_child(cam)
+			var c: Vector3 = ctl.global_transform * Vector3(-0.259, 0.15, 0.14)
+			cam.global_position = c + d.player.global_transform.basis * Vector3(0.18, 0.2, -0.12)
+			cam.look_at(c, Vector3.UP)
+			cam.current = true
+			var lamp := OmniLight3D.new()
+			lamp.light_energy = 0.6
+			lamp.omni_range = 2.0
+			g.add_child(lamp)
+			lamp.global_position = cam.global_position + Vector3(0, 0.3, 0)
+			await secs(1.0)
+			await shot("chair_joystick_close")
+			cam.current = false
+			d.player.cam.current = true
 
 
 # ------------------------------------------------------------------ прохождение всей истории (без экрана)
@@ -470,6 +508,15 @@ func wait_for(cond: Callable, limit := 120.0, what := "") -> bool:
 			print("TIMEOUT waiting for ", what, "  act=", d.act)
 			return false
 	return true
+
+
+func wait_for_d(dd: Node, cond: Callable, limit: float) -> void:
+	var t := 0.0
+	while not cond.call() and t < limit:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+	if t >= limit:
+		print("TIMEOUT (shot case) act=", dd.act)
 
 
 func tp(p: Vector3, yaw := 0.0) -> void:

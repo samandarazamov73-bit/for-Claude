@@ -747,7 +747,7 @@ func _take_lift_key(play_scene: bool) -> void:
 	psycho.visible = true
 	psycho.global_position = Vector3(43.5, 1.2, -7.25)
 	psycho.face(Vector3(43.5, 1.2, -6.0), true)
-	psycho.play("hit", 0.1)
+	psycho.strike(Vector3(43.5, 2.1, -6.55), "hit", 0.35)
 	await wait(0.35)
 	snd("glass_bang", Vector3(43.5, 2.1, -6.55), 8.0, 1.0, 30.0)
 	if d:
@@ -907,7 +907,7 @@ func _update_chase(dt: float) -> void:
 		_psycho_bang_t -= dt
 		if _psycho_bang_t <= 0.0:
 			_psycho_bang_t = 0.75
-			psycho.play_once("hit", 0.05)
+			psycho.strike(Vector3(37.5, 2.2, -6.62), "hit", 0.4)
 			snd("metal_bang", Vector3(37.5, 2.2, -6.6), 0.0, randf_range(0.9, 1.15), 25.0)
 		return
 	if not safe and Vector2(ppos().x - psycho.global_position.x, ppos().z - psycho.global_position.z).length() < 1.15:
@@ -935,7 +935,7 @@ func _caught() -> void:
 	freeze(true)
 	GameState.deaths += 1
 	psycho.face(ppos(), true)
-	psycho.play("hit", 0.05)
+	psycho.strike(func() -> Vector3: return player.head.global_position, "hit", 0.62)
 	look_at_point(psycho.head_pos(), 0.35)
 	snd("psycho_roar", psycho.head_pos(), 6.0, 1.15)
 	await wait(0.62)                                   # момент удара в анимации
@@ -1314,7 +1314,7 @@ func _brothers_catch() -> void:
 	psycho.face(ppos(), true)
 	var step_in := create_tween()
 	step_in.tween_property(psycho, "global_position", reach, 0.22)
-	psycho.play_once("hit", 0.05)
+	psycho.strike(func() -> Vector3: return player.head.global_position, "hit", 0.62)
 	look_at_point(psycho.head_pos(), 0.3)
 	snd("laugh_evil", younger.head_pos(), 3.0, 1.15)
 	await wait(0.62)
@@ -1444,7 +1444,7 @@ func _lounge_scene() -> void:
 	await psycho.go_and_wait([strike], 3.6, "run_loop")
 	younger.face(strike, true)
 	psycho.face(younger.global_position, true)
-	psycho.play_once("hit", 0.05)
+	psycho.strike(younger.head_pos() + Vector3(0, -0.08, 0), "hit", 0.6)
 	await wait(0.6)
 	snd("punch_flesh", younger.head_pos(), 6.0, 0.8)
 	snd("scream_pain", younger.head_pos(), -2.0, 1.25)
@@ -1874,7 +1874,7 @@ func _clamp_room204(p: Vector3) -> Vector3:
 ## Замах: на экране «ПРОБЕЛ — увернись!» — успел за 0,6 с — коляска рывком уходит вбок, удар мимо.
 func _mom_attack() -> void:
 	_mom_cd = 2.0
-	mom.play("attack", 0.1, 1.15)
+	mom.strike(player.head.global_position, "attack", 0.62, 1.15)     # бьёт туда, где голова сейчас: увернулся — мимо
 	snd("whoosh", mom.head_pos(), 0.0, 0.9)
 	_dodge_open = true
 	_dodged = false
@@ -1950,7 +1950,7 @@ func _punch() -> void:
 ## Барно зажимает его в угол и почти убивает — в последний момент дверь слетает с петель.
 func _cornered() -> void:
 	freeze(true)
-	mom.play("attack", 0.1, 0.6)
+	mom.strike(func() -> Vector3: return player.head.global_position, "attack", 0.62, 0.6)
 	var to: Vector3 = mom.global_position - ppos()
 	to.y = 0.0
 	var tw := create_tween()

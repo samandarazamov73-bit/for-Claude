@@ -26,6 +26,9 @@ var _yaw := 0.0
 var step_volume := -8.0                 # громкость шагов (дБ); псих топает громче
 var _step_left := 0.0
 var _steps: AudioStreamPlayer3D
+var _strike_target: Variant = null      # Vector3 или Callable → Vector3
+var _strike_t := -1.0
+var _strike_impact := 0.6
 
 
 func setup(path: String, scale_k := 1.0) -> void:
@@ -63,7 +66,10 @@ func setup(path: String, scale_k := 1.0) -> void:
 ## Спокойная стойка из двух поз (если в модели есть stand_ref, например у мамы): корпус, голова и ступни —
 ## свои (ровная спина, ступни в туфлях на каблуке), а ноги, таз и руки — из спокойной стойки stand_ref
 ## (ноги рядом, руки свободно вдоль тела). Без этого мама стояла как посреди шага, с разведёнными руками.
-const STAND_FROM_REF := ["UpLeg", "Leg", "Shoulder", "Arm", "ForeArm", "Hand"]
+const STAND_FROM_REF := ["UpLeg", "Leg"]
+var idle_hands := false                 # в стойке кисти свободно опущены вдоль бёдер (у мамы)
+var _hands_user := false                # руки сейчас заняты сюжетом (set_hands / set_arm)
+var _idle_w := 0.0
 
 
 func _mix_stand() -> void:
@@ -82,7 +88,9 @@ func _mix_stand() -> void:
 			if bone.begins_with(prefix):
 				bone = bone.substr(prefix.length())
 				break
-		var take: bool = bone == "Hips" and ref.track_get_type(i) == Animation.TYPE_ROTATION_3D
+		if ref.track_get_type(i) != Animation.TYPE_ROTATION_3D:
+			continue                         # только повороты: длины костей у каждого свои
+		var take: bool = bone == "Hips"
 		for side in ["Left", "Right"]:
 			for part in STAND_FROM_REF:
 				if bone == side + part or (part == "Hand" and bone.begins_with(side + "Hand")):
@@ -93,6 +101,7 @@ func _mix_stand() -> void:
 		if j >= 0:
 			idle.remove_track(j)
 		ref.copy_track(i, idle)
+	idle_hands = true
 
 
 ## Имя анимации в плеере. Godot при импорте отрезает окончание «_loop» (walk_loop → walk) и делает такую
@@ -149,8 +158,12 @@ func set_look(target: Variant) -> void:
 
 
 func set_arm(target: Variant) -> void:
+	_hands_user = target != null
 	if look:
 		look.arm_target = target
+		if target != null:
+			look.arm_target_left = null
+			look.arm_weight = 1.0
 
 
 func set_lean(a: float) -> void:
@@ -160,10 +173,69 @@ func set_lean(a: float) -> void:
 
 ## Обе руки к точкам (мировые), weight — насколько (0..1).
 func set_hands(right: Variant, left: Variant, weight := 1.0) -> void:
+	_hands_user = right != null or left != null
 	if look:
 		look.arm_target = right
 		look.arm_target_left = left
 		look.arm_weight = weight
+
+
+## Удар кулаком: корпус — из анимации clip (замах, шаг вперёд), а правая рука вместо широкой дуги «мечом»
+## идёт прямым ударом в цель target (мировая точка или Callable → Vector3): сначала кулак отводится к плечу,
+## к моменту impact (с) — в цель, потом рука возвращается в анимацию.
+func strike(target: Variant, clip := "hit", impact := 0.6, spd := 1.0) -> void:
+	_strike_target = target
+	_strike_impact = impact / maxf(spd, 0.05)
+	_strike_t = 0.0
+	play_once(clip, 0.05, spd)
+
+
+func _update_strike(dt: float) -> void:
+	if _strike_t < 0.0 or look == null:
+		return
+	_strike_t += dt
+	var tgt: Vector3 = (_strike_target as Callable).call() if _strike_target is Callable else _strike_target
+	var b: Basis = global_transform.basis
+	var cock: Vector3 = global_position + b * Vector3(0.28, 1.42, 0.22)       # кулак у правого плеча, отведён назад
+	var a: float = _strike_t / _strike_impact
+	var w := 0.0
+	var p: Vector3 = cock
+	if a < 0.55:
+		w = smoothstep(0.0, 0.55, a) * 0.9
+	elif a < 1.0:
+		var k: float = (a - 0.55) / 0.45
+		p = cock.lerp(tgt, k * k)
+		w = 0.9 + 0.1 * k
+	else:
+		p = tgt
+		var after: float = _strike_t - _strike_impact
+		w = 1.0 if after < 0.12 else clampf(1.0 - (after - 0.12) / 0.35, 0.0, 1.0)
+		if after > 0.5:
+			_strike_t = -1.0
+			look.arm_target = null
+			look.arm_weight = 0.0
+			return
+	look.arm_target = p
+	look.arm_target_left = null
+	look.arm_weight = w
+
+
+## Стойка: кисти опускаются вдоль бёдер (чуть впереди, локоть слегка согнут) — пока руки не заняты.
+func _update_idle_hands(dt: float) -> void:
+	if not idle_hands or look == null or _hands_user or _strike_t >= 0.0:
+		_idle_w = 0.0
+		return
+	var want: float = 1.0 if (current == idle_anim and not _moving) else 0.0
+	_idle_w = move_toward(_idle_w, want, dt * 2.5)
+	if _idle_w <= 0.0:
+		if look.arm_target != null or look.arm_target_left != null:
+			look.arm_target = null
+			look.arm_target_left = null
+		return
+	var b: Basis = global_transform.basis
+	look.arm_target = global_position + b * Vector3(0.2, 0.8, -0.045)
+	look.arm_target_left = global_position + b * Vector3(-0.2, 0.8, -0.045)
+	look.arm_weight = _idle_w
 
 
 ## Голова (для «навести взгляд и нажать E» и камер).
@@ -241,6 +313,8 @@ func set_yaw(y: float) -> void:
 
 
 func _process(dt: float) -> void:
+	_update_strike(dt)
+	_update_idle_hands(dt)
 	if _moving and not _path.is_empty():
 		var target: Vector3 = _path[0]
 		var to: Vector3 = target - global_position
