@@ -60,6 +60,7 @@ func _ready() -> void:
 	_tune_materials()
 	_build_static_colliders()
 	_build_occluders_and_ranges()
+	stats["models_swapped"] = swap_models(building)     # свои 3D-модели из sanatorium/models/
 	_build_furniture_colliders()
 	_build_blockers()
 	hud = Hud.new()
@@ -339,6 +340,79 @@ const TEX_SET := {
 	"M_Roofing_Bitumen": ["ext_roofing_albedo", "ext_roofing_normal", "ext_roofing_orm"],
 	"M_Ceramic_Tile_RedBrown": ["ext_brick_albedo", "ext_brick_normal", "ext_brick_orm"],
 }
+
+
+## Свои 3D-модели мебели вместо коробочных: положи <тип>.glb в sanatorium/models/ (типы — ниже и в таблице
+## моделей). Все предметы этого типа в здании (и в прологе) заменятся: новая модель встаёт ровно на место старой
+## (та же точка опоры и поворот), старая прячется (её имя и место остаются — сюжет их использует).
+## Модель: 1 единица = 1 м, опора — на полу под центром предмета, спинка/изголовье — к −Z (в Blender: к +Y,
+## лицом к виду «Спереди»). Свой коллайдер не нужен: столкновения остаются прежние (коробки из level.json).
+const MODELS_DIR := "res://sanatorium/models/"
+const MODEL_TYPES := [
+	"armchair", "armchair_beige", "armchair_red", "bar_counter", "bathtub", "bed_a", "bed_b", "bed_hosp",
+	"bed_strip", "bedside", "bench", "billiard", "bin", "binders", "boiler", "bookcase", "books", "bucket",
+	"buvette", "call_panel", "carafe", "chair", "chair_soft", "chair_tube", "charcot_console", "cinema_row",
+	"cleaning_cart", "clock", "coat_hooks", "coat_stand", "crates", "cubicle", "cubicle_wide", "cue_rack",
+	"curtain_rail", "curtain_rail_s", "desk_office", "desk_small", "desk_wide", "dishwasher", "duct",
+	"elec_cabinet", "elec_panel_wall", "ex_bike", "exam_couch", "filing", "fire_ext", "fridge", "fridge_ind",
+	"fuse_box", "game_chess", "game_dominoes", "goods_rack", "grab_bar", "grab_bar_l", "grab_bar_v",
+	"grab_fold", "gym_bench", "hose_cabinet", "hydro_bath", "inhaler", "instrument_table", "iv_stand", "kettle",
+	"kitchen_hood", "kitchen_sink", "lab_rack", "laundry_cart", "linen_rack", "locker", "luggage_rack",
+	"massage_table", "med_cabinet", "medbox_rack", "microscope", "mirror", "notice_board", "oxygen",
+	"painting_1", "painting_2", "painting_3", "palm", "paper_stack", "peeler", "physio_device", "piano",
+	"plant_stand", "prep_table", "projector", "pump", "radio", "recliner", "safe", "samovar", "scale", "screen",
+	"seat_row", "shower", "shower_cubicle", "shower_s", "shower_seat", "shower_tray", "sink", "sofa_beige",
+	"sofa_brown", "sofa_red", "stage", "stool", "stove", "stretcher", "suitcase_a", "suitcase_b", "table_cloth",
+	"table_coffee", "table_lab", "table_read", "table_round", "table_small", "table_sq", "tea_shelf",
+	"telephone", "toilet", "tool_rack", "towel_rail", "travel_bag", "tv_cabinet", "tv_small", "urinal", "vase",
+	"wall_bars", "wardrobe", "wardrobe_wide", "wheelchair", "workbench"
+]
+
+
+## Тип предмета по имени узла: самый длинный тип из MODEL_TYPES, с которого начинается имя
+## («armchair_beige_F2_001» → armchair_beige, «chair_EB_BAR_003» → chair). "" — не мебель.
+static func model_type(node_name: String) -> String:
+	var best := ""
+	for t in MODEL_TYPES:
+		var ts: String = t
+		if ts.length() > best.length() and (node_name == ts or node_name.begins_with(ts + "_")):
+			best = ts
+	return best
+
+
+static func swap_models(root: Node) -> int:
+	var have := {}
+	for t in MODEL_TYPES:
+		var p: String = MODELS_DIR + String(t) + ".glb"
+		if ResourceLoader.exists(p):
+			have[t] = p
+	if have.is_empty():
+		return 0
+	var scenes := {}
+	var n := 0
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		var old: MeshInstance3D = mi
+		var t := model_type(String(old.name))
+		if t == "" or not have.has(t) or not old.visible:
+			continue
+		if not scenes.has(t):
+			scenes[t] = load(have[t])
+		var ps: PackedScene = scenes[t]
+		if ps == null:
+			continue
+		var inst: Node3D = ps.instantiate()
+		inst.name = String(old.name) + "_model"
+		old.get_parent().add_child(inst)
+		inst.transform = old.transform
+		for g in inst.find_children("*", "GeometryInstance3D", true, false):
+			var gi: GeometryInstance3D = g
+			gi.visibility_range_end = old.visibility_range_end
+			gi.visibility_range_end_margin = old.visibility_range_end_margin
+			gi.visibility_range_fade_mode = old.visibility_range_fade_mode
+			gi.layers = old.layers
+		old.visible = false
+		n += 1
+	return n
 
 
 ## Мебель, лестницы и крыша в модели здания собраны из коробок. У части из них грани разных деталей лежат в

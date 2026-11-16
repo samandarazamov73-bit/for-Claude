@@ -567,6 +567,7 @@ func _build_building() -> void:
 	# те же новые текстуры, что в здании (тамбур и вестибюль видны через входную дверь)
 	var Game: Script = load("res://sanatorium/scripts/game.gd")
 	Game.fix_coplanar(building)                      # крыша и торцы кроватей без мерцания
+	Game.swap_models(building)                       # свои 3D-модели мебели (вестибюль виден через дверь)
 	for mi in building.find_children("*", "MeshInstance3D", true, false):
 		var mesh: Mesh = (mi as MeshInstance3D).mesh
 		if mesh == null:
