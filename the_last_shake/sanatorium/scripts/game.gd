@@ -52,6 +52,7 @@ func _ready() -> void:
 	building = (load("res://sanatorium/assets/sanatorium.glb") as PackedScene).instantiate()
 	add_child(building)
 	_index(building)
+	stats["coplanar_fixed"] = fix_coplanar(building)
 	for r in level["rooms"]:
 		rooms[r["id"]] = r
 		room_list.append(r)
@@ -328,7 +329,191 @@ const TEX_SET := {
 	"M_Tile_FloorCeramic": ["floor_ceramic_albedo", "floor_ceramic_normal", "floor_ceramic_orm"],
 	"M_Terrazzo": ["terrazzo_albedo", "terrazzo_normal", "terrazzo_orm"],
 	"M_Wood_DoorDark": ["door_albedo", "door_normal", "door_orm"],
+	# снаружи (tools/godot_assets/make_exterior_textures.py): фасадные панели, цоколь, карнизы, отмостка, кровля
+	"M_Concrete_FacadeWall": ["ext_facade_wall_albedo", "ext_facade_wall_normal", "ext_facade_wall_orm"],
+	"M_Concrete_FacadePanel": ["ext_facade_panel_albedo", "ext_facade_panel_normal", "ext_facade_panel_orm"],
+	"M_Concrete_Weathered": ["ext_concrete_weathered_albedo", "ext_concrete_weathered_normal", "ext_concrete_weathered_orm"],
+	"M_Concrete_Trim": ["ext_concrete_trim_albedo", "ext_concrete_trim_normal", "ext_concrete_trim_orm"],
+	"M_Concrete_Paving": ["ext_paving_albedo", "ext_paving_normal", "ext_paving_orm"],
+	"M_Concrete_Interior": ["ext_concrete_interior_albedo", "ext_concrete_interior_normal", "ext_concrete_interior_orm"],
+	"M_Roofing_Bitumen": ["ext_roofing_albedo", "ext_roofing_normal", "ext_roofing_orm"],
+	"M_Ceramic_Tile_RedBrown": ["ext_brick_albedo", "ext_brick_normal", "ext_brick_orm"],
 }
+
+
+## Мебель, лестницы и крыша в модели здания собраны из коробок. У части из них грани разных деталей лежат в
+## одной плоскости, смотрят в одну сторону и перекрываются: торцы всех кроватей (спинка и рама), площадки
+## маршей, стёкла в рамах, крыша. Такие грани мерцают «рябью» (z-fighting) — «глючит низ кровати».
+## Меньшую из двух граней утапливаем внутрь на 2,5 мм (третью — на 5 и т. д.): глазу не видно, мерцания нет.
+const COPLANAR_FIX := ["bed_", "Stair", "Roof_Structures", "InteriorGlazing", "Lift_Machine", "projector_"]
+const COPLANAR_STEP := 0.0025
+
+
+static func fix_coplanar(root: Node) -> int:
+	var done := {}
+	var fixed := 0
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		var m3: MeshInstance3D = mi
+		var nm := String(m3.name)
+		var want := false
+		for pre in COPLANAR_FIX:
+			if nm.begins_with(pre):
+				want = true
+				break
+		if not want or not (m3.mesh is ArrayMesh):
+			continue
+		var src: ArrayMesh = m3.mesh
+		if not done.has(src):
+			done[src] = _decoplanar(src)
+		var out: ArrayMesh = done[src]
+		if out:
+			m3.mesh = out
+			fixed += 1
+	return fixed
+
+
+static func _decoplanar(src: ArrayMesh) -> ArrayMesh:
+	# все поверхности меша вместе: крыша спорит гранями разных материалов (кровля и парапет)
+	var surfaces: Array = []
+	var allv := PackedVector3Array()
+	var alli := PackedInt32Array()
+	var base := PackedInt32Array()
+	for s in src.get_surface_count():
+		var arr: Array = src.surface_get_arrays(s)
+		surfaces.append(arr)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		base.append(allv.size())
+		if src.surface_get_primitive_type(s) == Mesh.PRIMITIVE_TRIANGLES:
+			var idx := PackedInt32Array()
+			if arr[Mesh.ARRAY_INDEX] != null:
+				idx = arr[Mesh.ARRAY_INDEX]
+			if idx.is_empty():
+				idx.resize(v.size())
+				for i in v.size():
+					idx[i] = i
+			for i in idx:
+				alli.append(i + allv.size())
+		allv.append_array(v)
+	if not _decoplanar_verts(allv, alli):
+		return null
+	for s in surfaces.size():
+		var arr: Array = surfaces[s]
+		var n: int = (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+		arr[Mesh.ARRAY_VERTEX] = allv.slice(base[s], base[s] + n)
+	var out := ArrayMesh.new()
+	for s in surfaces.size():
+		out.add_surface_from_arrays(src.surface_get_primitive_type(s), surfaces[s])
+		out.surface_set_material(s, src.surface_get_material(s))
+		out.surface_set_name(s, src.surface_get_name(s))
+	out.resource_name = src.resource_name
+	return out
+
+
+static func _uf_find(par: PackedInt32Array, i: int) -> int:
+	while par[i] != i:
+		par[i] = par[par[i]]
+		i = par[i]
+	return i
+
+
+## v — вершины (меняются на месте), idx — треугольники. true, если что-то сдвинули.
+static func _decoplanar_verts(v: PackedVector3Array, idx: PackedInt32Array) -> bool:
+	# детали = связные куски треугольников с общими вершинами (у разных коробок вершины свои)
+	var par := PackedInt32Array()
+	par.resize(v.size())
+	for i in v.size():
+		par[i] = i
+	var nt := idx.size() / 3
+	for t in nt:
+		for k in [1, 2]:
+			var ra := _uf_find(par, idx[t * 3])
+			var rb := _uf_find(par, idx[t * 3 + k])
+			if ra != rb:
+				par[rb] = ra
+	var tn: Array = []
+	var td := PackedFloat32Array()
+	var comp := PackedInt32Array()
+	var area := {}
+	tn.resize(nt)
+	td.resize(nt)
+	comp.resize(nt)
+	var buckets := {}
+	var pairs := {}
+	for t in nt:
+		var a: Vector3 = v[idx[t * 3]]
+		var b: Vector3 = v[idx[t * 3 + 1]]
+		var c: Vector3 = v[idx[t * 3 + 2]]
+		var n: Vector3 = (b - a).cross(c - a)
+		var l := n.length()
+		comp[t] = _uf_find(par, idx[t * 3])
+		if l < 2e-6:
+			tn[t] = Vector3.ZERO
+			continue
+		n /= l
+		tn[t] = n
+		td[t] = n.dot(a)
+		area[comp[t]] = float(area.get(comp[t], 0.0)) + l * 0.5
+		var key := Vector4i(roundi(n.x * 40.0), roundi(n.y * 40.0), roundi(n.z * 40.0), roundi(td[t] / 0.002))
+		var cen := (a + b + c) / 3.0
+		var probes: Array = [cen, a.lerp(cen, 0.15), b.lerp(cen, 0.15), c.lerp(cen, 0.15)]
+		for dk in [-1, 0, 1]:
+			var k2 := Vector4i(key.x, key.y, key.z, key.w + dk)
+			if not buckets.has(k2):
+				continue
+			for u in buckets[k2]:
+				if comp[u] == comp[t] or absf(td[u] - td[t]) > 0.002 or (tn[u] as Vector3).dot(n) < 0.999:
+					continue
+				var a2: Vector3 = v[idx[u * 3]]
+				var b2: Vector3 = v[idx[u * 3 + 1]]
+				var c2: Vector3 = v[idx[u * 3 + 2]]
+				var cen2 := (a2 + b2 + c2) / 3.0
+				var probes2: Array = [cen2, a2.lerp(cen2, 0.15), b2.lerp(cen2, 0.15), c2.lerp(cen2, 0.15)]
+				var hit := false
+				for q in probes:
+					if Geometry3D.ray_intersects_triangle(q + n * 0.01, -n, a2, b2, c2) != null:
+						hit = true
+						break
+				if not hit:
+					for q in probes2:
+						if Geometry3D.ray_intersects_triangle(q + n * 0.01, -n, a, b, c) != null:
+							hit = true
+							break
+				if hit:
+					pairs[Vector2i(mini(comp[t], comp[u]), maxi(comp[t], comp[u]))] = n
+		if not buckets.has(key):
+			buckets[key] = []
+		buckets[key].append(t)
+	if pairs.is_empty():
+		return false
+	# глубина: самая большая деталь остаётся на месте, каждая меньшая — на шаг глубже той, с которой спорит
+	var comps: Array = []
+	var partners := {}
+	for pr in pairs:
+		for c in [pr.x, pr.y]:
+			if not partners.has(c):
+				partners[c] = []
+				comps.append(c)
+		partners[pr.x].append(pr.y)
+		partners[pr.y].append(pr.x)
+	comps.sort_custom(func(x, y): return float(area.get(x, 0.0)) > float(area.get(y, 0.0)))
+	var depth := {}
+	for c in comps:
+		var dep := 0.0
+		for o in partners[c]:
+			if depth.has(o):
+				dep = maxf(dep, float(depth[o]) + COPLANAR_STEP)
+		depth[c] = dep
+	var moved := {}
+	for t in nt:
+		var dep: float = float(depth.get(comp[t], 0.0))
+		if dep <= 0.0 or (tn[t] as Vector3) == Vector3.ZERO:
+			continue
+		for k in 3:
+			var vi: int = idx[t * 3 + k]
+			if not moved.has(vi):
+				moved[vi] = true
+				v[vi] -= (tn[t] as Vector3) * dep
+	return not moved.is_empty()
 
 
 static func retexture(m: BaseMaterial3D, files: Array) -> void:
@@ -359,6 +544,33 @@ static func retexture(m: BaseMaterial3D, files: Array) -> void:
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 
 
+## Атлас мебели (tools/godot_assets/make_furniture_atlas.py): вдвое крупнее, настоящий шпон и ткани.
+## Каналы ORM те же, что у модели (металл остаётся металлом) — меняются только сами текстуры.
+static func retexture_atlas(m: BaseMaterial3D) -> void:
+	var dir := "res://sanatorium/assets/tex/%s.jpg"
+	for f in ["furniture_albedo", "furniture_normal", "furniture_orm"]:
+		if not ResourceLoader.exists(dir % f):
+			return
+	var alb: Texture2D = load(dir % "furniture_albedo")
+	var nrm: Texture2D = load(dir % "furniture_normal")
+	var orm: Texture2D = load(dir % "furniture_orm")
+	if alb == null or nrm == null or orm == null:
+		return
+	m.albedo_texture = alb
+	m.normal_enabled = true
+	m.normal_texture = nrm
+	m.roughness_texture = orm
+	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+	m.roughness = 1.0
+	m.metallic_texture = orm
+	m.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
+	m.ao_enabled = true
+	m.ao_texture = orm
+	m.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+	m.ao_light_affect = 0.0
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+
+
 func _tune_materials() -> void:
 	var seen := {}
 	var g_wall: Texture2D = load("res://sanatorium/assets/grime_wall.png")
@@ -376,6 +588,8 @@ func _tune_materials() -> void:
 			var nm: String = m.resource_name
 			if TEX_SET.has(nm):
 				retexture(m, TEX_SET[nm])
+			elif nm == "M_Atlas_Furniture":
+				retexture_atlas(m)
 			if nm in ["M_Atlas_Furniture", "M_Metal_Painted", "M_Metal_DarkSteel"]:
 				m.metallic = 0.35
 				m.metallic_specular = 0.5

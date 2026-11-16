@@ -267,16 +267,35 @@ func lamp(parent: Node3D, pos: Vector3, energy := 0.7, rng := 5.5, col := Color(
 	game.lights.confine(l, game.lights.storey_of(pos.y))
 	var bulb := MeshInstance3D.new()
 	var sm := SphereMesh.new()
-	sm.radius = 0.06
-	sm.height = 0.12
+	sm.radius = 0.085
+	sm.height = 0.17
 	bulb.mesh = sm
 	var bm := StandardMaterial3D.new()
 	bm.emission_enabled = true
 	bm.emission = col
-	bm.emission_energy_multiplier = 3.0
+	bm.emission_energy_multiplier = 9.0               # видно издалека, со свечением: понятно, откуда свет
 	bm.albedo_color = col
 	bulb.material_override = bm
 	l.add_child(bulb)
+	# эмалированный абажур над лампочкой: издалека видно, откуда свет
+	var shade := MeshInstance3D.new()
+	var shm := CylinderMesh.new()
+	shm.top_radius = 0.035
+	shm.bottom_radius = 0.24
+	shm.height = 0.17
+	shm.radial_segments = 20
+	shm.cap_top = true
+	shm.cap_bottom = false
+	shade.mesh = shm
+	var sh_mat := StandardMaterial3D.new()
+	sh_mat.albedo_color = Color(0.86, 0.85, 0.8)
+	sh_mat.roughness = 0.35
+	sh_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	sh_mat.emission_enabled = true
+	sh_mat.emission = col * 0.25
+	shade.material_override = sh_mat
+	shade.position.y = 0.05
+	l.add_child(shade)
 	var cord := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.top_radius = 0.006
@@ -316,9 +335,14 @@ func build_void() -> void:
 	_block_walls(root_set, B_STAIR3, x_max, [], [])
 	_block_walls(root_set, B_204, x_max, [HOLE_204], [])
 	_block_walls(root_set, B_STAIR1, x_max, [HOLE_LIFT, HOLE_STAIR], [])
+	# пороги под проёмами: перекрытие кончалось у края блока, а пол комнаты начинается на 10 см дальше —
+	# под дверью была щель на 1-й этаж. Верх порога на 2 мм ниже пола комнаты (без мерцания на стыке).
+	for h in [HOLE_204, HOLE_LIFT, HOLE_STAIR]:
+		_box(root_set, Vector3((h[0] + h[1]) * 0.5, Y0 - 0.102, -6.67), Vector3(h[1] - h[0] + 0.3, 0.2, 0.4), _m_floor)
 	_box(root_set, Vector3((HOLE_LIFT[0] + HOLE_LIFT[1]) * 0.5, (LIFT_FRAME_TOP + Y1) * 0.5, -6.6 - 0.16),
 		Vector3(HOLE_LIFT[1] - HOLE_LIFT[0] + 0.04, Y1 - LIFT_FRAME_TOP, 0.16), _m_wall)
 	_stair_door_panel(root_set)
+	game.lights.blackout_storey(1, ["L1.F2", "L1.F2b"])     # на этаже горят только палата деда и наши лампы
 	# одна лампа над дверью деда — как маяк в темноте; в палате горит свет
 	lamp(root_set, Vector3(8.8, 6.9, -7.3), 1.1, 7.0)
 	lamp(root_set, Vector3(37.5, 6.9, -7.6), 0.25, 3.5, Color(0.7, 0.8, 1.0))
@@ -357,6 +381,7 @@ func restore_floor2() -> void:
 func build_real2() -> void:
 	mode = "real"
 	game.hud.hidden_level = -1
+	game.lights.end_blackout()
 	_clear()
 	restore_floor2()
 	# свет: в комнатах темно, в коридоре горит, но то и дело гаснет; в процедурной 213 горит (там ключ)

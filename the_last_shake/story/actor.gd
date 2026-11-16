@@ -63,44 +63,45 @@ func setup(path: String, scale_k := 1.0) -> void:
 	add_child(_steps)
 
 
-## Спокойная стойка из двух поз (если в модели есть stand_ref, например у мамы): корпус, голова и ступни —
-## свои (ровная спина, ступни в туфлях на каблуке), а ноги, таз и руки — из спокойной стойки stand_ref
-## (ноги рядом, руки свободно вдоль тела). Без этого мама стояла как посреди шага, с разведёнными руками.
-const STAND_FROM_REF := ["UpLeg", "Leg"]
+## Спокойная стойка мамы (если в модели есть stand_ref): таз, ноги и ступни — из исходной позы самой модели
+## (в ней она стоит ровно, ноги прямые, туфли на каблуке стоят как надо), корпус и голова — свои из кадра
+## стойки, кисти свободно опущены вдоль бёдер (_update_idle_hands). Раньше ноги брались из стойки деда —
+## таз «подкручивался», ноги уходили назад, живот выпирал.
+const REST_BONES := ["Hips", "LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase", "RightUpLeg", "RightLeg",
+	"RightFoot", "RightToeBase"]
 var idle_hands := false                 # в стойке кисти свободно опущены вдоль бёдер (у мамы)
 var _hands_user := false                # руки сейчас заняты сюжетом (set_hands / set_arm)
 var _idle_w := 0.0
+const IDLE_LEAN := 0.0
 
 
 func _mix_stand() -> void:
-	if anim == null:
+	if anim == null or skel == null:
 		return
-	var ref_name: String = anim_name("stand_ref")
-	var idle_name: String = anim_name(idle_anim)
-	if ref_name == "" or idle_name == "":
+	if anim_name("stand_ref") == "" or anim_name(idle_anim) == "":
 		return
-	var ref: Animation = anim.get_animation(ref_name)
-	var idle: Animation = anim.get_animation(idle_name)
-	for i in ref.get_track_count():
-		var path: NodePath = ref.track_get_path(i)
-		var bone: String = String(path).get_slice(":", 1)
+	var idle: Animation = anim.get_animation(anim_name(idle_anim))
+	for t in idle.get_track_count():
+		var path: String = String(idle.track_get_path(t))
+		var bone: String = path.get_slice(":", 1)
+		var short: String = bone
 		for prefix in ["mixamorig:", "mixamorig_", "mixamorig"]:
-			if bone.begins_with(prefix):
-				bone = bone.substr(prefix.length())
+			if short.begins_with(prefix):
+				short = short.substr(prefix.length())
 				break
-		if ref.track_get_type(i) != Animation.TYPE_ROTATION_3D:
-			continue                         # только повороты: длины костей у каждого свои
-		var take: bool = bone == "Hips"
-		for side in ["Left", "Right"]:
-			for part in STAND_FROM_REF:
-				if bone == side + part or (part == "Hand" and bone.begins_with(side + "Hand")):
-					take = true
-		if not take:
+		if not (short in REST_BONES):
 			continue
-		var j: int = idle.find_track(path, ref.track_get_type(i))
-		if j >= 0:
-			idle.remove_track(j)
-		ref.copy_track(i, idle)
+		var bi: int = skel.find_bone(bone)
+		if bi < 0:
+			continue
+		var rest: Transform3D = skel.get_bone_rest(bi)
+		match idle.track_get_type(t):
+			Animation.TYPE_ROTATION_3D:
+				for k in idle.track_get_key_count(t):
+					idle.track_set_key_value(t, k, rest.basis.get_rotation_quaternion())
+			Animation.TYPE_POSITION_3D:
+				for k in idle.track_get_key_count(t):
+					idle.track_set_key_value(t, k, rest.origin)
 	idle_hands = true
 
 
@@ -224,6 +225,8 @@ func _update_strike(dt: float) -> void:
 ## Стойка: кисти опускаются вдоль бёдер (чуть впереди, локоть слегка согнут) — пока руки не заняты.
 func _update_idle_hands(dt: float) -> void:
 	if not idle_hands or look == null or _hands_user or _strike_t >= 0.0:
+		if idle_hands and look and _idle_w > 0.0:
+			look.lean = 0.0
 		_idle_w = 0.0
 		return
 	var want: float = 1.0 if (current == idle_anim and not _moving) else 0.0
@@ -232,11 +235,14 @@ func _update_idle_hands(dt: float) -> void:
 		if look.arm_target != null or look.arm_target_left != null:
 			look.arm_target = null
 			look.arm_target_left = null
+			look.lean = 0.0
 		return
 	var b: Basis = global_transform.basis
-	look.arm_target = global_position + b * Vector3(0.2, 0.8, -0.045)
-	look.arm_target_left = global_position + b * Vector3(-0.2, 0.8, -0.045)
+	look.arm_target = global_position + b * Vector3(0.21, 0.8, 0.01)
+	look.arm_target_left = global_position + b * Vector3(-0.21, 0.8, 0.01)
 	look.arm_weight = _idle_w
+	# в собранной стойке корпус был откинут назад (живот вперёд) — чуть наклонить спину вперёд
+	look.lean = IDLE_LEAN * _idle_w
 
 
 ## Голова (для «навести взгляд и нажать E» и камер).

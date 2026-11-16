@@ -558,7 +558,7 @@ func _locked_in_room() -> void:
 	await say("psycho", "Тш-ш-ш… Не шуми. Здесь все сначала шумят.", 3.2)
 	await say("hero", "Откройте!! Выпустите меня!", 2.2)
 	await wait(0.8)
-	await say("psycho", "Я тебя знаю. Ты — тот, кого нет. Тебя придумали, мальчик.", 4.0)
+	await say("psycho", "Я тебя знаю. Ты внук старика из двести четвёртой. Он про тебя всё время рассказывает.", 4.0)
 	await say("psycho", "Посиди. Подумай. А я схожу… за твоей мамой.", 3.6)
 	snd("laughter", SCREAM_DOOR + Vector3(2.0, 1.6, 0.6), 0.0, 0.9, 30.0)
 	snd("barefoot_steps", SCREAM_DOOR + Vector3(5.0, 1.0, 1.5), 0.0, 1.0, 30.0)
@@ -1019,6 +1019,8 @@ func _act3() -> void:
 	# в палате — бумаги деда: про маму, про него самого и его записка про это место
 	objective("Осмотри палату деда")
 	_place_notes()
+	await wait(1.0)
+	await say("thought", "Его вещи… На столе и на кровати какие-то бумаги. Надо посмотреть.")
 	await until(func(): return _notes_read.has("diary") or (_notes_read.size() >= 2 and not _note_open), 240.0)
 	while _note_open:
 		await get_tree().process_frame
@@ -1051,50 +1053,93 @@ func _act3() -> void:
 	act = "void_done"
 
 
+## Бумаги деда в палате 204. [заголовок, точка на поверхности мебели (высоты сняты с модели здания: коллайдер
+## кровати — коробка до верха изголовья, по нему лист висел в воздухе), текст, текстура,
+## поворот]. Текст тот же, что нарисован на бумаге (tools/godot_assets/make_note_textures.py).
 const NOTES := {
-	"mom": ["Заключение психиатра (копия)", Vector3(6.36, 5.26, -3.43),
-		"Пациентка: Барно Анваровна, 34 года.\n\n" +
-		"В 1959 году сын пациентки родился мёртвым. Имя ему дали заранее — Саман.\n\n" +
-		"Через два года муж, Рустам, ушёл из семьи. Со слов отца пациентки: «Он не смог жить в доме, " +
-		"где каждый вечер стелют постель мальчику, которого нет».\n\n" +
-		"С тех пор пациентка убеждена, что сын жив и растёт. Разговаривает с ним, покупает ему одежду " +
-		"«на вырост», ставит на стол третью тарелку. Когда ей напоминают о смерти ребёнка — приступы ярости.\n\n" +
-		"От лечения отказывается."],
-	"anvar": ["Направление в санаторий «Оромгох»", Vector3(7.5, 5.23, -0.93),
-		"Анвар Каримович, 74 года.\n\n" +
-		"После смерти жены — бессонница, отказывается от еды, неделями не выходит из комнаты. " +
-		"По ночам зовёт внука и разговаривает с ним. Внуков у пациента нет.\n\n" +
-		"Направлен на длительное наблюдение. Родственники (дочь) навещают редко.\n\n" +
-		"Особая отметка: острые предметы из палаты убрать."],
-	"diary": ["Записка карандашом на обороте меню (почерк деда)", Vector3(11.7, 5.13, -2.57),
+	"mom": ["Выписка из истории болезни (в папке «Дело»)", Vector3(6.36, 5.25, -3.3),
+		"Больная: Барно Анваровна К., 34 года.\n" +
+		"Диагноз: болезнь Альцгеймера, ранняя форма.\n\n" +
+		"Анамнез: в 1972 г. муж (Рустам) ушёл из семьи. После этого — бессонница, тяжёлый стресс. " +
+		"Через год появились провалы в памяти: забывает слова и дорогу домой, путает годы, не узнаёт соседей. " +
+		"Со слов отца, однажды не узнала его самого.\n\n" +
+		"Когда её поправляют — вспышки гнева, агрессия.\n\n" +
+		"В таком возрасте болезнь встречается редко. Прогноз неблагоприятный.\n" +
+		"Рекомендовано: наблюдение невропатолога. Одну не оставлять.",
+		"note_typed", 0.12],
+	"anvar": ["Направление на санаторно-курортное лечение", Vector3(7.36, 5.22, -1.05),
+		"Каримов Анвар Каримович, 74 года.\n\n" +
+		"Диагноз: стенокардия; невроз после смерти жены. Бессонница, отказывается от еды.\n\n" +
+		"Санаторий «Оромгох», 2 этаж, палата 204. Срок — 45 дней.\n\n" +
+		"Родные: дочь Барно; внук Саман, 16 лет (на коляске).\n\n" +
+		"Особая отметка: острые предметы из палаты убрать.",
+		"note_form", -0.35],
+	"diary": ["Записка карандашом (почерк деда)", Vector3(11.05, 5.065, -1.62),
+		"Барно опять не узнала меня по телефону. Спросила, кто говорит. Врач сказал — Альцгеймер, " +
+		"в тридцать четыре так почти не бывает. А у неё бывает. Рустам ушёл — не выдержал. " +
+		"Я его понимаю, и мне стыдно, что понимаю.\n" +
+		"Самана она пока помнит. Пока.\n\n" +
 		"Здесь никто не спит. Ночью кто-то идёт по коридору и стучит в каждую дверь — три раза. " +
 		"Я считаю двери. До моей он ещё не дошёл.\n\n" +
-		"Санитар говорит, в 139-й давно никого нет. Я спросил, кто же там тогда кричит. Он засмеялся " +
-		"и выключил мне свет.\n\n" +
-		"Опять снился мальчик. Он звал меня «дедушка», и я ему ответил. Здесь я его больше не слышу.\n\n" +
-		"Я устал. Если утром меня найдут — не будите. Мне там лучше. Там у меня хотя бы есть внук.\n\n" +
-		"— А."],
+		"Санитар говорит, в 139-й давно никого нет. Я спросил, кто же там тогда кричит. " +
+		"Он засмеялся и выключил мне свет.\n\n" +
+		"Я устал. Если утром меня найдут — не будите. Пусть Саман меня таким не видит.\n— А.",
+		"note_pencil", 1.35],
 }
 var _notes_read := {}
 var _note_open := false
 
 
+## Бумаги лежат на настоящей поверхности (луч сверху вниз находит стол, тумбочку, кровать): листы с текстом,
+## выписка — на картонной папке. Уголок листа чуть приподнимается от сквозняка — глаз за это цепляется.
 func _place_notes() -> void:
 	for key in NOTES:
 		var n: Array = NOTES[key]
+		var top: Vector3 = n[1]
 		var holder := Node3D.new()
 		game.add_child(holder)
-		holder.global_position = n[1]
-		var sheet := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.21, 0.004, 0.29)
-		sheet.mesh = bm
-		sheet.material_override = Props.mat(Color(0.85, 0.82, 0.72), 0.9)
-		holder.add_child(sheet)
-		sheet.rotation.y = randf_range(-0.5, 0.5)
+		holder.global_position = top + Vector3(0, 0.006, 0)
+		holder.rotation.y = float(n[4])
+		if key == "mom":                                   # папка под выпиской
+			_paper(holder, "note_folder", Vector2(0.24, 0.33), Vector3(-0.012, -0.002, 0.01), 0.0)
+		var sheet: Node3D = _paper(holder, String(n[3]), Vector2(0.21, 0.297), Vector3.ZERO, 0.0)
+		_flutter(sheet)
 		var it: Area3D = Interactable.new()
 		holder.add_child(it)
-		it.setup(Vector3(0.45, 0.3, 0.45), "[E] Прочитать", _read_note.bind(key))
+		it.setup(Vector3(0.4, 0.25, 0.45), "[E] Прочитать", _read_note.bind(key))
+
+
+## Лист бумаги с текстурой: шарнир у дальнего края (для сквозняка), плоскость лицом вверх.
+func _paper(parent: Node3D, tex: String, size: Vector2, offset: Vector3, yaw: float) -> Node3D:
+	var pivot := Node3D.new()
+	parent.add_child(pivot)
+	pivot.position = offset + Vector3(0, 0, -size.y * 0.5)
+	pivot.rotation.y = yaw
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = size
+	mi.mesh = pm
+	var m := StandardMaterial3D.new()
+	var path := "res://story/notes/%s.jpg" % tex
+	if ResourceLoader.exists(path):
+		m.albedo_texture = load(path)
+	else:
+		m.albedo_color = Color(0.86, 0.83, 0.74)
+	m.roughness = 0.92
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pivot.add_child(mi)
+	mi.position = Vector3(0, 0, size.y * 0.5)
+	return pivot
+
+
+func _flutter(sheet: Node3D) -> void:
+	var tw := create_tween().set_loops()
+	tw.tween_interval(randf_range(2.0, 4.5))
+	tw.tween_property(sheet, "rotation:x", deg_to_rad(-2.5), 0.6).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(sheet, "rotation:x", 0.0, 0.9).set_trans(Tween.TRANS_SINE)
 
 
 func _read_note(key: String) -> void:
@@ -1102,7 +1147,7 @@ func _read_note(key: String) -> void:
 		return
 	_note_open = true
 	freeze(true)
-	game.play_at("button", NOTES[key][1], -14.0, 1.8, 6.0)
+	snd("cloth_tear", null, -14.0, 1.9)                 # шорох бумаги
 	await ui.note(NOTES[key][0], NOTES[key][2])
 	_notes_read[key] = true
 	freeze(false)

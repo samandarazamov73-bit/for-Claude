@@ -29,6 +29,10 @@ var _fade := {}               # light -> target shadow opacity while it fades in
 # и не светят в тумане (иначе сквозь пол видно светящуюся дымку).
 var confined := []
 var _cur_storey := -99
+# сюжет может погасить весь свет этажа, кроме нескольких комнат (пустой 2-й этаж): иначе лампы спрятанных
+# комнат и лестничных площадок светили сквозь стены пустоты — «лучи без источника»
+var _storey_off := -1
+var _storey_keep: Array = []
 const STOREY_BITS := 0xF << 10
 
 
@@ -222,7 +226,7 @@ func set_room(room: String, on: bool, _sound := true) -> void:
 	var grp := _group(room)
 	grp["on"] = on
 	for l in grp["lights"]:
-		l.visible = on
+		l.visible = on and not _blacked(l, room)
 		if not on and l.shadow_enabled:
 			l.shadow_enabled = false
 			_fade.erase(l)
@@ -273,6 +277,33 @@ func _stair_fill() -> void:
 				l.set_meta("no_shadow", true)
 				confine(l, s)
 				_group(room)["lights"].append(l)
+
+
+func _blacked(l: Light3D, room: String) -> bool:
+	return _storey_off >= 0 and int(l.get_meta("storey", -1)) == _storey_off and not (room in _storey_keep)
+
+
+## Погасить все лампы этажа storey, кроме комнат keep_rooms (до end_blackout).
+func blackout_storey(storey: int, keep_rooms: Array) -> void:
+	_storey_off = storey
+	_storey_keep = keep_rooms
+	for room in groups:
+		for l in groups[room]["lights"]:
+			if is_instance_valid(l) and _blacked(l, room):
+				l.visible = false
+				if l.shadow_enabled:
+					l.shadow_enabled = false
+					_fade.erase(l)
+
+
+func end_blackout() -> void:
+	var s: int = _storey_off
+	_storey_off = -1
+	_storey_keep = []
+	for room in groups:
+		for l in groups[room]["lights"]:
+			if is_instance_valid(l) and int(l.get_meta("storey", -1)) == s:
+				l.visible = groups[room]["on"]
 
 
 static func storey_of(y: float) -> int:

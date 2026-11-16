@@ -23,7 +23,8 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 SRC, OLD, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
-N = 2048
+N = int(os.environ.get("TEX_N", "4096"))   # размер текстур (4096 — для 4K-исходников Poly Haven)
+SC = N / 2048.0                            # все размеры в пикселях ниже заданы для 2048
 rng = np.random.default_rng(1975)
 os.makedirs(OUT, exist_ok=True)
 
@@ -95,9 +96,10 @@ def save(arr, name, normal=False, q=90):
 
 # ------------------------------------------------------------------ помощники
 def blur(a, r):
-    """Гаусс через FFT (с переносом по краям — бесшовные текстуры остаются бесшовными)."""
+    """Гаусс через FFT (с переносом по краям — бесшовные текстуры остаются бесшовными); r — в пикселях 2048."""
+    r = r * SC
     if a.ndim == 3:
-        return np.stack([blur(a[..., i], r) for i in range(a.shape[2])], -1)
+        return np.stack([blur(a[..., i], r / SC) for i in range(a.shape[2])], -1)
     h, w = a.shape
     fy = np.fft.fftfreq(h)[:, None]
     fx = np.fft.rfftfreq(w)[None, :]
@@ -134,6 +136,7 @@ def nflat(n, s):
 
 
 def n_from_height(h, k):
+    k = k * SC
     """Нормаль (OpenGL: +Y вверх по картинке) из высоты h (м) с силой k."""
     dx = (np.roll(h, -1, 1) - np.roll(h, 1, 1)) * 0.5
     dy = (np.roll(h, -1, 0) - np.roll(h, 1, 0)) * 0.5
@@ -167,7 +170,7 @@ def noise(scale_px, octaves=4, seed=0):
     g = np.random.default_rng(seed)
     out = np.zeros((N, N), np.float32)
     amp = 1.0
-    s = scale_px
+    s = scale_px * SC
     for _ in range(octaves):
         small = g.standard_normal((max(2, N // int(s)), max(2, N // int(s)))).astype(np.float32)
         big = np.asarray(Image.fromarray(small, "F").resize((N, N), Image.BICUBIC))
@@ -180,7 +183,7 @@ def noise(scale_px, octaves=4, seed=0):
 def tileable_noise(scale_px, seed=0):
     """Шум, который повторяется по краям (для полов)."""
     g = np.random.default_rng(seed)
-    k = max(2, N // int(scale_px))
+    k = max(2, N // int(scale_px * SC))
     small = g.standard_normal((k, k)).astype(np.float32)
     tiled = np.tile(small, (3, 3))
     big = np.asarray(Image.fromarray(tiled, "F").resize((N * 3, N * 3), Image.BICUBIC))
@@ -252,13 +255,13 @@ xx = np.arange(N)[None, :] + 0.5
 yy = np.arange(N)[:, None] + 0.5
 tx = np.mod(xx, tile_px)
 ty = np.mod(yy - TILE0 * N, tile_px)
-grout_w = 3.2
+grout_w = 3.2 * SC
 in_tiles = rows(TILE0, TILE1)
 dgx = np.minimum(tx, tile_px - tx)
 dgy = np.minimum(ty, tile_px - ty)
 dg = np.minimum(np.broadcast_to(dgx, (N, N)), np.broadcast_to(dgy, (N, N)))
 grout = np.clip(grout_w * 0.5 - dg + 0.5, 0, 1) * in_tiles
-bevel = np.clip(1.0 - (dg - grout_w * 0.5) / 4.0, 0, 1) * in_tiles * (1 - grout)
+bevel = np.clip(1.0 - (dg - grout_w * 0.5) / (4.0 * SC), 0, 1) * in_tiles * (1 - grout)
 col_i = np.floor(xx / tile_px).astype(int)
 row_i = np.floor((yy - TILE0 * N) / tile_px).astype(int)
 cell = np.broadcast_to(col_i, (N, N)) * 131 + np.broadcast_to(row_i, (N, N)) * 977
@@ -312,7 +315,7 @@ lin_d = load("linoleum_brown", "diff")
 lin_n = nmap(load("linoleum_brown", "nor"))
 lin_r = load("linoleum_brown", "rough", gray=True)
 wear = np.clip(tileable_noise(300, 31) * 0.5 + 0.5, 0, 1)
-seam = np.exp(-(np.minimum(xx, N - xx) / 1.2) ** 2)
+seam = np.exp(-(np.minimum(xx, N - xx) / (1.2 * SC)) ** 2)
 mottle = 1.0 + tileable_noise(60, 32) * 0.05 + tileable_noise(14, 33) * 0.03
 col = tint((112, 62, 46), detail(lin_d, 1.8, flat_r=None) * mottle * (1.0 - wear * 0.16))
 col = col * (1 - np.broadcast_to(seam, (N, N))[..., None] * 0.45)
@@ -342,8 +345,8 @@ checker = ((np.broadcast_to(cx, (N, N)) + np.broadcast_to(cy, (N, N))) % 2).asty
 fx = np.mod(xx, cell_px)
 fy = np.mod(yy, cell_px)
 dgf = np.minimum(np.broadcast_to(np.minimum(fx, cell_px - fx), (N, N)), np.broadcast_to(np.minimum(fy, cell_px - fy), (N, N)))
-grout = np.clip(2.6 * 0.5 - dgf + 0.5, 0, 1)
-bev = np.clip(1.0 - (dgf - 1.3) / 3.0, 0, 1) * (1 - grout)
+grout = np.clip(2.6 * SC * 0.5 - dgf + 0.5, 0, 1)
+bev = np.clip(1.0 - (dgf - 1.3 * SC) / (3.0 * SC), 0, 1) * (1 - grout)
 cid = np.broadcast_to(cx, (N, N)) * 37 + np.broadcast_to(cy, (N, N)) * 101
 v2 = (np.sin(cid * 78.233) * 12345.678) % 1.0
 surf = detail(ft_d, 0.6, flat_r=10)

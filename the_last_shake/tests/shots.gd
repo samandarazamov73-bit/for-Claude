@@ -54,7 +54,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "liftmom", "tour", "voidtour":
+		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "liftmom", "tour", "voidtour", "mompose":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -324,7 +324,7 @@ func _sanatorium() -> void:
 		cp = "floor3"
 	elif case_name == "liftmom":
 		cp = "floor3b"
-	elif case_name == "tour":
+	elif case_name == "tour" or case_name == "mompose":
 		cp = "start"
 	elif case_name == "voidtour":
 		cp = "void"
@@ -355,6 +355,8 @@ func _sanatorium() -> void:
 		await _liftmom_test(d)
 	elif case_name == "tour" or case_name == "voidtour":
 		await _tour_test(d, case_name == "voidtour")
+	elif case_name == "mompose":
+		await _mompose_test(g, d)
 	elif case_name == "fight":
 		d.has_ward_key = true
 		var door = d.door(91)
@@ -890,16 +892,17 @@ const TOUR := [
 	[Vector3(44.0, 1.2, -6.8), PI, -0.25, "L0.F14"],
 	[Vector3(26.2, 7.8, -11.0), PI * 0.55, -0.12, "L2.R7"],
 	[Vector3(37.5, 7.8, -8.4), PI * 0.5, -0.05, ""],
+	[Vector3(8.0, 4.5, -4.7), -2.35, -0.18, "L1.F2"],
+	[Vector3(9.3, 4.5, -2.0), PI * 0.5, -0.25, "L1.F2"],
 ]
 const VOID_TOUR := [
 	[Vector3(37.5, 4.5, -8.9), PI, 0.05, ""],
-	[Vector3(34.5, 4.5, -8.6), PI * 0.8, 0.05, ""],
-	[Vector3(40.5, 4.5, -8.6), -PI * 0.8, 0.05, ""],
 	[Vector3(36.9, 4.5, -7.2), PI * 0.75, 0.0, ""],
-	[Vector3(38.2, 4.5, -7.2), -PI * 0.75, 0.0, ""],
-	[Vector3(30.9, 4.5, -8.4), PI, 0.1, ""],
-	[Vector3(44.0, 4.5, -3.0), PI * 0.5, 0.0, ""],
-	[Vector3(9.0, 4.5, -9.5), PI, 0.05, ""],
+	[Vector3(30.0, 4.5, -8.3), PI * 0.5, 0.0, ""],
+	[Vector3(8.83, 4.5, -8.3), PI, -0.55, "open204"],
+	[Vector3(7.2, 4.5, -2.5), 0.81, -0.45, "notes"],
+	[Vector3(8.2, 4.5, -2.4), 2.58, -0.5, ""],
+	[Vector3(9.6, 4.5, -2.6), -2.17, -0.4, ""],
 ]
 
 
@@ -911,13 +914,51 @@ func _tour_test(dir: Node, void_floor: bool) -> void:
 	var spots: Array = VOID_TOUR if void_floor else TOUR
 	for i in spots.size():
 		var sp: Array = spots[i]
-		if sp[3] != "":
+		if sp[3] == "notes":
+			await tp(Vector3(9.0, 4.5, -3.0), 0.0)
+			await wait_for_d(dir, func(): return dir.objective_text().contains("Осмотри"), 60)
+			await secs(2.0)
+		elif sp[3] == "open204":
+			dir.sets.door(dir.sets.DOOR_204).set_angle(90.0)
+		elif sp[3] != "":
 			dir.game.lights.set_room(sp[3], true)
 		await tp(sp[0], sp[1])
 		pl.look_yaw = 0.0
 		pl.look_pitch = sp[2]
 		await secs(1.5)
 		await shot("%s_%02d" % ["voidtour" if void_floor else "tour", i])
+
+
+## Стойка мамы в полный рост: спереди, сбоку, сзади — отдельной камерой на уровне глаз.
+func _mompose_test(g: Node, dir: Node) -> void:
+	d = dir
+	pl = dir.player
+	var m: Node3D = dir.mom
+	await wait_for_d(dir, func(): return dir.act == "act1" and not m.is_moving() and m.global_position.distance_to(dir.STAIR_FOOT) < 0.6, 90)
+	await secs(1.0)
+	dir.set_process(false)
+	m.global_position = Vector3(31.6, 1.2, 1.6)          # в просторном холле
+	m.set_yaw(-PI * 0.5)
+	m.play("idle_loop", 0.0)
+	await secs(1.5)
+	var cam := Camera3D.new()
+	cam.fov = 40.0
+	g.add_child(cam)
+	var lamp := OmniLight3D.new()
+	lamp.light_energy = 1.2
+	lamp.omni_range = 6.0
+	g.add_child(lamp)
+	var c: Vector3 = m.global_position + Vector3(0, 0.95, 0)
+	var fwd: Vector3 = -m.global_transform.basis.z
+	var right: Vector3 = m.global_transform.basis.x
+	var views := [fwd * 2.2, right * 2.2, -fwd * 2.2, (fwd + right).normalized() * 2.2]
+	for i in views.size():
+		cam.global_position = c + views[i] + Vector3(0, 0.25, 0)
+		cam.look_at(c, Vector3.UP)
+		cam.current = true
+		lamp.global_position = cam.global_position + Vector3(0, 0.8, 0)
+		await secs(0.8)
+		await shot("mompose_%d" % i)
 
 
 func _caught_test() -> void:

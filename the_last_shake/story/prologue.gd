@@ -566,6 +566,7 @@ func _build_building() -> void:
 		interior.queue_free()
 	# те же новые текстуры, что в здании (тамбур и вестибюль видны через входную дверь)
 	var Game: Script = load("res://sanatorium/scripts/game.gd")
+	Game.fix_coplanar(building)                      # крыша и торцы кроватей без мерцания
 	for mi in building.find_children("*", "MeshInstance3D", true, false):
 		var mesh: Mesh = (mi as MeshInstance3D).mesh
 		if mesh == null:
@@ -574,6 +575,8 @@ func _build_building() -> void:
 			var m: Material = mesh.surface_get_material(si)
 			if m is BaseMaterial3D and Game.TEX_SET.has(m.resource_name):
 				Game.retexture(m, Game.TEX_SET[m.resource_name])
+			elif m is BaseMaterial3D and m.resource_name == "M_Atlas_Furniture":
+				Game.retexture_atlas(m)
 	var broken: Node = building.find_child("Fix_0029", true, false)      # этот плафон в здании перегорел
 	if broken:
 		broken.queue_free()
