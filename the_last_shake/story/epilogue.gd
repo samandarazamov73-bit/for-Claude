@@ -167,15 +167,38 @@ func _build_room() -> void:
 	add_child(shukhrat)
 	shukhrat.setup("res://characters/grandpa.glb")
 	shukhrat.global_position = Vector3(1.35, 0.0, 1.75)
-	_scarf = MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.125
-	sm.height = 0.125
-	sm.is_hemisphere = true
-	_scarf.mesh = sm
-	_scarf.material_override = _mat(Color(0.2, 0.17, 0.2), 0.95)
+	# Шухрат — не пациент: та же модель, но вместо больничной рубашки тёмная гражданская (перекрашенная текстура)
+	var civ := "res://characters/grandpa_civil.jpg"
+	if ResourceLoader.exists(civ) and shukhrat.get("model"):
+		var cm := StandardMaterial3D.new()
+		cm.albedo_texture = load(civ)
+		cm.roughness = 0.85
+		cm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		for mi in (shukhrat.model as Node).find_children("*", "MeshInstance3D", true, false):
+			if str(mi.name).begins_with("geometry"):
+				(mi as MeshInstance3D).material_override = cm
+	# платок Малики: покрывает голову и затылок, сзади свисает треугольный хвост
+	var sc_mat := _mat(Color(0.15, 0.12, 0.14), 0.95)
+	_scarf = MeshInstance3D.new()                       # корень платка — следует за головой
 	_scarf.top_level = true
 	malika.add_child(_scarf)
+	var cap := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.118
+	sm.height = 0.25
+	cap.mesh = sm
+	cap.material_override = sc_mat
+	cap.position = Vector3(0, 0.0, 0.03)
+	cap.scale = Vector3(1.04, 1.0, 1.08)
+	_scarf.add_child(cap)
+	var tail := MeshInstance3D.new()
+	var pm := PrismMesh.new()
+	pm.size = Vector3(0.2, 0.26, 0.02)
+	tail.mesh = pm
+	tail.material_override = sc_mat
+	tail.position = Vector3(0, -0.22, 0.1)
+	tail.rotation = Vector3(-0.12, 0, PI)
+	_scarf.add_child(tail)
 	cam = Camera3D.new()
 	cam.fov = 58.0
 	add_child(cam)
@@ -312,6 +335,16 @@ func _run() -> void:
 	await GameState.fade_to(1.0, 3.0)
 	hum.stop()
 	ui.hide_line()
+	# титры — на своём чёрном фоне под слоем надписей (общее затемнение лежит поверх всего интерфейса)
+	var bg_layer := CanvasLayer.new()
+	bg_layer.layer = 29
+	add_child(bg_layer)
+	var bg := ColorRect.new()
+	bg.color = Color.BLACK
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg_layer.add_child(bg)
+	GameState.set_fade(0.0)
 	await wait(1.0)
 	_done = true
 	await ui.show_title("THE LAST SHAKE", "(Последний Скачок / Soʻnggi Silkiniş)", 80, 3.0)
@@ -338,8 +371,8 @@ func _line(who: String, text: String, sec := 0.0) -> void:
 func _process(dt: float) -> void:
 	_t += dt
 	if _scarf and malika:                              # платок на голове Малики
-		_scarf.global_position = malika.head_pos() + Vector3(0, 0.0, 0)
-		_scarf.rotation = Vector3(-0.35, malika.rotation.y, 0)
+		_scarf.global_position = malika.head_pos() + Vector3(0, -0.02, 0)
+		_scarf.rotation = Vector3(0, malika.rotation.y, 0)
 	if cam:
 		cam.rotation.z = sin(_t * 0.7) * 0.01
 	if beep_rate <= 0.0:

@@ -59,8 +59,21 @@ func _run() -> void:
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
-			await secs(12.0)
-			await shot("epilogue")
+			for k in 3:
+				await secs(8.0)
+				await shot("epilogue_%d" % k)
+			if _arg("credits", "") != "":                    # до титров: время ×6, титры — как есть
+				Engine.time_scale = 6.0
+				var ep: Node = get_tree().current_scene
+				var w := 0.0
+				while not ep.get("_done") and w < 120.0:
+					await get_tree().process_frame
+					w += get_process_delta_time() / 6.0
+				await shot("epilogue_end_0")
+				Engine.time_scale = 1.0
+				for k in [3.0, 6.0, 9.0]:
+					await secs(k)
+					await shot("epilogue_end_%d" % int(k))
 		"forest_main":
 			get_tree().change_scene_to_file("res://scenes/main.tscn")
 			await secs(25.0)
