@@ -2,7 +2,7 @@ extends Node
 ## Проверка без игрока: загружает сцену, проматывает сюжет и сохраняет скриншоты.
 ## Запуск: godot --path . res://tests/shots.tscn -- --case=<имя> --out=<папка> [--quality=medium]
 ## Случаи: bus, bus_mom, walk, building, entrance, sanatorium, chase, void, floor3, items, tour, epilogue, menu, anim;
-## playthrough — вся история (--from=глава, --shots — со скриншотами).
+## playthrough — вся история (--from=глава, --snaps — со скриншотами).
 
 var out := "user://shots"
 var case_name := "bus"
@@ -466,6 +466,8 @@ func step(msg: String) -> void:
 
 func wait_for(cond: Callable, limit := 120.0, what := "") -> bool:
 	var t := 0.0
+	if shoot:
+		limit *= 5.0                                      # с экраном программный рендер медленный
 	while not cond.call():
 		await get_tree().process_frame
 		t += get_process_delta_time() / maxf(Engine.time_scale, 0.001)
@@ -506,7 +508,7 @@ func press_cab(key: String) -> void:
 	print("NO CAB BUTTON ", key)
 
 
-## Всё прохождение. --from=start|void|floor3|pharmacy|forest|real — с какой главы; --shots — со скриншотами
+## Всё прохождение. --from=start|void|floor3|pharmacy|forest|real — с какой главы; --snaps — со скриншотами
 ## (запускать с экраном: xvfb-run … --rendering-driver vulkan).
 var shoot := false
 
@@ -534,7 +536,7 @@ func snap(nm: String, look: Variant = null) -> void:
 
 
 func _playthrough() -> void:
-	shoot = _arg("shots", "") != ""
+	shoot = _arg("snaps", "") != ""
 	var from := _arg("from", "start")
 	Engine.time_scale = 2.0 if shoot else 6.0
 	if from == "forest":
@@ -552,6 +554,7 @@ func _playthrough() -> void:
 	d = g.get_node("Director")
 	await wait_for(func(): return d.player != null and d.act != "", 60, "director")
 	pl = d.player
+	d.minigame.cheat = true                               # мини-игры в тесте проходятся сами
 	match from:
 		"start":
 			await _seg_start()
@@ -651,13 +654,22 @@ func _seg_void() -> void:
 	await tp(Vector3(8.83, 4.5, -7.6), -PI * 0.5)
 	await wait_for(func(): return d.act == "faceless", 30, "faceless chase")
 	step("faceless chase")
-	await secs(0.4)
-	await snap("10_faceless_behind", d._faceless[0].global_position + Vector3(0, 1.4, 0))
-	pl.rotation.y = -PI * 0.5
-	pl.look_yaw = 0.0
+	if shoot:                                              # снимок — с остановленным временем
+		var ts := Engine.time_scale
+		Engine.time_scale = 0.0001
+		await snap("10_faceless_behind", d._faceless[0].global_position + Vector3(0, 1.4, 0))
+		pl.rotation.y = -PI * 0.5
+		pl.look_yaw = 0.0
+		await frames(2)
+		Engine.time_scale = ts
+	await secs(1.0 / Engine.time_scale)                   # как человек: секунда на реакцию
 	pl.input_override = Vector2(1.0, 0.0)                 # честно: едем к лифту на 3-й скорости
 	await wait_for(func(): return pl.global_position.x > 30.0 or d.faceless_state != "run", 40, "drive to the lift")
-	await snap("11_mom_at_lift")
+	if shoot:
+		var ts2 := Engine.time_scale
+		Engine.time_scale = 0.0001
+		await snap("11_mom_at_lift")
+		Engine.time_scale = ts2
 	await wait_for(func(): return pl.global_position.x > 35.6 or d.faceless_state != "run", 20, "drive to the lift 2")
 	pl.input_override = null
 	var near := 99.0
