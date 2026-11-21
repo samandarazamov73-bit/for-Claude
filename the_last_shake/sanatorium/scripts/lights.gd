@@ -12,6 +12,7 @@ var all_lights := []
 var off_mat: StandardMaterial3D
 var buzz_players := []
 var fluo := []            # {pos, room, light}
+var dead_fix := []        # {f, mesh} — перегоревшие лампы (в настоящей больнице днём горят все)
 var _t := 0.0
 var _shadow_t := 0.0
 
@@ -75,47 +76,9 @@ func setup(g) -> void:
 				grp["fixtures"].erase(mesh)
 				mesh.material_override = off_mat
 			dead += 1
+			dead_fix.append({"f": f, "mesh": mesh})
 			continue
-		var l := OmniLight3D.new()
-		var col: Array = f["color"]
-		l.light_color = Color(col[0], col[1], col[2])
-		var e: float = f["energy"]
-		match kind:
-			"pendant":
-				l.light_energy = minf(e / 40.0, 3.2)     # the hall chandeliers were blinding
-				l.omni_range = 11.0
-			"bulb":
-				l.light_energy = e / 40.0
-				l.omni_range = 5.0
-			"lamp":
-				l.light_energy = e / 26.0
-				l.omni_range = 4.0
-			_:
-				l.light_energy = e / 44.0
-				l.omni_range = 7.0
-		# лампы накаливания — тёплые (~2700 K), старые люминесцентные трубки — холодно-белые с лёгкой зеленью
-		if kind == "fluo":
-			l.light_color = Color(col[0], col[1], col[2]).lerp(Color(0.9, 1.0, 0.94), 0.25)
-		elif kind == "plafond":
-			l.light_color = Color(col[0], col[1], col[2]).lerp(Color(1.0, 0.8, 0.58), 0.25)
-		l.light_energy *= DIM
-		l.omni_attenuation = 1.0
-		l.light_specular = 0.5
-		l.light_volumetric_fog_energy = 0.5
-		l.shadow_enabled = false
-		l.omni_shadow_mode = OmniLight3D.SHADOW_CUBE
-		l.shadow_bias = 0.08
-		l.distance_fade_enabled = true
-		l.distance_fade_begin = 30.0       # far lamps fade out slowly over 12 m instead of popping
-		l.distance_fade_length = 12.0
-		l.distance_fade_shadow = 14.0
-		add_child(l)
-		l.global_position = game._v3(f["pos"])
-		l.set_meta("base_energy", l.light_energy)
-		confine(l, _storey_for(f["room"], l.global_position.y))
-		# table lamps, floor lamps and sconces never get a shadow: inside their shade it only cut sharp
-		# wedges and stray lines of light on the walls and ceiling (and beams in the fog)
-		l.set_meta("no_shadow", kind == "lamp")
+		var l: OmniLight3D = _make_light(f)
 		grp["lights"].append(l)
 		all_lights.append({"light": l, "room": f["room"]})
 		var flicker: bool = f["state"] == "flicker"
@@ -188,6 +151,52 @@ func setup(g) -> void:
 ## Small rooms (bathrooms, WCs) had one ceiling light as strong as a ward's: 2 to 2.5 times more light per
 ## square metre than an average room, and with a 7 m reach it shone through the walls too. Rooms brighter
 ## than average are toned down, and in small rooms the light's reach is kept to about the room.
+## Источник света лампы из плана здания (энергия, радиус, цвет — по типу лампы).
+func _make_light(f: Dictionary) -> OmniLight3D:
+	var kind: String = f["kind"]
+	var l := OmniLight3D.new()
+	var col: Array = f["color"]
+	l.light_color = Color(col[0], col[1], col[2])
+	var e: float = f["energy"]
+	match kind:
+		"pendant":
+			l.light_energy = minf(e / 40.0, 3.2)     # the hall chandeliers were blinding
+			l.omni_range = 11.0
+		"bulb":
+			l.light_energy = e / 40.0
+			l.omni_range = 5.0
+		"lamp":
+			l.light_energy = e / 26.0
+			l.omni_range = 4.0
+		_:
+			l.light_energy = e / 44.0
+			l.omni_range = 7.0
+	# лампы накаливания — тёплые (~2700 K), старые люминесцентные трубки — холодно-белые с лёгкой зеленью
+	if kind == "fluo":
+		l.light_color = Color(col[0], col[1], col[2]).lerp(Color(0.9, 1.0, 0.94), 0.25)
+	elif kind == "plafond":
+		l.light_color = Color(col[0], col[1], col[2]).lerp(Color(1.0, 0.8, 0.58), 0.25)
+	l.light_energy *= DIM
+	l.omni_attenuation = 1.0
+	l.light_specular = 0.5
+	l.light_volumetric_fog_energy = 0.5
+	l.shadow_enabled = false
+	l.omni_shadow_mode = OmniLight3D.SHADOW_CUBE
+	l.shadow_bias = 0.08
+	l.distance_fade_enabled = true
+	l.distance_fade_begin = 30.0       # far lamps fade out slowly over 12 m instead of popping
+	l.distance_fade_length = 12.0
+	l.distance_fade_shadow = 14.0
+	add_child(l)
+	l.global_position = game._v3(f["pos"])
+	l.set_meta("base_energy", l.light_energy)
+	confine(l, _storey_for(f["room"], l.global_position.y))
+	# table lamps, floor lamps and sconces never get a shadow: inside their shade it only cut sharp
+	# wedges and stray lines of light on the walls and ceiling (and beams in the fog)
+	l.set_meta("no_shadow", kind == "lamp")
+	return l
+
+
 func _balance_rooms() -> void:
 	for room in groups:
 		var r: Dictionary = game.rooms.get(room, {})
@@ -452,6 +461,16 @@ func hospital_day(k := 1.7) -> void:
 		if f["mesh"] is GeometryInstance3D:
 			f["mesh"].material_override = null
 	flickers.clear()
+	for d in dead_fix:                                  # перегоревшие лампы — снова горят
+		var f: Dictionary = d["f"]
+		var grp: Dictionary = _group(f["room"])
+		if d["mesh"] is GeometryInstance3D:
+			d["mesh"].material_override = null
+			grp["fixtures"].append(d["mesh"])
+		var l: OmniLight3D = _make_light(f)
+		grp["lights"].append(l)
+		all_lights.append({"light": l, "room": f["room"]})
+	dead_fix.clear()
 	for room in groups:
 		set_room(room, true, false)
 		for l in groups[room]["lights"]:
