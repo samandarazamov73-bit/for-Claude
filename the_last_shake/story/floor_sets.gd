@@ -277,36 +277,48 @@ func lamp(parent: Node3D, pos: Vector3, energy := 0.7, rng := 5.5, col := Color(
 	bm.albedo_color = col
 	bulb.material_override = bm
 	l.add_child(bulb)
-	# эмалированный абажур над лампочкой: издалека видно, откуда свет
-	var shade := MeshInstance3D.new()
-	var shm := CylinderMesh.new()
-	shm.top_radius = 0.035
-	shm.bottom_radius = 0.24
-	shm.height = 0.17
-	shm.radial_segments = 20
-	shm.cap_top = true
-	shm.cap_bottom = false
-	shade.mesh = shm
-	var sh_mat := StandardMaterial3D.new()
-	sh_mat.albedo_color = Color(0.86, 0.85, 0.8)
-	sh_mat.roughness = 0.35
-	sh_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	sh_mat.emission_enabled = true
-	sh_mat.emission = col * 0.25
-	shade.material_override = sh_mat
-	shade.position.y = 0.05
-	l.add_child(shade)
-	var cord := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.006
-	cm.bottom_radius = 0.006
-	cm.height = maxf(Y1 - pos.y, 0.05)
-	cord.mesh = cm
-	cord.position.y = cm.height * 0.5 + 0.05
-	var cmat := StandardMaterial3D.new()
-	cmat.albedo_color = Color(0.05, 0.05, 0.05)
-	cord.material_override = cmat
-	l.add_child(cord)
+	# абажур на шнуре: своя модель автора (story_void_lamp — верх у потолка), иначе простой эмалированный
+	var vl := "res://sanatorium/models/story_void_lamp.glb"
+	if ResourceLoader.exists(vl):
+		var m: Node3D = (load(vl) as PackedScene).instantiate()
+		var k := clampf((Y1 - pos.y + 0.04) / 0.7, 0.4, 1.3)
+		m.scale = Vector3.ONE * k
+		l.add_child(m)
+		m.position = Vector3(0, Y1 - pos.y, 0)
+		sm.radius = 0.045
+		sm.height = 0.09
+		bulb.position.y = 0.04
+	else:
+		# эмалированный абажур над лампочкой: издалека видно, откуда свет
+		var shade := MeshInstance3D.new()
+		var shm := CylinderMesh.new()
+		shm.top_radius = 0.035
+		shm.bottom_radius = 0.24
+		shm.height = 0.17
+		shm.radial_segments = 20
+		shm.cap_top = true
+		shm.cap_bottom = false
+		shade.mesh = shm
+		var sh_mat := StandardMaterial3D.new()
+		sh_mat.albedo_color = Color(0.86, 0.85, 0.8)
+		sh_mat.roughness = 0.35
+		sh_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		sh_mat.emission_enabled = true
+		sh_mat.emission = col * 0.25
+		shade.material_override = sh_mat
+		shade.position.y = 0.05
+		l.add_child(shade)
+		var cord := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.006
+		cm.bottom_radius = 0.006
+		cm.height = maxf(Y1 - pos.y, 0.05)
+		cord.mesh = cm
+		cord.position.y = cm.height * 0.5 + 0.05
+		var cmat := StandardMaterial3D.new()
+		cmat.albedo_color = Color(0.05, 0.05, 0.05)
+		cord.material_override = cmat
+		l.add_child(cord)
 	lamps.append(l)
 	return l
 

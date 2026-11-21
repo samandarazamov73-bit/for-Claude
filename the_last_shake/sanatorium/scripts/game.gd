@@ -62,6 +62,8 @@ func _ready() -> void:
 	_build_static_colliders()
 	_build_occluders_and_ranges()
 	stats["models_swapped"] = swap_models(building)     # свои 3D-модели из sanatorium/models/
+	stats["models_on_tables"] = dress_tables(building)  # термос, кружка, хлеб на столах; мониторы на столиках
+	stats["lamps_swapped"] = swap_fixtures()            # свои лампы-трубки и абажуры на месте старых
 	stats["decor"] = Decor.apply(building, model_type, has_model)   # свои картины, циферблаты, экраны, таблички
 	_build_furniture_colliders()
 	_build_blockers()
@@ -385,8 +387,20 @@ const MODEL_TYPES := [
 	"sofa_brown", "sofa_red", "stage", "stool", "stove", "stretcher", "suitcase_a", "suitcase_b", "table_cloth",
 	"table_coffee", "table_lab", "table_read", "table_round", "table_small", "table_sq", "tea_shelf",
 	"telephone", "toilet", "tool_rack", "towel_rail", "travel_bag", "tv_cabinet", "tv_small", "urinal", "vase",
-	"wall_bars", "wardrobe", "wardrobe_wide", "wheelchair", "workbench"
+	"wall_bars", "wardrobe", "wardrobe_wide", "wheelchair", "workbench", "Radiator"
 ]
+## Свои модели автора под другими именами: тип предмета в здании → модели (если своих <тип>.glb нет).
+## Кровати — советские металлические (epi_bed — застеленная, epi_bed_2 — голый матрас), шкафчик персонала,
+## капельница, батарея с трубами, полка в ванной с полотенцами.
+const MODEL_ALIASES := {
+	"bed_a": ["epi_bed"], "bed_b": ["epi_bed"], "bed_hosp": ["epi_bed"], "bed_strip": ["epi_bed_2"],
+	"locker": ["epi_cabinet"], "iv_stand": ["epi_iv"], "Radiator": ["radiator"], "towel_rail": ["bath_shelf"],
+}
+## Ещё варианты к своим моделям типа (больничная тумбочка — среди тумбочек).
+const MODEL_EXTRA := {"bedside": ["epi_cabinet_2"]}
+## Насколько модель может быть шире (x) и глубже (z) старой коробки; по умолчанию 1.15. Батарея — с трубами вдоль
+## стены, полка — глубже вешалки для полотенец.
+const SWAP_FIT := {"Radiator": Vector2(2.05, 99.0), "towel_rail": Vector2(1.3, 99.0)}
 
 
 ## Тип предмета по имени узла: самый длинный тип из MODEL_TYPES, с которого начинается имя
@@ -415,6 +429,14 @@ static func model_variants(t: String) -> Array:
 	for k in range(1, 10):
 		if ResourceLoader.exists("%s__%d.glb" % [base, k]):
 			out.append("%s__%d.glb" % [base, k])
+	if out.is_empty():
+		for a in MODEL_ALIASES.get(t, []):
+			if ResourceLoader.exists(MODELS_DIR + a + ".glb"):
+				out.append(MODELS_DIR + a + ".glb")
+	if not out.is_empty():
+		for a in MODEL_EXTRA.get(t, []):
+			if ResourceLoader.exists(MODELS_DIR + a + ".glb"):
+				out.append(MODELS_DIR + a + ".glb")
 	return out
 
 
@@ -471,10 +493,11 @@ static func swap_models(root: Node) -> int:
 		var ob: AABB = old.mesh.get_aabb()
 		var nb: AABB = _scene_aabb(inst)
 		var k := 1.0
+		var fit: Vector2 = SWAP_FIT.get(t, Vector2(1.15, 1.15))
 		if nb.size.x > 0.05 and ob.size.x > 0.05:
-			k = minf(k, ob.size.x * 1.15 / nb.size.x)
+			k = minf(k, ob.size.x * fit.x / nb.size.x)
 		if nb.size.z > 0.05 and ob.size.z > 0.05:
-			k = minf(k, ob.size.z * 1.15 / nb.size.z)
+			k = minf(k, ob.size.z * fit.y / nb.size.z)
 		inst.scale = Vector3.ONE * k
 		nb = AABB(nb.position * k, nb.size * k)
 		var y: float = ob.position.y - nb.position.y
@@ -488,6 +511,113 @@ static func swap_models(root: Node) -> int:
 			gi.visibility_range_fade_mode = old.visibility_range_fade_mode
 			gi.layers = old.layers
 		old.visible = false
+		n += 1
+	return n
+
+
+## Модель на месте старого предмета: копирует слои и дальность видимости (чтобы прятаться вместе с этажом).
+static func _model_like(old: GeometryInstance3D, path: String) -> Node3D:
+	var ps: PackedScene = load(path)
+	if ps == null:
+		return null
+	var inst: Node3D = ps.instantiate()
+	for g in inst.find_children("*", "GeometryInstance3D", true, false):
+		var gi: GeometryInstance3D = g
+		gi.visibility_range_end = old.visibility_range_end
+		gi.visibility_range_end_margin = old.visibility_range_end_margin
+		gi.visibility_range_fade_mode = old.visibility_range_fade_mode
+		gi.layers = old.layers
+	return inst
+
+
+## Верх стола (в системе координат старого узла): у заменённого стола — по своей модели.
+static func _table_top(old: MeshInstance3D) -> float:
+	var top: float = old.mesh.get_aabb().end.y
+	var holder: Node = old.get_parent().get_node_or_null(String(old.name) + "_model")
+	if holder is Node3D:
+		var b := _scene_aabb(holder as Node3D)
+		if b.size.y > 0.2:
+			top = b.end.y
+	return top
+
+
+## На столы — термос, кружка и хлеб (table_items, примерно на двух столах из трёх), на столики с инструментами —
+## кардиомонитор (epi_monitor). Выбор по имени узла — всегда один и тот же.
+const TABLE_ITEMS := ["table_sq", "table_round", "table_cloth", "table_coffee", "table_read"]
+
+
+static func dress_tables(root: Node) -> int:
+	var items := MODELS_DIR + "table_items.glb"
+	var mon := MODELS_DIR + "epi_monitor.glb"
+	var have_items := ResourceLoader.exists(items)
+	var have_mon := ResourceLoader.exists(mon)
+	var n := 0
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		var old: MeshInstance3D = mi
+		if old.mesh == null:
+			continue
+		var t := model_type(String(old.name))
+		var h: int = absi(hash(String(old.name)))
+		var path := ""
+		if t in TABLE_ITEMS and have_items and h % 3 != 0:
+			path = items
+		elif t == "instrument_table" and have_mon and h % 2 == 0:
+			path = mon
+		if path == "":
+			continue
+		var inst := _model_like(old, path)
+		if inst == null:
+			continue
+		var holder := Node3D.new()
+		holder.name = String(old.name) + "_ontop"
+		old.get_parent().add_child(holder)
+		holder.transform = old.transform
+		holder.add_child(inst)
+		var c: Vector3 = old.mesh.get_aabb().get_center()
+		inst.position = Vector3(c.x, _table_top(old) + 0.002, c.z)
+		inst.rotation.y = float(h % 360) * PI / 180.0 if path == items else 0.0   # монитор — экраном в комнату
+		n += 1
+	return n
+
+
+## Лампы: трубки (fluo) — своя лампа epi_lamp, голые лампочки (bulb) — эмалевый абажур story_void_lamp.
+## Модель висит верхом у потолка там же, где старая; старая прячется (свет — от тех же источников).
+const FIXTURE_MODELS := {"fluo": ["epi_lamp", 1.0], "bulb": ["story_void_lamp", 0.75]}
+
+
+func swap_fixtures() -> int:
+	var n := 0
+	for f in level["fixtures"]:
+		var kind: String = f["kind"]
+		if not FIXTURE_MODELS.has(kind):
+			continue
+		var path: String = MODELS_DIR + str(FIXTURE_MODELS[kind][0]) + ".glb"
+		if not ResourceLoader.exists(path):
+			continue
+		var old = node(f["name"])
+		if not (old is MeshInstance3D) or (old as MeshInstance3D).mesh == null:
+			continue
+		var om: MeshInstance3D = old
+		var inst := _model_like(om, path)
+		if inst == null:
+			continue
+		var holder := Node3D.new()
+		holder.name = String(om.name) + "_model"
+		om.get_parent().add_child(holder)
+		holder.transform = om.transform
+		holder.add_child(inst)
+		var k: float = FIXTURE_MODELS[kind][1]
+		inst.scale = Vector3.ONE * k
+		var ob: AABB = om.mesh.get_aabb()
+		var nb := _scene_aabb(inst)
+		nb = AABB(nb.position * k, nb.size * k)
+		# длинная трубка — вдоль длинной стороны старой лампы
+		if kind == "fluo" and ob.size.z > ob.size.x * 1.5:
+			inst.rotation.y = PI * 0.5
+			nb = AABB(Vector3(nb.position.z, nb.position.y, nb.position.x), Vector3(nb.size.z, nb.size.y, nb.size.x))
+		var c: Vector3 = ob.get_center()
+		inst.position = Vector3(c.x, ob.end.y - nb.end.y, c.z)
+		om.visible = false
 		n += 1
 	return n
 

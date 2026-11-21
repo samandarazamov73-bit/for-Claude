@@ -108,9 +108,47 @@ func _mi(parent: Node3D, mesh: Mesh, mat: Material, pos: Vector3, scl := Vector3
 	return m
 
 
+## Свои модели автора (sanatorium/models/story_rat.glb, story_roach.glb): у крысы голова к +Z — разворачиваем.
+var _rat_scene: PackedScene
+var _roach_scene: PackedScene
+
+
+func _own(path: String) -> PackedScene:
+	return load(path) if ResourceLoader.exists(path) else null
+
+
+## Своя модель как тело зверька: без теней (кроме крысы), видна до 22 м, ноги — на полу.
+func _own_body(parent: Node3D, ps: PackedScene, y: float, yaw: float, shadow: bool) -> Node3D:
+	var holder := Node3D.new()
+	holder.position = Vector3(0, y, 0)
+	parent.add_child(holder)
+	var m: Node3D = ps.instantiate()
+	m.position = Vector3(0, -y, 0)
+	m.rotation.y = yaw
+	holder.add_child(m)
+	for g in m.find_children("*", "GeometryInstance3D", true, false):
+		var gi: GeometryInstance3D = g
+		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gi.visibility_range_end = 22.0
+	return holder
+
+
 func _spawn_rat(area: Dictionary) -> Dictionary:
 	var n := Node3D.new()
 	add_child(n)
+	if _rat_scene == null:
+		_rat_scene = _own("res://sanatorium/models/story_rat.glb")
+	if _rat_scene:
+		var ob := _own_body(n, _rat_scene, 0.042, PI, true)
+		var oh := Node3D.new()                         # голова и хвост — пустые (качает всё тело)
+		n.add_child(oh)
+		var ot := Node3D.new()
+		n.add_child(ot)
+		var ro := {"node": n, "body": ob, "head": oh, "tail": ot, "area": area, "state": "wait",
+			"timer": rng.randf_range(0.5, 4.0), "target": Vector3.ZERO, "speed": 0.0, "t": rng.randf() * 10.0,
+			"squeak": rng.randf_range(15.0, 60.0)}
+		_place_random(ro, area)
+		return ro
 	var body := _mi(n, rat_mesh["body"], rat_mesh["fur"], Vector3(0, 0.042, 0), Vector3(1.0, 0.8, 2.2), true)
 	var head := Node3D.new()
 	head.position = Vector3(0, 0.048, -0.12)
@@ -135,11 +173,16 @@ func _spawn_rat(area: Dictionary) -> Dictionary:
 func _spawn_roach(area: Dictionary) -> Dictionary:
 	var n := Node3D.new()
 	add_child(n)
-	_mi(n, roach_mesh["body"], roach_mesh["mat"], Vector3(0, 0.004, 0), Vector3(1.0, 0.35, 1.9))
-	_mi(n, roach_mesh["body"], roach_mesh["mat"], Vector3(0, 0.004, -0.018), Vector3(0.55, 0.3, 0.5))
-	for sx in [-1.0, 1.0]:
-		var a := _mi(n, roach_mesh["ant"], roach_mesh["mat"], Vector3(0.004 * sx, 0.005, -0.035))
-		a.rotation = Vector3(0.25, 0.35 * sx, 0)
+	if _roach_scene == null:
+		_roach_scene = _own("res://sanatorium/models/story_roach.glb")
+	if _roach_scene:
+		_own_body(n, _roach_scene, 0.0, 0.0, false)
+	else:
+		_mi(n, roach_mesh["body"], roach_mesh["mat"], Vector3(0, 0.004, 0), Vector3(1.0, 0.35, 1.9))
+		_mi(n, roach_mesh["body"], roach_mesh["mat"], Vector3(0, 0.004, -0.018), Vector3(0.55, 0.3, 0.5))
+		for sx in [-1.0, 1.0]:
+			var a := _mi(n, roach_mesh["ant"], roach_mesh["mat"], Vector3(0.004 * sx, 0.005, -0.035))
+			a.rotation = Vector3(0.25, 0.35 * sx, 0)
 	n.scale = Vector3.ONE * rng.randf_range(0.8, 1.25)
 	var r := {"node": n, "area": area, "state": "wait", "timer": rng.randf_range(1.0, 8.0), "target": Vector3.ZERO,
 		"speed": 0.0, "hidden": 0.0}

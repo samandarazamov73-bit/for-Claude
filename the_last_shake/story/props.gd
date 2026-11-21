@@ -165,6 +165,9 @@ static func glb(path: String, scale_k: float, lift_half := 0.0) -> Node3D:
 ## Старая фронтальная стиральная машина (эмаль, круглый люк на петле). Начало — на полу посередине,
 ## люк смотрит в −Z. Люк — узел «Hatch»: rotation.y > 0 — открыт наружу.
 static func washer() -> Node3D:
+	var own := "res://sanatorium/models/story_washer.glb"
+	if ResourceLoader.exists(own):
+		return _washer_model(own)
 	var root := Node3D.new()
 	var enamel := mat(Color(0.72, 0.7, 0.62), 0.45)
 	var panel := mat(Color(0.58, 0.56, 0.49), 0.55)
@@ -213,6 +216,57 @@ static func faceless(a: Node3D) -> MeshInstance3D:
 	egg.top_level = true
 	a.add_child(egg)
 	return egg
+
+
+## Своя стиральная машина автора (лицом к −Z, как старая). Поверх её иллюминатора — такая же дверца «Hatch»
+## (кольцо и стекло), она открывается наружу; за ней — тёмный барабан.
+static func _washer_model(path: String) -> Node3D:
+	var root := Node3D.new()
+	var m: Node3D = (load(path) as PackedScene).instantiate()
+	m.rotation.y = PI                                  # у модели лицо к +Z
+	root.add_child(m)
+	var c := Vector3(0.0, 0.477, -0.252)                # центр иллюминатора на передней стенке
+	var hole := MeshInstance3D.new()
+	var hm := CylinderMesh.new()
+	hm.top_radius = 0.168
+	hm.bottom_radius = 0.168
+	hm.height = 0.004
+	hm.radial_segments = 32
+	hole.mesh = hm
+	hole.material_override = mat(Color(0.03, 0.03, 0.03), 0.9)
+	hole.rotation.x = PI * 0.5
+	hole.position = c
+	root.add_child(hole)
+	var hatch := Node3D.new()
+	hatch.name = "Hatch"
+	root.add_child(hatch)
+	hatch.position = c + Vector3(-0.19, 0.0, -0.012)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.148
+	tm.outer_radius = 0.19
+	tm.rings = 32
+	tm.ring_segments = 10
+	ring.mesh = tm
+	ring.material_override = mat(Color(0.86, 0.83, 0.74), 0.4)
+	ring.rotation.x = PI * 0.5
+	ring.position = Vector3(0.19, 0.0, 0.0)
+	ring.scale = Vector3(1.0, 0.35, 1.0)
+	hatch.add_child(ring)
+	var glass := MeshInstance3D.new()
+	var gm := CylinderMesh.new()
+	gm.top_radius = 0.15
+	gm.bottom_radius = 0.15
+	gm.height = 0.008
+	gm.radial_segments = 32
+	glass.mesh = gm
+	var gmat := mat(Color(0.55, 0.47, 0.36, 0.82), 0.12)
+	gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.material_override = gmat
+	glass.rotation.x = PI * 0.5
+	glass.position = Vector3(0.19, 0.0, 0.004)
+	hatch.add_child(glass)
+	return root
 
 
 ## Аптечный киоск у остановки (если нет своей модели story_kiosk.glb): будка, витрина с коробками лекарств

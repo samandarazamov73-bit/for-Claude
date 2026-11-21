@@ -1015,6 +1015,41 @@ func _beatpose_test(g: Node, d: Node) -> void:
 
 
 ## Лифт на 3-м этаже: двери закрываются медленно, мама увозит человека в коляске.
+## Стиральная машина (закрыта и с открытым люком), крыса и таракан — крупно, при свете.
+func _critters_shots(g: Node, cam: Camera3D, lamp: OmniLight3D) -> void:
+	var Props: Script = load("res://story/props.gd")
+	var spot := Vector3(26.2, 7.8, -11.0)                 # комната на 3-м этаже
+	g.lights.set_room("L2.R7", true)
+	var w: Node3D = Props.washer()
+	g.add_child(w)
+	w.global_position = spot
+	cam.global_position = spot + Vector3(0.6, 1.1, -1.5)
+	cam.look_at(spot + Vector3(0, 0.45, 0), Vector3.UP)
+	cam.current = true
+	lamp.global_position = cam.global_position + Vector3(0, 0.6, 0)
+	await secs(1.0)
+	await shot("washer_closed")
+	var hatch: Node3D = w.get_node_or_null("Hatch")
+	if hatch:
+		hatch.rotation.y = deg_to_rad(105.0)
+	await secs(0.8)
+	await shot("washer_open")
+	w.queue_free()
+	for kind in ["rats", "roaches"]:
+		var list: Array = g.critters.get(kind)
+		if list.is_empty():
+			continue
+		var n: Node3D = list[0]["node"]
+		var size := 0.45 if kind == "rats" else 0.12
+		var c: Vector3 = n.global_position
+		cam.global_position = c + Vector3(size * 0.8, size * 0.6, size)
+		cam.look_at(c + Vector3(0, size * 0.1, 0), Vector3.UP)
+		lamp.global_position = cam.global_position + Vector3(0, 0.4, 0)
+		g.critters.set_process(false)
+		await secs(0.8)
+		await shot("critter_" + kind)
+
+
 ## Кадры из разных мест здания: текстуры, свет, цвет (комнаты включены).
 ## [точка, поворот (рад), наклон взгляда, комната со светом или ""]
 const TOUR := [
@@ -1120,7 +1155,9 @@ func _caught_test() -> void:
 ## Каждый тип предмета со своей моделью или картинкой — крупно, отдельной камерой перед ним (свет в комнате включён).
 const ITEM_TYPES := ["armchair_beige", "armchair", "armchair_red", "bedside", "table_small", "table_sq", "wardrobe", "bathtub",
 	"toilet", "sink", "wheelchair", "chair", "painting_1", "painting_2", "painting_3", "notice_board", "clock", "radio",
-	"tv_small", "telephone", "call_panel", "fire_ext", "game_chess", "fuse_box", "electro_warning"]
+	"tv_small", "telephone", "call_panel", "fire_ext", "game_chess", "fuse_box", "electro_warning",
+	"bed_a", "bed_b", "bed_strip", "bed_hosp", "locker", "iv_stand", "Radiator", "towel_rail", "table_round",
+	"table_cloth", "instrument_table", "fix_fluo", "fix_bulb"]
 
 
 func _items_test(g: Node, dir: Node) -> void:
@@ -1134,15 +1171,26 @@ func _items_test(g: Node, dir: Node) -> void:
 	lamp.light_energy = 0.8
 	lamp.omni_range = 5.0
 	g.add_child(lamp)
+	if _arg("critters", "") != "":
+		await _critters_shots(g, cam, lamp)
+		return
 	var seen := {}
+	var fix_kind := {}
+	for f in g.level["fixtures"]:
+		fix_kind[String(f["name"])] = "fix_" + String(f["kind"])
 	var meshes: Array = g.building.find_children("*", "Node3D", true, false)
+	var only := _arg("types", "")
 	for t in ITEM_TYPES:
+		if only != "" and not (t in only.split(",")):
+			continue
 		var k := 0
 		for n in meshes:
 			var nm := String(n.name)
-			var base: String = nm.trim_suffix("_model").trim_suffix("_pic")
+			var base: String = nm.trim_suffix("_model").trim_suffix("_pic").trim_suffix("_ontop")
 			var tt: String = "electro_warning" if nm.begins_with("electro_warning") else Game.model_type(base)
-			if tt != t or not (nm.ends_with("_model") or nm.ends_with("_pic")):
+			if fix_kind.has(base):
+				tt = fix_kind[base]
+			if tt != t or not (nm.ends_with("_model") or nm.ends_with("_pic") or nm.ends_with("_ontop")):
 				continue
 			var node: Node3D = n
 			if not node.is_inside_tree():
@@ -1160,6 +1208,10 @@ func _items_test(g: Node, dir: Node) -> void:
 			var front: Vector3 = xf.basis.z.normalized()
 			var c: Vector3 = xf.origin
 			cam.global_position = c + front * (size * 1.25 + 0.3) + Vector3(0, size * 0.35, 0)
+			if t.begins_with("fix_"):                   # лампа под потолком: снизу и сбоку
+				cam.global_position = c + Vector3(0.45, -1.35, 0.5)
+			elif t == "iv_stand":
+				cam.global_position = c + front * 1.3 + Vector3(0, 0.2, 0)
 			cam.look_at(c, Vector3.UP)
 			cam.current = true
 			lamp.global_position = cam.global_position + Vector3(0, 0.6, 0)
