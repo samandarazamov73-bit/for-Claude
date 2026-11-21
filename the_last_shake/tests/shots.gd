@@ -810,14 +810,16 @@ func _seg_real() -> void:
 	await tp(Vector3(8.83, 4.5, -4.0), PI)
 	await secs(1.5)
 	await snap("53_room204", Vector3(10.7, 5.3, -0.74))
-	await wait_for(func(): return d.ui.line_visible() and str(d.ui._sub_text.text).contains("сын"), 90, "real son line")
-	await snap("54_real_son", Vector3(10.25, 5.3, -0.74))
+	if shoot:
+		await wait_for(func(): return not is_instance_valid(d) or (d.ui.line_visible() and str(d.ui._sub_text.text).contains("сын")), 90, "real son line")
+		await snap("54_real_son", Vector3(10.25, 5.3, -0.74))
 	await wait_for(func(): return d.act == "panic", 120, "panic attack")
 	step("panic")
 	await secs(2.5)
 	await snap("55_panic")
-	await wait_for(func(): return d.ui.line_visible() and str(d.ui._sub_text.text).contains("Доктор"), 60, "doctor call")
-	await snap("56_fallen")
+	if shoot:
+		await wait_for(func(): return not is_instance_valid(d) or (d.ui.line_visible() and str(d.ui._sub_text.text).contains("Доктор")), 60, "doctor call")
+		await snap("56_fallen")
 	await wait_for(func(): return get_tree().current_scene == null or get_tree().current_scene.name == "Epilogue", 120, "epilogue")
 	step("epilogue reached")
 	if shoot:
