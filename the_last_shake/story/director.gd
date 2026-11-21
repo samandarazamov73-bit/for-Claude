@@ -1162,7 +1162,7 @@ var _mom_ride := false            # мама едет в кабине: её вы
 var _hold_lift := false           # сюжет держит двери лифта открытыми
 var _bang_t2 := 0.0
 var _chase_lamps: Array = []
-var _strobe_t := 0.0
+var _lamp_t := 0.0
 ## Блоки пустого этажа (лестницы, палата деда): толпа их обходит, а не проходит насквозь. [x0, z0, x1, z1]
 const VOID_BLOCKS := [[3.0, -15.8, 9.0, -9.6], [6.0, -6.6, 12.0, -0.3], [30.0, -6.6, 39.0, -0.3], [66.0, -15.8, 72.0, -9.6]]
 
@@ -1264,7 +1264,7 @@ func _faceless_chase() -> void:
 		a.play("run_loop", 0.0, 0.75)
 	_crowd_sound(true)
 	_chase_lights(true)
-	_strobe_t = 0.0
+	_lamp_t = 0.0
 	game.play_at("flicker", Vector3(2.4, 6.9, -6.0), 2.0, 0.8, 30.0)
 	snd("stinger", null, -2.0, 0.85)
 	if player.speed_level < 3:
@@ -1402,9 +1402,9 @@ func _update_faceless(dt: float) -> void:
 		var egg: MeshInstance3D = _eggs[i]
 		egg.global_position = a.head_pos() + Vector3(0, 0.02, 0)
 		egg.rotation.y = a.rotation.y
-	_strobe_t -= dt
-	if _strobe_t <= 0.0:                              # лампы погони: то горят, то гаснут
-		_strobe_t = randf_range(0.05, 0.35)
+	_lamp_t -= dt
+	if _lamp_t <= 0.0:                                # лампы погони: то горят, то гаснут
+		_lamp_t = randf_range(0.05, 0.35)
 		for l in _chase_lamps:
 			var on: bool = randf() < (0.8 if l.global_position.x > 10.0 else 0.6)
 			(l as OmniLight3D).light_energy = (l.get_meta("base") as float) * (randf_range(0.7, 1.0) if on else 0.0)
