@@ -2182,6 +2182,7 @@ func _act5() -> void:
 		await GameState.fade_to(0.0, 1.5)
 	freeze(true)
 	await wait(0.8)
+	objective("")
 	await say("thought", "Тут же пусто было…")
 	mom.face(ppos())
 	mom.set_look(player.head.global_position)
