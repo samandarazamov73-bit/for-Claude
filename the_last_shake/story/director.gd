@@ -1573,6 +1573,7 @@ func _mom_returns() -> void:
 	snd("stinger", null, -12.0, 1.1)
 	await look_at_point(mom.head_pos(), 0.35)
 	mom.set_look(player.head.global_position)
+	objective("")
 	await say("hero", "Мам, ты где была?!")
 	await say("mom", "Ты же сказал, что отвезёшь нас к дедушке. Где твой дедушка?")
 	await wait(1.0)
