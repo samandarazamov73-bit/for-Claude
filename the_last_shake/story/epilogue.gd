@@ -1,8 +1,8 @@
 extends Node3D
-## Эпилог: больница, ночь. Дед Анвар умер — на койке тело под простынёй, монитор тянет одну линию.
-## Доктор по шагам объясняет его дочери Барно: сердце остановилось, а мозг жил ещё около двадцати минут —
-## может, он вспоминал лучшее в жизни, а может, придумал чью-то жизнь, которой не было. Что он видел,
-## мы никогда не узнаем. Затем логотип на трёх языках, манифест, автор.
+## Эпилог: больница, ночь, 1975. Умер старик, которого игрок раньше не видел, — на койке тело под простынёй,
+## монитор тянет одну линию. Доктор объясняет его детям, Малике и Шухрату: сердце остановилось, а мозг жил ещё
+## около двадцати минут — может, вспоминал лучшее, а может, сочинил чью-то жизнь, которой не было. Только приборы
+## показывали, что всё это время он боялся и с кем-то дрался. Затем логотип на трёх языках и манифест.
 
 const StoryUI = preload("res://story/story_ui.gd")
 const Actor = preload("res://story/actor.gd")
@@ -11,7 +11,9 @@ const Props = preload("res://story/props.gd")
 var ui
 var cam: Camera3D
 var doctor                     # story/actor.gd
-var barno                      # story/actor.gd — дочь деда (настоящая, обычная)
+var malika                     # story/actor.gd — дочь умершего (модель мамы в платке, спиной к нам)
+var shukhrat                   # story/actor.gd — сын умершего
+var _scarf: MeshInstance3D
 var flat: AudioStreamPlayer    # монитор: одна сплошная линия
 var beep_t := 0.0
 var beep_rate := 0.45          # с между ударами
@@ -92,11 +94,14 @@ func _build_room() -> void:
 	fill.shadow_enabled = true
 	add_child(fill)
 	Props.box(self, Vector3(0.2, 2.98, 0.6), Vector3(1.2, 0.05, 0.2), _mat(Color(0.95, 0.98, 0.95), 0.4))
-	# кровать: на ней тело деда под простынёй
-	Props.box(self, Vector3(-0.6, 0.55, 0.3), Vector3(1.0, 0.18, 2.1), white)
-	Props.box(self, Vector3(-0.6, 0.66, -0.2), Vector3(0.96, 0.08, 1.2), _mat(Color(0.8, 0.82, 0.85)))
-	for z in [-0.75, 1.35]:
-		Props.box(self, Vector3(-0.6, 0.75, z), Vector3(1.05, 0.9, 0.05), metal)
+	# кровать: на ней тело под простынёй (своя модель epi_bed — если есть)
+	if not _model("epi_bed", Vector3(-0.6, 0.0, 0.3), 0.0):
+		Props.box(self, Vector3(-0.6, 0.55, 0.3), Vector3(1.0, 0.18, 2.1), white)
+		Props.box(self, Vector3(-0.6, 0.66, -0.2), Vector3(0.96, 0.08, 1.2), _mat(Color(0.8, 0.82, 0.85)))
+		for z in [-0.75, 1.35]:
+			Props.box(self, Vector3(-0.6, 0.75, z), Vector3(1.05, 0.9, 0.05), metal)
+	_model("epi_cabinet", Vector3(-2.2, 0.0, 2.2), PI * 0.5)
+	_model("epi_lamp", Vector3(0.2, 3.0, 0.6), 0.0)
 	# тело под простынёй — округлые формы, чтобы читался силуэт: голова, грудь, ноги, стопы приподнимают ткань
 	var sheet := _mat(Color(0.84, 0.85, 0.86), 0.95)
 	_blob(_capsule(0.2, 0.8), Vector3(-0.6, 0.8, -0.02), Vector3(PI * 0.5, 0, 0), Vector3(1.2, 1.0, 0.62), sheet)   # грудь, живот
@@ -106,28 +111,38 @@ func _build_room() -> void:
 		_blob(_capsule(0.05, 0.2), Vector3(-0.6 + x * 1.2, 0.84, 1.17), Vector3(0.2, 0, 0), Vector3.ONE, sheet)            # стопы
 	Props.box(self, Vector3(-0.6, 0.7, 0.3), Vector3(0.98, 0.03, 2.0), sheet)       # простыня свисает с краёв
 	# монитор сердца с зелёной линией и капельница
+	var have_cab: bool = _model("epi_cabinet_2", Vector3(0.75, 0.0, -0.95), deg_to_rad(-35))
+	var top_y: float = 0.85 if have_cab else 1.1
+	if not have_cab:
+		Props.box(self, Vector3(0.6, 0.55, -0.9), Vector3(0.4, 1.1, 0.35), _mat(Color(0.75, 0.75, 0.72)))
 	var mon := Node3D.new()
 	add_child(mon)
-	mon.position = Vector3(0.6, 1.25, -0.9)
+	mon.position = Vector3(0.68, top_y + 0.175, -0.92)
 	mon.rotation.y = deg_to_rad(-35)
-	Props.box(mon, Vector3.ZERO, Vector3(0.45, 0.35, 0.3), _mat(Color(0.3, 0.32, 0.3)))
-	var scr := StandardMaterial3D.new()
-	scr.albedo_color = Color(0.02, 0.08, 0.04)
-	scr.emission_enabled = true
-	scr.emission = Color(0.05, 0.25, 0.1)
-	Props.box(mon, Vector3(0, 0.02, 0.151), Vector3(0.36, 0.24, 0.01), scr)
 	var line := StandardMaterial3D.new()
 	line.emission_enabled = true
 	line.emission = Color(0.3, 1.0, 0.4)
 	line.emission_energy_multiplier = 3.0
 	line.albedo_color = Color(0.3, 1.0, 0.4)
-	screen_line = Props.box(mon, Vector3(0, 0.02, 0.157), Vector3(0.3, 0.008, 0.005), line)
-	Props.box(self, Vector3(0.6, 0.55, -0.9), Vector3(0.4, 1.1, 0.35), _mat(Color(0.75, 0.75, 0.72)))
-	Props.cyl(self, Vector3(-1.4, 0.95, -0.6), 0.015, 1.9, metal)
-	var bag := StandardMaterial3D.new()
-	bag.albedo_color = Color(0.9, 0.95, 1.0, 0.5)
-	bag.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	Props.box(self, Vector3(-1.4, 1.8, -0.6), Vector3(0.12, 0.2, 0.05), bag)
+	if ResourceLoader.exists("res://sanatorium/models/epi_monitor.glb"):
+		var m := Props.glb("res://sanatorium/models/epi_monitor.glb", 1.0)
+		mon.add_child(m)
+		m.position = Vector3(0, -0.175, 0)
+		screen_line = Props.box(mon, Vector3(-0.085, 0.07, 0.196), Vector3(0.15, 0.006, 0.004), line)
+	else:
+		Props.box(mon, Vector3.ZERO, Vector3(0.45, 0.35, 0.3), _mat(Color(0.3, 0.32, 0.3)))
+		var scr := StandardMaterial3D.new()
+		scr.albedo_color = Color(0.02, 0.08, 0.04)
+		scr.emission_enabled = true
+		scr.emission = Color(0.05, 0.25, 0.1)
+		Props.box(mon, Vector3(0, 0.02, 0.151), Vector3(0.36, 0.24, 0.01), scr)
+		screen_line = Props.box(mon, Vector3(0, 0.02, 0.157), Vector3(0.3, 0.008, 0.005), line)
+	if not _model("epi_iv", Vector3(-1.45, 0.0, -0.65), 0.6):
+		Props.cyl(self, Vector3(-1.4, 0.95, -0.6), 0.015, 1.9, metal)
+		var bag := StandardMaterial3D.new()
+		bag.albedo_color = Color(0.9, 0.95, 1.0, 0.5)
+		bag.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		Props.box(self, Vector3(-1.4, 1.8, -0.6), Vector3(0.12, 0.2, 0.05), bag)
 	# календарь
 	var cal := Label3D.new()
 	cal.text = "НОЯБРЬ\n1975"
@@ -143,20 +158,45 @@ func _build_room() -> void:
 	add_child(doctor)
 	doctor.setup("res://characters/psycho.glb")
 	doctor.global_position = Vector3(0.35, 0.0, 0.55)
-	# дочь деда — Барно (та же модель, что «мама», но здесь обычная, уставшая)
-	barno = Actor.new()
-	add_child(barno)
-	barno.setup("res://characters/mom.glb")
-	barno.global_position = Vector3(0.55, 0.0, 2.05)
-	# камера: мы стоим у двери рядом с Барно и смотрим на койку и доктора
+	# дети умершего — Малика (в платке) и Шухрат; мы стоим у двери за их спинами
+	malika = Actor.new()
+	add_child(malika)
+	malika.setup("res://characters/mom.glb")
+	malika.global_position = Vector3(0.7, 0.0, 1.95)
+	shukhrat = Actor.new()
+	add_child(shukhrat)
+	shukhrat.setup("res://characters/grandpa.glb")
+	shukhrat.global_position = Vector3(1.35, 0.0, 1.75)
+	_scarf = MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.125
+	sm.height = 0.125
+	sm.is_hemisphere = true
+	_scarf.mesh = sm
+	_scarf.material_override = _mat(Color(0.2, 0.17, 0.2), 0.95)
+	_scarf.top_level = true
+	malika.add_child(_scarf)
 	cam = Camera3D.new()
 	cam.fov = 58.0
 	add_child(cam)
-	cam.position = Vector3(1.45, 1.6, 2.55)
+	cam.position = Vector3(1.75, 1.6, 2.75)
 	cam.look_at(Vector3(-0.1, 1.05, 0.4), Vector3.UP)
 	cam.make_current()
-	doctor.face(Vector3(0.55, 0, 2.05), true)
-	barno.face(doctor.global_position, true)
+	doctor.face(Vector3(0.9, 0, 1.9), true)
+	malika.face(doctor.global_position, true)
+	shukhrat.face(doctor.global_position, true)
+
+
+## Своя модель из sanatorium/models (если есть): на пол в точке pos, поворот yaw. true — поставлена.
+func _model(nm: String, pos: Vector3, yaw: float) -> bool:
+	var path := "res://sanatorium/models/%s.glb" % nm
+	if not ResourceLoader.exists(path):
+		return false
+	var m := Props.glb(path, 1.0)
+	add_child(m)
+	m.position = pos
+	m.rotation.y = yaw
+	return true
 
 
 func _capsule(r: float, h: float) -> Mesh:
@@ -235,45 +275,51 @@ func _run() -> void:
 	var tw := create_tween()
 	tw.tween_property(_blur, "modulate:a", 0.0, 3.0).set_ease(Tween.EASE_OUT)
 	await wait(3.5)
-	doctor.set_look(cam.global_position)
-	barno.set_look(doctor.head_pos())
-	await _say(doctor, "doctor", "Барно Анваровна… Присядьте, пожалуйста.")
-	await _say(barno, "mom", "Не надо. Говорите.")
+	doctor.set_look(malika.head_pos())
+	malika.set_look(doctor.head_pos())
+	shukhrat.set_look(doctor.head_pos())
+	await _say(doctor, "doctor", "Малика Ахмедовна… Присядьте, пожалуйста.")
+	await _say(malika, "malika", "Не надо. Говорите.")
 	await wait(0.8)
 	flat.stop()                                       # монитор выключают
 	snd("button", -12.0, 0.8)
 	await wait(1.2)
 	await _say(doctor, "doctor", "Ваш отец умер сегодня ночью, в двадцать три четырнадцать. Сердце остановилось во сне.")
 	await wait(1.5)
-	await _say(barno, "mom", "…Он мучился?")
+	await _say(shukhrat, "shukhrat", "…Он мучился?")
 	await _say(doctor, "doctor", "Нет. Но я должен вам кое-что объяснить. Это важно — послушайте.")
 	await _say(doctor, "doctor", "Когда сердце останавливается, мозг умирает не сразу. Ещё примерно двадцать минут он работает.")
-	await _say(barno, "mom", "Двадцать минут… И что он… всё это время?")
+	await _say(malika, "malika", "Двадцать минут… И что он… всё это время?")
 	await _say(doctor, "doctor", "Мы не знаем. Приборы показали только одно: всё это время его мозг был очень активен. Как во сне.")
-	await _say(doctor, "doctor", "Может быть, он вспоминал. Самое лучшее, что было в его жизни, — вас маленькой, свою жену, свой дом.")
-	await _say(doctor, "doctor", "А может быть, его мозг сочинил целую историю. Чью-то жизнь — жизнь человека, которого никогда не было.")
-	await wait(2.0)
-	await _say(barno, "mom", "…Перед самым концом он звал Самана. Так я хотела назвать сына. Он умер, не родившись.")
-	await wait(1.5)
-	await _say(doctor, "doctor", "Что он видел в эти двадцать минут, мы никогда не узнаем.")
+	await _say(doctor, "doctor", "Может быть, он вспоминал. Самое лучшее, что было в его жизни, — вас маленькими, свою жену, свой дом.")
+	await _say(doctor, "doctor", "А может быть, его мозг сочинил целую историю. Чью-то жизнь — жизнь человека, которого никогда не было. Только приборы показывали, что всё это время он боялся. И с кем-то дрался.")
+	await wait(1.0)
+	# Малика плачет; Шухрат обнимает её за плечи
+	snd("crying", -6.0, 1.05)
+	malika.set_look(null)
+	shukhrat.set_look(malika.head_pos())
+	var to: Vector3 = malika.global_position - shukhrat.global_position
+	to.y = 0.0
+	var tw2 := create_tween()
+	tw2.tween_property(shukhrat, "global_position", malika.global_position - to.normalized() * 0.45, 1.2).set_trans(Tween.TRANS_SINE)
+	await tw2.finished
+	var sh: Vector3 = malika.head_pos() + Vector3(0, -0.22, 0)
+	shukhrat.set_hands(sh + Vector3(0, 0, -0.1), sh + Vector3(0, 0, 0.12), 0.9)
+	await wait(2.5)
+	await _say(doctor, "doctor", "Что он видел в эти двадцать минут, мы никогда не узнаем. У нас есть только эти показатели.")
 	await _say(doctor, "doctor", "Мне очень жаль.")
 	await wait(1.5)
 	await GameState.fade_to(1.0, 3.0)
 	hum.stop()
 	ui.hide_line()
-	await ui.title("Двадцать минут.",
-		"Столько живёт мозг после того, как остановилось сердце. Что видел Анвар в свои последние двадцать " +
-		"минут — Самана, санаторий, землетрясение — знал только он.", 7.0, 44)
 	await wait(1.0)
 	_done = true
 	await ui.show_title("THE LAST SHAKE", "(Последний Скачок / Soʻnggi Silkiniş)", 80, 3.0)
 	await wait(3.0)
 	await ui.clear_title(1.5)
 	await ui.show_title("«The Last Shake» — это манифест силы духа.",
-		"Игра была полностью создана 16-летним соло-разработчиком с ограниченными физическими возможностями.\n\n" +
-		"«Никакие барьеры в реальном мире не смогут запереть твой разум и твою мечту.\nСпасибо, что прошли этот путь со мной».\n\n" +
-		"Автор игры и сценария: Саман", 34, 2.5)
-	await wait(9.0)
+		"Игра была полностью создана 16-летним соло-разработчиком с ограниченными физическими возможностями.", 34, 2.5)
+	await wait(6.0)
 	ui.hint("Нажмите любую клавишу", 999.0)
 	set_process_unhandled_input(true)
 
@@ -291,6 +337,9 @@ func _line(who: String, text: String, sec := 0.0) -> void:
 
 func _process(dt: float) -> void:
 	_t += dt
+	if _scarf and malika:                              # платок на голове Малики
+		_scarf.global_position = malika.head_pos() + Vector3(0, 0.0, 0)
+		_scarf.rotation = Vector3(-0.35, malika.rotation.y, 0)
 	if cam:
 		cam.rotation.z = sin(_t * 0.7) * 0.01
 	if beep_rate <= 0.0:

@@ -1,7 +1,8 @@
 extends Node
 ## Проверка без игрока: загружает сцену, проматывает сюжет и сохраняет скриншоты.
 ## Запуск: godot --path . res://tests/shots.tscn -- --case=<имя> --out=<папка> [--quality=medium]
-## Случаи: bus, bus_mom, walk, building, entrance, sanatorium, chase, void, floor3, maze, fight, epilogue, menu, anim
+## Случаи: bus, bus_mom, walk, building, entrance, sanatorium, chase, void, floor3, items, tour, epilogue, menu, anim;
+## playthrough — вся история (--from=глава, --shots — со скриншотами).
 
 var out := "user://shots"
 var case_name := "bus"
@@ -54,7 +55,7 @@ func _run() -> void:
 			await _entrance()
 		"skytest":
 			await _skytest()
-		"sanatorium", "chase", "void", "floor3", "maze", "fight", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "liftmom", "tour", "voidtour", "mompose":
+		"sanatorium", "chase", "void", "floor3", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "tour", "voidtour", "mompose", "items":
 			await _sanatorium()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
@@ -130,7 +131,7 @@ func _prologue() -> void:
 			await secs(10.0)
 			await shot("bus_mom_talk")
 			p.talking = false
-			p.say("mom", "Он нас ждёт, Саман.", 8.0)
+			p.say("mom", "Он нас ждёт, Азиз.", 8.0)
 			await secs(2.5)
 			await shot("bus_mom_speaking")
 		"walk", "building", "torch":
@@ -318,13 +319,9 @@ func _sanatorium() -> void:
 		cp = "chase"
 	elif case_name == "void2":
 		cp = "void"
-	elif case_name == "fight":
-		cp = "maze"
 	elif case_name == "brothers" or case_name == "beatpose":
 		cp = "floor3"
-	elif case_name == "liftmom":
-		cp = "floor3b"
-	elif case_name == "tour" or case_name == "mompose":
+	elif case_name == "tour" or case_name == "mompose" or case_name == "items":
 		cp = "start"
 	elif case_name == "voidtour":
 		cp = "void"
@@ -336,6 +333,9 @@ func _sanatorium() -> void:
 	await secs(4.0)
 	GameStateRef().set_fade(0.0)
 	await shot(case_name + "_start")
+	if case_name == "items":
+		await _items_test(g, d)
+		return
 	if case_name == "sanatorium":
 		await secs(6.0)
 		await shot("sanatorium_mom_walk")
@@ -351,46 +351,10 @@ func _sanatorium() -> void:
 		await _brothers_test(d)
 	elif case_name == "beatpose":
 		await _beatpose_test(g, d)
-	elif case_name == "liftmom":
-		await _liftmom_test(d)
 	elif case_name == "tour" or case_name == "voidtour":
 		await _tour_test(d, case_name == "voidtour")
 	elif case_name == "mompose":
 		await _mompose_test(g, d)
-	elif case_name == "fight":
-		d.has_ward_key = true
-		var door = d.door(91)
-		door.locked = false
-		d.player.global_position = Vector3(8.8, 4.55, -4.6)
-		d.player.rotation.y = PI
-		await secs(2.0)
-		await wait_for_d(d, func(): return d.grandpa.visible, 60)     # сцену запускает сам сюжет: игрок в палате, ключ есть
-		await secs(2.5)
-		await shot("fight_grandpa")
-		await wait_for_d(d, func(): return d.mom.visible, 60)
-		await secs(2.0)
-		await shot("fight_mom_behind")
-		await wait_for_d(d, func(): return str(d.ui._sub_text.text).contains("папа") and d.ui.line_visible(), 60)
-		await secs(0.5)
-		await shot("fight_mom_asks")
-		await wait_for_d(d, func(): return str(d.ui._sub_text.text).contains("Ты кто такой"), 60)
-		await secs(0.5)
-		await shot("fight_mom_inside")
-		while d.act != "fight":
-			await get_tree().process_frame
-		await secs(2.0)
-		await shot("fight_mom")
-		await wait_for_d(d, func(): return d.mom.current == "attack", 30)
-		await secs(0.5)
-		await shot("fight_mom_strike")
-		while d.fight == "on":
-			await get_tree().process_frame
-		await secs(2.0)
-		await shot("fight_cornered")
-		while d.act != "quake":
-			await get_tree().process_frame
-		await secs(3.0)
-		await shot("quake")
 	elif case_name == "void2":
 		# пустой этаж: виды из разных точек во все стороны (ищем дыры)
 		var spots := [Vector3(37.5, 4.55, -8.5), Vector3(20.0, 4.55, -8.0), Vector3(50.0, 4.55, -8.0), Vector3(8.8, 4.55, -8.5),
@@ -542,15 +506,85 @@ func press_cab(key: String) -> void:
 	print("NO CAB BUTTON ", key)
 
 
+## Всё прохождение. --from=start|void|floor3|pharmacy|forest|real — с какой главы; --shots — со скриншотами
+## (запускать с экраном: xvfb-run … --rendering-driver vulkan).
+var shoot := false
+
+
+func _arg(k: String, def: String) -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--%s=" % k):
+			return a.get_slice("=", 1)
+		if a == "--" + k:
+			return "1"
+	return def
+
+
+## Скриншот в режиме --shots; look — куда повернуть голову (точка в мире).
+func snap(nm: String, look: Variant = null) -> void:
+	if not shoot:
+		return
+	if look != null and pl:
+		var to: Vector3 = (look as Vector3) - pl.head.global_position
+		pl.rotation.y = atan2(-to.x, -to.z)
+		pl.look_yaw = 0.0
+		pl.look_pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -0.9, 0.9)
+		await frames(3)
+	await shot(nm)
+
+
 func _playthrough() -> void:
-	Engine.time_scale = 6.0
-	GameStateRef().checkpoint = "start"
+	shoot = _arg("shots", "") != ""
+	var from := _arg("from", "start")
+	Engine.time_scale = 2.0 if shoot else 6.0
+	if from == "forest":
+		GameStateRef().checkpoint = "pharmacy_out"
+		get_tree().change_scene_to_file(GameStateRef().PROLOGUE)
+		await wait_for_scene(func(sc): return sc.get("pharmacy") == true and sc.phase == "walk", 240)
+		await _seg_forest()
+		await _seg_real()
+		Engine.time_scale = 1.0
+		return
+	GameStateRef().checkpoint = from
 	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
 	await secs(2.0)
 	var g: Node = get_tree().current_scene
 	d = g.get_node("Director")
-	await wait_for(func(): return d.act == "act1", 60, "act1")
+	await wait_for(func(): return d.player != null and d.act != "", 60, "director")
 	pl = d.player
+	match from:
+		"start":
+			await _seg_start()
+			await _seg_void()
+			await _seg_f3()
+			await _seg_pills()
+		"void":
+			await _seg_void()
+			await _seg_f3()
+			await _seg_pills()
+		"floor3":
+			await _seg_f3()
+			await _seg_pills()
+		"pharmacy":
+			await _seg_pills()
+		"real":
+			await _seg_real()
+			Engine.time_scale = 1.0
+			return
+	await wait_for_scene(func(sc): return sc.get("pharmacy") == true and sc.phase == "walk", 240)
+	await _seg_forest()
+	await _seg_real()
+	Engine.time_scale = 1.0
+
+
+func wait_for_scene(cond: Callable, limit: float) -> bool:
+	return await wait_for(func():
+		var sc: Node = get_tree().current_scene
+		return sc != null and sc.name != "Sanatorium" and sc.get("phase") != null and cond.call(sc), limit, "scene")
+
+
+func _seg_start() -> void:
+	await wait_for(func(): return d.act == "act1", 60, "act1")
 	step("act1 started")
 	await tp(Vector3(31.0, 1.2, -3.0), PI)
 	await wait_for(func(): return d.act == "scream", 400, "scream")
@@ -605,19 +639,50 @@ func _playthrough() -> void:
 	await tp(Vector3(37.5, 1.2, -5.0), PI)
 	await wait_for(func(): return d.act == "void", 90, "void (lift goes up by itself in the chase)")
 	step("void")
+
+
+func _seg_void() -> void:
 	await wait_for(func(): return d.lift.state == "open", 30, "doors open at 2")
 	await tp(Vector3(9.0, 4.5, -3.5), 0.0)
 	await wait_for(func(): return d.objective_text().contains("палату деда"), 60, "notes")
 	d._read_note("diary")
-	await wait_for(func(): return d.act == "void_done", 120, "void_done")
-	step("void_done")
-	await tp(Vector3(37.5, 4.5, -7.3), 0.0)
-	press_call(1)
-	await wait_for(func(): return d.lift.state == "open" and d.lift.floor_idx == 1, 30, "lift at 2")
+	await wait_for(func(): return d.objective_text().contains("Вернись к лифту"), 120, "back to the lift")
+	step("radio done")
+	await tp(Vector3(8.83, 4.5, -7.6), -PI * 0.5)
+	await wait_for(func(): return d.act == "faceless", 30, "faceless chase")
+	step("faceless chase")
+	await secs(0.4)
+	await snap("10_faceless_behind", d._faceless[0].global_position + Vector3(0, 1.4, 0))
+	pl.rotation.y = -PI * 0.5
+	pl.look_yaw = 0.0
+	pl.input_override = Vector2(1.0, 0.0)                 # честно: едем к лифту на 3-й скорости
+	await wait_for(func(): return pl.global_position.x > 30.0 or d.faceless_state != "run", 40, "drive to the lift")
+	await snap("11_mom_at_lift")
+	await wait_for(func(): return pl.global_position.x > 35.6 or d.faceless_state != "run", 20, "drive to the lift 2")
+	pl.input_override = null
+	var near := 99.0
+	for f in d._faceless:
+		near = minf(near, f.global_position.distance_to(pl.global_position))
+	step("at the lift: state=%s nearest faceless %.1f m" % [d.faceless_state, near])
 	await tp(Vector3(37.5, 4.5, -5.0), PI)
-	press_cab("3")
-	await wait_for(func(): return d.act == "floor3_search", 90, "floor3")
+	await wait_for(func(): return d.faceless_state == "door", 20, "in the cabin")
+	await secs(0.5)
+	await snap("12_faceless_at_doors", Vector3(37.5, 5.6, -8.0))
+	await wait_for(func(): return d.act == "f3_call", 90, "lift with mom to 3, she leaves")
+	step("mom vanishes on 3")
+	await snap("13_mom_on_3", d.mom.global_position + Vector3(0, 1.5, 0))
+	await secs(1.2)
+	await snap("14_mom_walks_away", d.mom.global_position + Vector3(0, 1.5, 0))
+	await wait_for(func(): return not d.mom.visible, 60, "mom gone")
+	await secs(1.0)
+	await tp(Vector3(37.5, 7.8, -7.8), PI)
+	await secs(0.5)
+	await snap("15_empty_corridor", Vector3(30.0, 9.0, -8.1))
+	await wait_for(func(): return d.act == "floor3_search", 60, "floor3")
 	step("floor3")
+
+
+func _seg_f3() -> void:
 	await tp(Vector3(20.0, 7.8, -8.1), 0.0)
 	pl.v = 1.0
 	await secs(4.0)
@@ -625,8 +690,12 @@ func _playthrough() -> void:
 	d.scares.count = 10
 	await wait_for(func(): return d.act == "brothers", 60, "brothers")
 	step("brothers")
+	await secs(1.0)
+	await snap("20_brothers")
 	await wait_for(func(): return d.act == "lounge", 90, "caught by the brothers")
 	step("lounge: tied")
+	await secs(1.0)
+	await snap("21_lounge")
 	await secs(2.0)
 	if d.player.input_override != Vector2.ZERO:
 		step("FAIL: hands not tied")
@@ -634,48 +703,105 @@ func _playthrough() -> void:
 	step("bite minigame")
 	await wait_for(func(): return not d._tied, 60, "hands free")
 	step("hands free")
+	await wait_for(func(): return d.act == "mom_back", 60, "searching for mom")
+	await tp(Vector3(24.0, 7.8, -8.1), -PI * 0.5)
+	await wait_for(func(): return d.mom.visible, 120, "mom comes back behind")
+	step("mom behind")
 	await secs(2.0)
-	d.scares.elapsed = 400.0
-	d.scares.count = 10
-	await secs(3.0)
-	await tp(d.MAN_POS + Vector3(-1.4, 0, 0.4), -PI * 0.5)
-	await wait_for(func(): return d.act == "floor3_leave", 120, "man dialogue")
-	step("floor3_leave")
-	await tp(Vector3(37.5, 7.8, -7.6), 0.0)
-	press_call(2)
-	await wait_for(func(): return d.lift.state == "open" and d.lift.floor_idx == 2, 30, "lift at 3")
+	var to_m: Vector3 = d.mom.global_position - pl.global_position
+	pl.rotation.y = atan2(-to_m.x, -to_m.z)
+	pl.look_yaw = 0.0
+	await snap("22_mom_behind", d.mom.global_position + Vector3(0, 1.5, 0))
+	await wait_for(func(): return d.act == "room_scare", 120, "mom noticed")
+	step("mom noticed, going to the lift")
+	await wait_for(func(): return d.objective_text().contains("Загляни"), 120, "look into the room")
+	step("look into the room")
+	var dg = d.door(167)
+	var dc: Vector3 = dg.center if dg else Vector3(31.6, 7.8, -9.7)
+	await tp(Vector3(dc.x, 7.8, -9.4), PI)
+	if shoot:
+		await wait_for(func(): return d.ui.line_visible() and str(d.ui._sub_text.text).contains("Твою"), 30, "scare line")
+		await snap("23_jump_scare")
+	await wait_for(func(): return d.act == "f3_lift", 60, "scare done")
+	step("jump scare done")
+	await wait_for(func(): return not d.mom.is_moving(), 60, "mom in the cabin")
 	await tp(Vector3(37.5, 7.8, -5.0), PI)
-	press_cab("2")
-	await wait_for(func(): return d.act == "maze", 120, "maze")
-	step("maze")
+	await wait_for(func(): return d.act == "pills", 90, "floor 2 with mom")
+	step("pills")
 	await secs(2.0)
-	for c in g.get_children():
-		if c is Node3D and c.get_child_count() > 0:
-			for it in c.get_children():
-				if it is Area3D and it.has_meta("interact") and str(it.get_meta("interact").get("text")).contains("204"):
-					it.get_meta("interact").action.call()
-	await wait_for(func(): return d.has_ward_key, 20, "ward key")
-	step("ward key")
-	await tp(Vector3(8.8, 4.5, -4.8), 0.0)
-	await wait_for(func(): return d.act == "fight", 120, "fight")
-	step("fight")
+	await snap("30_floor2_mom", d.mom.global_position + Vector3(0, 1.5, 0))
+
+
+func _seg_pills() -> void:
+	await wait_for(func(): return d.objective_text().contains("аптек"), 120, "pharmacy objective")
+	press_cab("1")
+	await wait_for(func(): return d.lift.floor_idx == 0 and d.lift.state == "open", 60, "down to 1")
+	step("floor 1")
+	await snap("31_floor1")
+	await wait_for(func(): return d.objective_text().contains("улицу"), 60, "go outside")
+	for c in d.game.get_children():
+		if c is Area3D and c.has_meta("interact") and str(c.get_meta("interact").get("text")).contains("Выйти"):
+			c.get_meta("interact").action.call()
+
+
+func _seg_forest() -> void:
+	var pr: Node = get_tree().current_scene
+	step("forest: pharmacy")
 	await secs(3.0)
-	d.hp = 10.0
-	await wait_for(func(): return d.act == "quake", 120, "quake")
-	step("quake")
-	for wp in d.GRANDPA_RUN:
-		await tp(wp, 0.0)
-		await secs(0.6)
-	await tp(Vector3(31.0, 4.5, -3.0), -PI * 0.5)
-	for i in 6:
-		await secs(3.0)
-		if not is_instance_valid(d):
-			break
-		print("DBG pl ", pl.global_position, " gp ", d.grandpa.global_position, " moving ", d.grandpa.is_moving(), " act ", d.act)
+	tp_route(pr, 1.0)
+	await secs(2.0)
+	if shoot:
+		pr.hero.rotation.y = atan2(-(pr.kiosk_point.x - pr.hero.global_position.x), -(pr.kiosk_point.z - pr.hero.global_position.z))
+		await secs(0.5)
+		await shot("40_kiosk")
+	pr._buy_pills()
+	await secs(2.0)
+	print("STEP pills bought: ", pr.has_pills)
+	await snap("41_kiosk_bought")
+	tp_route(pr, pr.door_stop_s - 0.4)
+	await secs(1.0)
+	await snap("42_back_at_door")
+	pr._open_entrance()
+	await secs(3.0)
+	tp_route(pr, pr.path_cum[-1] - 0.05)
+
+
+func _seg_real() -> void:
+	var g: Node
+	await wait_for(func(): return get_tree().current_scene != null and get_tree().current_scene.has_node("Director") and get_tree().current_scene.get_node("Director").act == "real", 240, "real hospital")
+	g = get_tree().current_scene
+	d = g.get_node("Director")
+	pl = d.player
+	step("real hospital")
+	await secs(3.0)
+	await snap("50_real_hall")
+	if shoot:
+		await tp(Vector3(33.0, 1.2, 4.0), PI * 0.5)
+		await secs(0.5)
+		await snap("51_real_hall_people", Vector3(30.0, 1.6, 7.5))
+		await tp(Vector3(37.5, 4.5, -7.6), -PI * 0.5)
+		await secs(0.5)
+		await snap("52_real_floor2", Vector3(20.0, 5.6, -8.0))
+	await tp(Vector3(8.83, 4.5, -4.0), PI)
+	await secs(1.5)
+	await snap("53_room204", Vector3(10.7, 5.3, -0.74))
+	await wait_for(func(): return d.ui.line_visible() and str(d.ui._sub_text.text).contains("сын"), 90, "real son line")
+	await snap("54_real_son", Vector3(10.25, 5.3, -0.74))
+	await wait_for(func(): return d.act == "panic", 120, "panic attack")
+	step("panic")
+	await secs(2.5)
+	await snap("55_panic")
+	await wait_for(func(): return d.ui.line_visible() and str(d.ui._sub_text.text).contains("Доктор"), 60, "doctor call")
+	await snap("56_fallen")
 	await wait_for(func(): return get_tree().current_scene == null or get_tree().current_scene.name == "Epilogue", 120, "epilogue")
 	step("epilogue reached")
-	await secs(10.0)
-	Engine.time_scale = 1.0
+	if shoot:
+		Engine.time_scale = 1.0
+		for k in 6:
+			await secs(7.0)
+			await shot("6%d_epilogue" % k)
+	else:
+		await secs(10.0)
 
 
 func _prologue_play() -> void:
@@ -862,26 +988,6 @@ func _beatpose_test(g: Node, d: Node) -> void:
 
 
 ## Лифт на 3-м этаже: двери закрываются медленно, мама увозит человека в коляске.
-func _liftmom_test(dir: Node) -> void:
-	d = dir
-	pl = dir.player
-	await secs(2.0)
-	dir.scares.elapsed = 400.0
-	dir.scares.count = 10
-	await secs(1.0)
-	await tp(dir.MAN_POS + Vector3(-1.4, 0, 0.4), -PI * 0.5)
-	await wait_for(func(): return dir.act == "floor3_leave", 120, "man dialogue")
-	await tp(Vector3(37.5, 7.8, -7.6), 0.0)
-	press_call(2)
-	await wait_for(func(): return dir.lift.state == "open" and dir.lift.floor_idx == 2, 30, "lift at 3")
-	await tp(Vector3(37.5, 7.8, -5.0), 0.0)
-	press_cab("2")
-	await wait_for(func(): return dir.mom.visible, 20, "mom appears")
-	for i in 10:
-		await secs(1.1)
-		await shot("lift_mom_%d" % i)
-
-
 ## Кадры из разных мест здания: текстуры, свет, цвет (комнаты включены).
 ## [точка, поворот (рад), наклон взгляда, комната со светом или ""]
 const TOUR := [
@@ -982,3 +1088,56 @@ func _caught_test() -> void:
 	await wait_for(func(): return d.chase == "run", 30, "chase again")
 	step("second chase started, speed " + str(d._psycho_speed))
 	Engine.time_scale = 1.0
+
+
+## Каждый тип предмета со своей моделью или картинкой — крупно, отдельной камерой перед ним (свет в комнате включён).
+const ITEM_TYPES := ["armchair_beige", "armchair", "armchair_red", "bedside", "table_small", "table_sq", "wardrobe", "bathtub",
+	"toilet", "sink", "wheelchair", "chair", "painting_1", "painting_2", "painting_3", "notice_board", "clock", "radio",
+	"tv_small", "telephone", "call_panel", "fire_ext", "game_chess", "fuse_box", "electro_warning"]
+
+
+func _items_test(g: Node, dir: Node) -> void:
+	dir.set_process(false)
+	dir.scares.stop()
+	var Game: Script = load("res://sanatorium/scripts/game.gd")
+	var cam := Camera3D.new()
+	cam.fov = 55.0
+	g.add_child(cam)
+	var lamp := OmniLight3D.new()
+	lamp.light_energy = 0.8
+	lamp.omni_range = 5.0
+	g.add_child(lamp)
+	var seen := {}
+	var meshes: Array = g.building.find_children("*", "Node3D", true, false)
+	for t in ITEM_TYPES:
+		var k := 0
+		for n in meshes:
+			var nm := String(n.name)
+			var base: String = nm.trim_suffix("_model").trim_suffix("_pic")
+			var tt: String = "electro_warning" if nm.begins_with("electro_warning") else Game.model_type(base)
+			if tt != t or not (nm.ends_with("_model") or nm.ends_with("_pic")):
+				continue
+			var node: Node3D = n
+			if not node.is_inside_tree():
+				continue
+			k += 1
+			if k > 2:
+				break
+			var xf: Transform3D = node.global_transform
+			var src: Node = node.get_parent().get_node_or_null(base)
+			var size := 1.0
+			if src is MeshInstance3D and (src as MeshInstance3D).mesh:
+				var bb: AABB = (src as MeshInstance3D).mesh.get_aabb()
+				size = maxf(bb.size.length(), 0.25)
+				xf = xf * Transform3D(Basis.IDENTITY, bb.get_center())
+			var front: Vector3 = xf.basis.z.normalized()
+			var c: Vector3 = xf.origin
+			cam.global_position = c + front * (size * 1.25 + 0.3) + Vector3(0, size * 0.35, 0)
+			cam.look_at(c, Vector3.UP)
+			cam.current = true
+			lamp.global_position = cam.global_position + Vector3(0, 0.6, 0)
+			var room: Dictionary = g.room_at(c + Vector3(0, 0.2, 0))
+			if room.has("id"):
+				g.lights.set_room(String(room["id"]), true)
+			await secs(1.2)
+			await shot("item_%s_%d" % [t, k])

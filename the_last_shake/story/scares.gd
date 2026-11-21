@@ -1,8 +1,8 @@
 extends Node
-## Звуковые пугалки 3-го этажа (акт 4), пока Саман 3–4 минуты ищет маму:
+## Звуковые пугалки 3-го этажа (акт 4), пока Азиз 3–4 минуты ищет маму:
 ##   • проезжаешь мимо закрытой двери палаты — изнутри резкий стук или глухой женский плач;
 ##   • в пустом коридоре за спиной — тяжёлое дыхание и быстрые босые шаги; стоит остановиться — обрываются;
-##   • из дальних комнат — звон падающих инструментов, глухой смех, шёпот «Саман…».
+##   • из дальних комнат — звон падающих инструментов, глухой смех, шёпот «Азиз…».
 
 var d                       # director
 var running := false
@@ -94,12 +94,14 @@ func _process(dt: float) -> void:
 			_steps.play()
 			_breath.play()
 		_:
-			var what: Array = ["instruments_fall", "laughter", "whisper_saman"]
+			var what: Array = ["instruments_fall", "laughter", "whisper_name"]
 			var s: String = what[randi() % what.size()]
 			var a: float = randf() * TAU
 			var dist: float = randf_range(9.0, 17.0)
 			var p := Vector3(clampf(pp.x + cos(a) * dist, 1.0, 74.0), pp.y + 1.3, clampf(pp.z + sin(a) * dist * 0.4, -15.0, -1.0))
-			d.snd(s, p, -1.0 if s != "whisper_saman" else -6.0, randf_range(0.92, 1.05), 40.0)
+			d.snd(s, p, -1.0 if s != "whisper_name" else -6.0, randf_range(0.92, 1.05), 40.0)
+			if s == "whisper_name":
+				d.ui.say("", "…Азиз…", 1.6)                 # шёпот из дальних комнат
 
 
 func _closed_door_near(pp: Vector3, r: float):

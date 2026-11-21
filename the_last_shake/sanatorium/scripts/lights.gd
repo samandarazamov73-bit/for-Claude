@@ -441,3 +441,22 @@ func _update_buzz(pp: Vector3) -> void:
 				p.play(randf() * 0.9)
 		elif p.playing:
 			p.stop()
+
+
+## Настоящая больница (акт 6): всё горит ровно и ярче, ничего не мигает — светло и не страшно.
+func hospital_day(k := 1.7) -> void:
+	for f in flickers:
+		var l: OmniLight3D = f["light"]
+		if is_instance_valid(l):
+			l.light_energy = l.get_meta("base_energy")
+		if f["mesh"] is GeometryInstance3D:
+			f["mesh"].material_override = null
+	flickers.clear()
+	for room in groups:
+		set_room(room, true, false)
+		for l in groups[room]["lights"]:
+			if is_instance_valid(l) and not l.has_meta("day_k"):
+				l.set_meta("day_k", true)
+				l.light_energy *= k
+				if l.has_meta("base_energy"):
+					l.set_meta("base_energy", float(l.get_meta("base_energy")) * k)

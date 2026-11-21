@@ -3,7 +3,7 @@ extends Node
 ## Управление (все клавиши задаются здесь), глава/контрольная точка, переходы между сценами с затемнением.
 
 ## Номер сборки — виден в главном меню слева внизу (чтобы сразу видно, какая версия запущена).
-const VERSION := "версия 8 · 16 ноября 2026"
+const VERSION := "версия 9 · 21 ноября 2026"
 
 const MENU := "res://story/menu.tscn"
 const PROLOGUE := "res://story/prologue.tscn"
@@ -12,16 +12,17 @@ const EPILOGUE := "res://story/epilogue.tscn"
 
 ## Главы для меню: [название, сцена, контрольная точка]
 const CHAPTERS := [
-	["Пролог. Дорога в никуда", PROLOGUE, ""],
+	["Пролог. Дорога в никуда", PROLOGUE, "start"],
 	["Глава 1. Санаторий «Оромгох»", SANATORIUM, "start"],
 	["Глава 2. Ключ администратора", SANATORIUM, "key"],
 	["Глава 3. Второй этаж", SANATORIUM, "void"],
 	["Глава 4. Третий этаж", SANATORIUM, "floor3"],
-	["Глава 5. Палата №204", SANATORIUM, "maze"],
-	["Эпилог. 1980", EPILOGUE, ""],
+	["Глава 5. Таблетка", SANATORIUM, "pharmacy"],
+	["Глава 6. Настоящая больница", SANATORIUM, "real"],
+	["Эпилог", EPILOGUE, ""],
 ]
 
-var checkpoint := "start"       # где начать санаторий: start, key, chase, void, floor3, maze
+var checkpoint := "start"       # где начать: start, key, chase, void, floor3, floor3b, pharmacy, pharmacy_out (лес), real
 var deaths := 0
 var auto_lines := false          # автотест: реплики идут сами по времени (в игре — только по пробелу)
 var entry := {}                  # откуда заехали в здание (пролог → санаторий): pos, yaw, mom — координаты здания

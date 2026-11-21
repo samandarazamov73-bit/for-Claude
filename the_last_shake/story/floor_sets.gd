@@ -378,32 +378,33 @@ func restore_floor2() -> void:
 			(c as Area3D).collision_layer = game.L_INTERACT
 
 
-func build_real2() -> void:
-	mode = "real"
+## scary = false — обычный второй этаж (акт 5): коридор горит ровно, двери не заперты, без перебоев света.
+func build_real2(scary := true) -> void:
+	mode = "real" if scary else "normal"
 	game.hud.hidden_level = -1
 	game.lights.end_blackout()
 	_clear()
 	restore_floor2()
-	# свет: в комнатах темно, в коридоре горит, но то и дело гаснет; в процедурной 213 горит (там ключ)
+	# свет: в комнатах темно, в коридоре горит (в страшном — то и дело гаснет); в процедурной 213 горит
 	for room in game.lights.groups.keys():
 		var rs: String = str(room)
 		if rs.begins_with("L1."):
-			game.lights.set_room(rs, rs == "L1.C" or rs == "L1.R10")
+			game.lights.set_room(rs, rs == "L1.C" or rs == "L1.R10" or (not scary and rs in ["L1.F2", "L1.F2b"]))
 	_surge_t = 4.0
 	var d = door(DOOR_204)
 	if d:
 		d.set_angle(0.0)
-		d.locked = true
-		d.locked_text = "Заперто. Нужен ключ от палаты"
+		d.locked = scary
+		d.locked_text = "Заперто. Нужен ключ от палаты" if scary else ""
 	var k = door(DOOR_213)
 	if k:
 		k.locked = false
 		k.set_angle(0.0)
-	var st = door(DOOR_STAIR1_F2)                # на лестницу — заклинило (откроет землетрясение)
+	var st = door(DOOR_STAIR1_F2)                # на лестницу — заклинило
 	if st:
 		st.set_angle(0.0)
-		st.locked = true
-		st.locked_text = "Дверь на лестницу заклинило"
+		st.locked = scary
+		st.locked_text = "Дверь на лестницу заклинило" if scary else ""
 
 
 ## Землетрясение на настоящем этаже: свет в коридоре скачет, двери палат бьются и распахиваются.

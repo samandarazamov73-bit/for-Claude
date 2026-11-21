@@ -13,6 +13,7 @@ const Ambience = preload("res://sanatorium/scripts/ambience.gd")
 const Hud = preload("res://sanatorium/scripts/hud.gd")
 const Switch = preload("res://sanatorium/scripts/switch.gd")
 const Quality = preload("res://sanatorium/scripts/quality.gd")
+const Decor = preload("res://sanatorium/scripts/decor.gd")
 
 const L_WORLD := 1
 const L_PLAYER := 2
@@ -61,6 +62,7 @@ func _ready() -> void:
 	_build_static_colliders()
 	_build_occluders_and_ranges()
 	stats["models_swapped"] = swap_models(building)     # свои 3D-модели из sanatorium/models/
+	stats["decor"] = Decor.apply(building, model_type, has_model)   # свои картины, циферблаты, экраны, таблички
 	_build_furniture_colliders()
 	_build_blockers()
 	hud = Hud.new()
@@ -150,7 +152,12 @@ func play_at(stream_name: String, pos: Vector3, vol_db := 0.0, pitch := 1.0, max
 var _sfx_cache := {}
 
 
+## Звук здания. Есть варианты (name_2.wav, name_3.wav …) — каждый раз случайный (петли — всегда основной).
 func sfx(name: String, loop := false) -> AudioStream:
+	if not loop:
+		var vs: Array = sfx_variants("res://sanatorium/assets/sfx/", name, _sfx_cache)
+		if vs.size() > 1:
+			return vs[randi() % vs.size()]
 	var key := name + ("#l" if loop else "")
 	if _sfx_cache.has(key):
 		return _sfx_cache[key]
@@ -162,6 +169,19 @@ func sfx(name: String, loop := false) -> AudioStream:
 		s.loop_end = int(s.get_length() * s.mix_rate)
 	_sfx_cache[key] = s
 	return s
+
+
+static func sfx_variants(dir: String, name: String, cache: Dictionary) -> Array:
+	var key := "#v" + dir + name
+	if cache.has(key):
+		return cache[key]
+	var out: Array = []
+	for k in range(1, 7):
+		var p: String = dir + name + ("" if k == 1 else "_%d" % k) + ".wav"
+		if ResourceLoader.exists(p):
+			out.append(load(p))
+	cache[key] = out
+	return out
 
 
 # ------------------------------------------------------------------------------ setup
@@ -314,23 +334,23 @@ func _grime(m: BaseMaterial3D, tex: Texture2D, scale: Vector3, offset: Vector3) 
 ## Indoors there is no sky to reflect, so fully metallic atlas regions would render black: tone metal down.
 ## Walls, floors and ceilings get grime laid over them in world space (so it never repeats tile by tile),
 ## lamp glass glows less, and window glass is a little dirty, so it no longer reads as an invisible wall.
-## Новые текстуры (tools/godot_assets/make_hospital_textures.py: фото Poly Haven, CC0) в той же раскладке UV,
-## что старые: имя материала → [цвет, нормаль, ORM (R — затенение, G — шероховатость)].
+## Текстуры стен, полов и фасада — свои (сгенерированы автором игры, поправлены tools/user_assets/), в той же
+## раскладке UV, что старые: имя материала → [цвет, нормаль, ORM (R — затенение, G — шероховатость)].
 const TEX_SET := {
-	"M_Paint_WallBeige": ["wall_beige_albedo", "wall_paint_normal", "wall_paint_orm"],
-	"M_Paint_WallBlue": ["wall_blue_albedo", "wall_paint_normal", "wall_paint_orm"],
-	"M_Paint_WallPeach": ["wall_peach_albedo", "wall_paint_normal", "wall_paint_orm"],
+	"M_Paint_WallBeige": ["wall_beige_albedo", "wall_beige_normal", "wall_beige_orm"],
+	"M_Paint_WallBlue": ["wall_blue_albedo", "wall_blue_normal", "wall_blue_orm"],
+	"M_Paint_WallPeach": ["wall_peach_albedo", "wall_peach_normal", "wall_peach_orm"],
 	"M_Tile_WallWhite": ["wall_tile_albedo", "wall_tile_normal", "wall_tile_orm"],
-	"M_Wallpaper_Floral": ["wallpaper_floral_albedo", "wallpaper_normal", "wallpaper_orm"],
-	"M_Wallpaper_Geometric": ["wallpaper_geometric_albedo", "wallpaper_normal", "wallpaper_orm"],
-	"M_Ceiling_Paint": ["ceiling_albedo", "plaster_normal", "plaster_orm"],
+	"M_Wallpaper_Floral": ["wallpaper_floral_albedo", "wallpaper_floral_normal", "wallpaper_floral_orm"],
+	"M_Wallpaper_Geometric": ["wallpaper_geometric_albedo", "wallpaper_geometric_normal", "wallpaper_geometric_orm"],
+	"M_Ceiling_Paint": ["plaster_albedo", "plaster_normal", "plaster_orm"],
 	"M_Plaster_White": ["plaster_albedo", "plaster_normal", "plaster_orm"],
 	"M_Linoleum_Brown": ["linoleum_albedo", "linoleum_normal", "linoleum_orm"],
 	"M_Linoleum_Parquet": ["parquet_albedo", "parquet_normal", "parquet_orm"],
 	"M_Tile_FloorCeramic": ["floor_ceramic_albedo", "floor_ceramic_normal", "floor_ceramic_orm"],
 	"M_Terrazzo": ["terrazzo_albedo", "terrazzo_normal", "terrazzo_orm"],
 	"M_Wood_DoorDark": ["door_albedo", "door_normal", "door_orm"],
-	# снаружи (tools/godot_assets/make_exterior_textures.py): фасадные панели, цоколь, карнизы, отмостка, кровля
+	# снаружи: фасадные панели, цоколь, карнизы, отмостка, кровля
 	"M_Concrete_FacadeWall": ["ext_facade_wall_albedo", "ext_facade_wall_normal", "ext_facade_wall_orm"],
 	"M_Concrete_FacadePanel": ["ext_facade_panel_albedo", "ext_facade_panel_normal", "ext_facade_panel_orm"],
 	"M_Concrete_Weathered": ["ext_concrete_weathered_albedo", "ext_concrete_weathered_normal", "ext_concrete_weathered_orm"],
@@ -380,12 +400,52 @@ static func model_type(node_name: String) -> String:
 	return best
 
 
+## Варианты одного типа: <тип>.glb и <тип>__1.glb … <тип>__9.glb — предметы в разных комнатах берут разные
+## (выбор по имени узла, всегда один и тот же). Модель ставится на место старой коробки: по центру по X, на тот
+## же низ, спинкой к той же стене (−Z), и не шире старой больше чем на 15 % (иначе врежется в соседей).
+## SWAP_TOP — у настенных предметов, где важна высота верха (раковина), а не низа.
+const SWAP_TOP := {"sink": 0.86}
+
+
+static func model_variants(t: String) -> Array:
+	var out: Array = []
+	var base: String = MODELS_DIR + t
+	if ResourceLoader.exists(base + ".glb"):
+		out.append(base + ".glb")
+	for k in range(1, 10):
+		if ResourceLoader.exists("%s__%d.glb" % [base, k]):
+			out.append("%s__%d.glb" % [base, k])
+	return out
+
+
+static func has_model(t: String) -> bool:
+	return not model_variants(t).is_empty()
+
+
+static func _scene_aabb(n: Node3D) -> AABB:
+	var box := AABB()
+	var first := true
+	for g in n.find_children("*", "MeshInstance3D", true, false):
+		var mi: MeshInstance3D = g
+		if mi.mesh == null:
+			continue
+		var xf: Transform3D = Transform3D.IDENTITY
+		var p: Node = mi
+		while p != n and p is Node3D:
+			xf = (p as Node3D).transform * xf
+			p = p.get_parent()
+		var b: AABB = xf * mi.mesh.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	return box
+
+
 static func swap_models(root: Node) -> int:
 	var have := {}
 	for t in MODEL_TYPES:
-		var p: String = MODELS_DIR + String(t) + ".glb"
-		if ResourceLoader.exists(p):
-			have[t] = p
+		var v: Array = model_variants(t)
+		if not v.is_empty():
+			have[t] = v
 	if have.is_empty():
 		return 0
 	var scenes := {}
@@ -393,17 +453,34 @@ static func swap_models(root: Node) -> int:
 	for mi in root.find_children("*", "MeshInstance3D", true, false):
 		var old: MeshInstance3D = mi
 		var t := model_type(String(old.name))
-		if t == "" or not have.has(t) or not old.visible:
+		if t == "" or not have.has(t) or not old.visible or old.mesh == null:
 			continue
-		if not scenes.has(t):
-			scenes[t] = load(have[t])
-		var ps: PackedScene = scenes[t]
+		var paths: Array = have[t]
+		var path: String = paths[absi(hash(String(old.name))) % paths.size()]
+		if not scenes.has(path):
+			scenes[path] = load(path)
+		var ps: PackedScene = scenes[path]
 		if ps == null:
 			continue
 		var inst: Node3D = ps.instantiate()
-		inst.name = String(old.name) + "_model"
-		old.get_parent().add_child(inst)
-		inst.transform = old.transform
+		var holder := Node3D.new()
+		holder.name = String(old.name) + "_model"
+		old.get_parent().add_child(holder)
+		holder.transform = old.transform
+		holder.add_child(inst)
+		var ob: AABB = old.mesh.get_aabb()
+		var nb: AABB = _scene_aabb(inst)
+		var k := 1.0
+		if nb.size.x > 0.05 and ob.size.x > 0.05:
+			k = minf(k, ob.size.x * 1.15 / nb.size.x)
+		if nb.size.z > 0.05 and ob.size.z > 0.05:
+			k = minf(k, ob.size.z * 1.15 / nb.size.z)
+		inst.scale = Vector3.ONE * k
+		nb = AABB(nb.position * k, nb.size * k)
+		var y: float = ob.position.y - nb.position.y
+		if SWAP_TOP.has(t):
+			y = float(SWAP_TOP[t]) - nb.end.y
+		inst.position = Vector3(ob.get_center().x - nb.get_center().x, y, ob.position.z - nb.position.z)
 		for g in inst.find_children("*", "GeometryInstance3D", true, false):
 			var gi: GeometryInstance3D = g
 			gi.visibility_range_end = old.visibility_range_end

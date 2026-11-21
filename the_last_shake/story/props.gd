@@ -1,6 +1,6 @@
 extends RefCounted
 ## Простые предметы для сюжета, собранные из примитивов: каталка, тумбочка, бетонная балка, обломки,
-## кулак Самана (вид от первого лица), пыль. Модели ключей и фонаря — из props/*.glb.
+## кулак Азиза (вид от первого лица), пыль. Модели ключей и фонаря — из props/*.glb.
 
 static func mat(col: Color, rough := 0.85, metal := 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -100,7 +100,7 @@ static func chunk(size: float) -> MeshInstance3D:
 	return mi
 
 
-## Рука Самана для удара (вид от первого лица): рукав и кулак. Начало — у плеча, вытянута в −Z.
+## Рука Азиза для удара (вид от первого лица): рукав и кулак. Начало — у плеча, вытянута в −Z.
 static func fist_arm() -> Node3D:
 	var root := Node3D.new()
 	var sleeve := mat(Color(0.18, 0.24, 0.36), 0.9)
@@ -185,6 +185,88 @@ static func washer() -> Node3D:
 	cyl(hatch, Vector3(0.2, 0, -0.02), 0.19, 0.04, steel, Vector3(PI * 0.5, 0, 0))
 	cyl(hatch, Vector3(0.2, 0, -0.035), 0.15, 0.02, dark, Vector3(PI * 0.5, 0, 0))
 	box(hatch, Vector3(0.37, 0, -0.045), Vector3(0.04, 0.08, 0.03), steel)
+	for gi in root.find_children("*", "GeometryInstance3D", true, false):
+		(gi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return root
+
+
+## Безликий: больничная одежда (весь человек — выцветшая серо-голубая ткань) и гладкая голова без лица —
+## «яйцо» из кожи поверх головы модели. Яйцо — отдельный узел (top_level): сюжет каждый кадр ставит его
+## на голову (actor.head_pos()), так не зависит от масштаба костей модели.
+static func faceless(a: Node3D) -> MeshInstance3D:
+	var gown := mat(Color(0.5, 0.55, 0.57), 0.93)
+	var model: Node3D = a.get("model")
+	if model:
+		for mi in model.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).material_override = gown
+	var egg := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.112
+	sm.height = 0.29
+	sm.radial_segments = 24
+	sm.rings = 14
+	egg.mesh = sm
+	var skin := mat(Color(0.7, 0.6, 0.53), 0.5)
+	skin.rim_enabled = true
+	skin.rim = 0.25
+	egg.material_override = skin
+	egg.top_level = true
+	a.add_child(egg)
+	return egg
+
+
+## Аптечный киоск у остановки (если нет своей модели story_kiosk.glb): будка, витрина с коробками лекарств
+## (картинка med_boxes), окошко, вывеска «АПТЕКА» с зелёным крестом. Начало — на земле посередине, витрина — к +Z.
+static func kiosk() -> Node3D:
+	var root := Node3D.new()
+	var paint := mat(Color(0.62, 0.7, 0.62), 0.7)
+	var frame := mat(Color(0.25, 0.3, 0.27), 0.55, 0.3)
+	var roof := mat(Color(0.3, 0.32, 0.3), 0.6, 0.4)
+	box(root, Vector3(0, 1.3, 0), Vector3(2.2, 2.6, 1.8), paint)
+	box(root, Vector3(0, 2.66, 0.05), Vector3(2.5, 0.12, 2.1), roof)
+	box(root, Vector3(0, 0.12, 0.92), Vector3(2.2, 0.24, 0.06), frame)
+	# витрина: коробки лекарств за стеклом, подсвечены изнутри
+	var shelf := StandardMaterial3D.new()
+	if ResourceLoader.exists("res://sanatorium/assets/pics/med_boxes.png"):
+		shelf.albedo_texture = load("res://sanatorium/assets/pics/med_boxes.png")
+		shelf.emission_enabled = true
+		shelf.emission_texture = shelf.albedo_texture
+		shelf.emission = Color(1, 1, 1)
+		shelf.emission_energy_multiplier = 0.35
+	else:
+		shelf.albedo_color = Color(0.8, 0.75, 0.6)
+	shelf.roughness = 0.6
+	box(root, Vector3(0, 1.45, 0.905), Vector3(1.9, 1.05, 0.02), frame)
+	var vit := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(1.8, 0.95)
+	vit.mesh = q
+	vit.material_override = shelf
+	root.add_child(vit)
+	vit.position = Vector3(0, 1.45, 0.918)
+	var glass := mat(Color(0.7, 0.8, 0.85, 0.18), 0.05)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.metallic_specular = 0.9
+	box(root, Vector3(0, 1.45, 0.93), Vector3(1.8, 0.95, 0.006), glass)
+	# окошко продавца
+	box(root, Vector3(0.62, 0.86, 0.93), Vector3(0.42, 0.3, 0.02), mat(Color(0.95, 0.82, 0.55), 0.4))
+	box(root, Vector3(0.62, 0.7, 1.0), Vector3(0.6, 0.04, 0.2), frame)
+	# вывеска
+	box(root, Vector3(0, 2.38, 0.92), Vector3(1.9, 0.34, 0.06), mat(Color(0.92, 0.92, 0.88), 0.6))
+	var sign := Label3D.new()
+	sign.text = "АПТЕКА"
+	sign.font_size = 96
+	sign.pixel_size = 0.0028
+	sign.modulate = Color(0.1, 0.38, 0.2)
+	sign.outline_size = 0
+	sign.position = Vector3(0.15, 2.38, 0.955)
+	root.add_child(sign)
+	var green := mat(Color(0.1, 0.55, 0.25), 0.5)
+	green.emission_enabled = true
+	green.emission = Color(0.1, 0.7, 0.3)
+	green.emission_energy_multiplier = 1.2
+	box(root, Vector3(-0.72, 2.38, 0.96), Vector3(0.22, 0.07, 0.02), green)
+	box(root, Vector3(-0.72, 2.38, 0.96), Vector3(0.07, 0.22, 0.02), green)
 	for gi in root.find_children("*", "GeometryInstance3D", true, false):
 		(gi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	return root

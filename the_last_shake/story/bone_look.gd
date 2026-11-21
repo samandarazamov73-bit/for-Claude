@@ -9,6 +9,7 @@ var arm_target: Variant = null       # Vector3 (мировые) или null — 
 var arm_target_left: Variant = null  # левая рука
 var arm_weight := 1.0                # 0..1: насколько рука тянется к цели (плавно взяться/отпустить)
 var lean := 0.0                      # рад: наклон корпуса вперёд от поясницы (бьёт сверху, тянется вниз)
+var sit := 0.0                       # 0..1: сидит на стуле — бёдра вперёд, голени вниз (актёра опускают на сиденье)
 var max_yaw := 1.2
 var max_pitch := 0.5
 var follow_rate := 4.0
@@ -22,6 +23,10 @@ var _larm := -1
 var _lfore := -1
 var _lhand := -1
 var _spine := -1
+var _lup := -1
+var _rup := -1
+var _lleg := -1
+var _rleg := -1
 var _yaw := 0.0
 var _pitch := 0.0
 var _last_us := 0
@@ -45,6 +50,10 @@ func find_bones(sk: Skeleton3D) -> void:
 			"LeftForeArm": _lfore = i
 			"LeftHand": _lhand = i
 			"Spine": _spine = i
+			"LeftUpLeg": _lup = i
+			"RightUpLeg": _rup = i
+			"LeftLeg": _lleg = i
+			"RightLeg": _rleg = i
 
 
 func _process_modification() -> void:
@@ -62,6 +71,8 @@ func _process_modification() -> void:
 		var pb: Basis = sk.get_bone_global_pose(par).basis if par >= 0 else Basis.IDENTITY
 		var bent: Basis = Basis(Vector3.RIGHT, lean) * sg.basis
 		sk.set_bone_pose_rotation(_spine, (pb.inverse() * bent).get_rotation_quaternion())
+	if sit > 0.001 and _lup >= 0 and _rup >= 0 and _lleg >= 0 and _rleg >= 0:
+		_sit(sk)
 	if arm_target != null and _arm >= 0 and _fore >= 0 and _hand >= 0:
 		_reach(sk, inv * (arm_target as Vector3), _arm, _fore, _hand, Vector3(-0.6, -1.0, -0.3))
 	if arm_target_left != null and _larm >= 0 and _lfore >= 0 and _lhand >= 0:
@@ -122,3 +133,24 @@ func _reach(sk: Skeleton3D, t_full: Vector3, arm: int, fore: int, hand: int, pol
 	var parent_b: Basis = sk.get_bone_global_pose(parent).basis if parent >= 0 else Basis.IDENTITY
 	sk.set_bone_pose_rotation(arm, (parent_b.inverse() * arm_new).get_rotation_quaternion())
 	sk.set_bone_pose_rotation(fore, (arm_new.inverse() * fore_new).get_rotation_quaternion())
+
+
+## Сидит: бедро поворачивается вперёд (к лицу, +Z скелета) на 90°, голень — обратно вниз.
+func _sit(sk: Skeleton3D) -> void:
+	var axis: Vector3 = sk.get_bone_global_pose(_lup).origin - sk.get_bone_global_pose(_rup).origin
+	axis = axis.normalized() if axis.length() > 0.0001 else Vector3.RIGHT
+	for pair in [[_lup, _lleg], [_rup, _rleg]]:
+		var up: int = pair[0]
+		var low: int = pair[1]
+		var g: Transform3D = sk.get_bone_global_pose(up)
+		g.basis = Basis(axis, -PI * 0.5 * sit) * g.basis
+		_set_global_rot(sk, up, g.basis)
+		var k: Transform3D = sk.get_bone_global_pose(low)
+		k.basis = Basis(axis, PI * 0.5 * sit) * k.basis
+		_set_global_rot(sk, low, k.basis)
+
+
+func _set_global_rot(sk: Skeleton3D, bone: int, b: Basis) -> void:
+	var par: int = sk.get_bone_parent(bone)
+	var pb: Basis = sk.get_bone_global_pose(par).basis if par >= 0 else Basis.IDENTITY
+	sk.set_bone_pose_rotation(bone, (pb.orthonormalized().inverse() * b.orthonormalized()).get_rotation_quaternion())

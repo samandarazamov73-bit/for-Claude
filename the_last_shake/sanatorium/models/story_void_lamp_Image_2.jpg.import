@@ -1,0 +1,44 @@
+[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://bb6vdplkc7yv1"
+path.s3tc="res://.godot/imported/story_void_lamp_Image_2.jpg-cfb6d3453f6c35e397ca1a93abadab77.s3tc.ctex"
+metadata={
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
+}
+generator_parameters={
+"md5": "b8c370651be7e6c5e288e0212514df42"
+}
+
+[deps]
+
+source_file="res://sanatorium/models/story_void_lamp_Image_2.jpg"
+dest_files=["res://.godot/imported/story_void_lamp_Image_2.jpg-cfb6d3453f6c35e397ca1a93abadab77.s3tc.ctex"]
+
+[params]
+
+compress/mode=2
+compress/high_quality=false
+compress/lossy_quality=0.7
+compress/uastc_level=0
+compress/rdo_quality_loss=0.0
+compress/hdr_compression=1
+compress/normal_map=1
+compress/channel_pack=0
+mipmaps/generate=true
+mipmaps/limit=-1
+roughness/mode=0
+roughness/src_normal=""
+process/channel_remap/red=0
+process/channel_remap/green=1
+process/channel_remap/blue=2
+process/channel_remap/alpha=3
+process/fix_alpha_border=true
+process/premult_alpha=false
+process/normal_map_invert_y=false
+process/hdr_as_srgb=false
+process/hdr_clamp_exposure=false
+process/size_limit=1024
+detect_3d/compress_to=0

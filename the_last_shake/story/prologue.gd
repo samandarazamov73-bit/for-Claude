@@ -1,7 +1,7 @@
 extends Node3D
 ## Пролог «The Last Shake» (акт 1, начало): старый ЛиАЗ едет по лесной дороге в густом сером тумане предгорий.
-## Коляска Самана стоит на задней площадке (в автобусе её не двигать), свет в салоне выключен; мышью смотришь
-## по сторонам, навести взгляд на маму (Барно) и нажать E — разговор. Остановка «Санаторий «Оромгох»» → темнота → остановка снаружи, автобус уезжает →
+## Коляска Азиза стоит на задней площадке (в автобусе её не двигать), свет в салоне выключен; мышью смотришь
+## по сторонам, навести взгляд на маму (Дилором) и нажать E — разговор. Остановка «Санаторий «Оромгох»» → темнота → остановка снаружи, автобус уезжает →
 ## по лесной тропинке за мамой в сумерках (F — фонарик) → вверх по пандусу (коляска едет по маршруту
 ## resources/world/entrance_route.json, W/S) → E — открыть входную дверь → заехать в тамбур → дверь закрывается
 ## за мамой → санаторий (main.tscn) продолжается с того же места в тамбуре.
@@ -28,7 +28,7 @@ const FAST := 6.0                   # Tab — перемотка поездки
 const PATH_HALF := 1.6             # по лесной тропинке можно отъехать от середины на 1,6 м
 const EYE := Vector3(0.0, 1.19, 0.20)
 const MOUSE_SENS := 0.0022
-const MOM_IN_BUS := Vector3(0.28, 0.8, 3.9)     # Барно стоит справа от Самана (руки опущены), смотрит в окно
+const MOM_IN_BUS := Vector3(0.28, 0.8, 3.9)     # Дилором стоит справа от Азиза (руки опущены), смотрит в окно
 const HERO_IN_BUS := Vector3(-0.6, 0.8, 3.85)   # задняя площадка, лицом вперёд по ходу, окно слева
 # вход в санаторий (координаты здания, как в sanatorium/assets/level.json)
 const DOOR_STOP_X := 26.75                      # пока дверь закрыта, центр коляски — не дальше
@@ -99,6 +99,9 @@ var _preload := false
 var _mom_aside := false
 var _mom_v := 0.0                 # скорость мамы по тропинке (плавная)
 var _mom_still := 0.0
+var pharmacy := false             # глава 5: ночью из санатория к аптечному киоску у остановки и назад
+var has_pills := false
+var kiosk_point := Vector3.ZERO   # окошко киоска (мир)
 
 
 func _ready() -> void:
@@ -135,6 +138,10 @@ func _ready() -> void:
 	terrain.update_lods(cam.global_position, true)
 	forest.lod_manager.update_now(cam)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	pharmacy = GameState.checkpoint == "pharmacy_out"
+	if pharmacy:
+		_start_pharmacy()
+		return
 	phase = "ride"
 	_ride_story()
 
@@ -496,7 +503,7 @@ func _build_hero() -> void:
 
 func _build_mom() -> void:
 	mom = Actor.new()
-	mom.name = "Barno"
+	mom.name = "Dilorom"
 	bus.body.add_child(mom)
 	mom.setup("res://characters/mom.glb")
 	mom.position = MOM_IN_BUS
@@ -511,16 +518,22 @@ func _build_stop() -> void:
 	root.name = "BusStop"
 	add_child(root)
 	root.global_transform = Transform3D(Basis(Vector3.UP, atan2(xf.basis.x.x, xf.basis.x.z) - PI * 0.5), xf.origin)
-	var conc := Props.mat(Color(0.55, 0.54, 0.5), 0.95)
-	var mosaic := Props.mat(Color(0.25, 0.45, 0.58), 0.6)
-	var red := Props.mat(Color(0.6, 0.18, 0.14), 0.7)
-	Props.box(root, Vector3(0, 0.05, 0), Vector3(2.6, 0.18, 6.0), conc)
-	Props.box(root, Vector3(1.05, 1.35, 0), Vector3(0.18, 2.6, 5.2), conc)
-	Props.box(root, Vector3(0.95, 1.6, 0), Vector3(0.02, 1.4, 4.4), mosaic)
-	for i in 6:
-		Props.box(root, Vector3(0.93, 1.1 + 0.18 * (i % 3), -1.8 + i * 0.72), Vector3(0.02, 0.12, 0.5), red if i % 2 == 0 else conc)
-	Props.box(root, Vector3(0.3, 2.72, 0), Vector3(1.9, 0.14, 5.6), conc)
-	Props.box(root, Vector3(0.55, 0.45, 0), Vector3(0.4, 0.08, 3.6), Props.mat(Color(0.32, 0.22, 0.14), 0.8))
+	var stop_model := "res://sanatorium/models/prologue_bus_stop.glb"
+	if ResourceLoader.exists(stop_model):
+		var m := Props.glb(stop_model, 1.0)              # своя модель: задняя стена с мозаикой — к +X
+		root.add_child(m)
+		m.position = Vector3(-0.5, 0.0, 0.0)
+	else:
+		var conc := Props.mat(Color(0.55, 0.54, 0.5), 0.95)
+		var mosaic := Props.mat(Color(0.25, 0.45, 0.58), 0.6)
+		var red := Props.mat(Color(0.6, 0.18, 0.14), 0.7)
+		Props.box(root, Vector3(0, 0.05, 0), Vector3(2.6, 0.18, 6.0), conc)
+		Props.box(root, Vector3(1.05, 1.35, 0), Vector3(0.18, 2.6, 5.2), conc)
+		Props.box(root, Vector3(0.95, 1.6, 0), Vector3(0.02, 1.4, 4.4), mosaic)
+		for i in 6:
+			Props.box(root, Vector3(0.93, 1.1 + 0.18 * (i % 3), -1.8 + i * 0.72), Vector3(0.02, 0.12, 0.5), red if i % 2 == 0 else conc)
+		Props.box(root, Vector3(0.3, 2.72, 0), Vector3(1.9, 0.14, 5.6), conc)
+		Props.box(root, Vector3(0.55, 0.45, 0), Vector3(0.4, 0.08, 3.6), Props.mat(Color(0.32, 0.22, 0.14), 0.8))
 	var pole := Props.cyl(root, Vector3(-1.0, 1.25, 3.2), 0.04, 2.5, Props.mat(Color(0.5, 0.5, 0.5), 0.5, 0.6))
 	pole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var sign := Label3D.new()
@@ -545,6 +558,35 @@ func _build_stop() -> void:
 	arrow.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(arrow)
 	arrow.global_position = p0 + Vector3(1.4, 1.5, 0)
+	_build_kiosk(root.global_position)
+
+
+## Аптечный киоск у начала тропинки, витриной к тропинке, на той стороне, что дальше от остановки
+## (своя модель story_kiosk.glb — если есть, иначе собранный из коробок). Горит окошко — видно из леса.
+func _build_kiosk(stop_pos: Vector3) -> void:
+	var a: Vector3 = path[0]
+	var d0: Vector3 = (path[mini(4, path.size() - 1)] - a)
+	d0.y = 0.0
+	d0 = d0.normalized()
+	var right := Vector3(-d0.z, 0.0, d0.x)
+	if (a + right * 3.0).distance_to(stop_pos) < (a - right * 3.0).distance_to(stop_pos):
+		right = -right
+	var c: Vector3 = a + right * 2.9 + d0 * 0.6
+	c.y = terrain.height_at(c.x, c.z)
+	var kiosk_path := "res://sanatorium/models/story_kiosk.glb"
+	var k: Node3D = Props.glb(kiosk_path, 1.0) if ResourceLoader.exists(kiosk_path) else Props.kiosk()
+	add_child(k)
+	k.global_position = c
+	var face: Vector3 = -right                     # витрина — к тропинке
+	k.rotation.y = atan2(face.x, face.z)
+	kiosk_point = c + face * 1.0 + Vector3(0, 1.0, 0)
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(1.0, 0.85, 0.6)
+	lamp.light_energy = 2.2
+	lamp.omni_range = 7.0
+	lamp.shadow_enabled = true
+	add_child(lamp)
+	lamp.global_position = c + face * 1.4 + Vector3(0, 2.3, 0)
 
 
 func _build_building() -> void:
@@ -568,6 +610,8 @@ func _build_building() -> void:
 	var Game: Script = load("res://sanatorium/scripts/game.gd")
 	Game.fix_coplanar(building)                      # крыша и торцы кроватей без мерцания
 	Game.swap_models(building)                       # свои 3D-модели мебели (вестибюль виден через дверь)
+	var Decor: Script = load("res://sanatorium/scripts/decor.gd")
+	Decor.apply(building, Callable(Game, "model_type"), Callable(Game, "has_model"))   # свои картины и таблички
 	for mi in building.find_children("*", "MeshInstance3D", true, false):
 		var mesh: Mesh = (mi as MeshInstance3D).mesh
 		if mesh == null:
@@ -714,7 +758,7 @@ func _talk() -> void:
 	await say("mom", "Знает.")
 	await say("hero", "Ты ему звонила? Он же не любит, когда без предупреждения.")
 	await wait(1.2)
-	await say("mom", "Он нас ждёт, Саман.")
+	await say("mom", "Он нас ждёт, Азиз.")
 	await say("hero", "Почему его увезли так далеко? Тут же на сто километров никого.")
 	await say("mom", "Врачи так решили. Там тихо.")
 	await wait(1.5)
@@ -729,7 +773,7 @@ func _arrival() -> void:
 	await say("driver", "«Оромгох»… Вам точно сюда? Там же давно никого нет.")
 	await say("mom", "Нам сюда.")
 	if not talked:
-		await say("mom", "Саман, выходим.")
+		await say("mom", "Азиз, выходим.")
 	bus.door_open["middle"] = 0.0
 	audio.play_sfx("hiss", 0.8)
 	var tw := create_tween()
@@ -827,6 +871,9 @@ func _walk_events() -> void:
 
 
 func _walk_event() -> void:
+	if pharmacy:
+		await _pharmacy_event()
+		return
 	if walk_s > 25.0 and not _events.has("crow"):
 		_events["crow"] = true
 		audio.play_sfx("crow", 0.7)
@@ -932,14 +979,23 @@ func _update_walk(dt: float) -> void:
 	audio.set_forest(0.0, day)
 	_drone.volume_db = lerpf(-40.0, -15.0, smoothstep(0.45, 0.9, day))
 	_update_mom_walk(dt)
-	if guided and not door_open and not _door_busy and _mom_aside and walk_s > door_stop_s - 0.6:
+	var at_kiosk: bool = pharmacy and not has_pills and Vector2(hero.global_position.x - kiosk_point.x,
+		hero.global_position.z - kiosk_point.z).length() < 2.6
+	if at_kiosk:
+		ui.set_prompt("[E] Купить цитрамон")
+		if Input.is_action_just_pressed("interact"):
+			_buy_pills()
+	elif guided and not door_open and not _door_busy and _mom_aside and walk_s > door_stop_s - 0.6 and (not pharmacy or has_pills):
 		ui.set_prompt("[E] Открыть дверь")
 		if Input.is_action_just_pressed("interact"):
 			_open_entrance()
 	elif not _door_busy:
 		ui.set_prompt("")
 	if guided and door_open and walk_s >= path_cum[-1] - 0.15:
-		_enter_building()
+		if pharmacy:
+			_enter_real_hospital()
+		else:
+			_enter_building()
 		return
 	if not talking and not _event_busy:
 		_walk_events()
@@ -1056,7 +1112,7 @@ func _open_entrance() -> void:
 	ui.set_objective("Заезжай внутрь")
 
 
-## В тамбуре: мама заходит следом, Саман оглядывается — дверь закрывается — дальше санаторий с этого места.
+## В тамбуре: мама заходит следом, Азиз оглядывается — дверь закрывается — дальше санаторий с этого места.
 func _enter_building() -> void:
 	phase = "end"
 	drive_model.stop()
@@ -1085,6 +1141,92 @@ func _enter_building() -> void:
 	GameState.entry = {"pos": inv * hero.global_position, "yaw": wrapf(hero.rotation.y - float(site["building"]["yaw"]), -PI, PI),
 		"mom": inv * mom.global_position}
 	GameState.go(GameState.SANATORIUM, "start", _preload)
+
+
+# ================================================================================ глава 5: аптека
+## Ночь. Азиз выехал из санатория: вниз по пандусу и по тропинке к остановке, у остановки — аптечный киоск.
+## По дороге раз-два странный звук, но никто не нападает. С цитрамоном — назад, в дверь: внутри уже другое.
+func _start_pharmacy() -> void:
+	phase = "walk"
+	bus.visible = false
+	hero.reparent(self, false)
+	mom.visible = false
+	_mom_aside = true
+	_mom_hold = true
+	for k in ["crow", "snap", "dark", "building", "door", "ramp"]:
+		_events[k] = true
+	var s0: float = door_stop_s - 0.4
+	walk_s = s0
+	var a: Vector3 = _path_at(s0)
+	var b: Vector3 = _path_at(s0 - 1.0)
+	hero.global_position = a
+	hero.rotation = Vector3(0.0, atan2(-(b.x - a.x), -(b.z - a.z)), 0.0)
+	look_yaw = 0.0
+	look_pitch = -0.08
+	drive_model.stop()
+	guided = true
+	set_day(1.0)
+	torch.visible = true
+	audio.set_forest(0.0, 1.0)
+	_update_globals()
+	await GameState.fade_to(0.0, 1.5)
+	ui.set_objective("Сходи в аптеку у остановки")
+	ui.hint("W / S — ехать   ·   A / D — поворот   ·   Q / R — скорость   ·   F — фонарик", 7.0)
+
+
+func _pharmacy_event() -> void:
+	if not has_pills and walk_s < 80.0 and not _events.has("p_snap"):
+		_events["p_snap"] = true
+		audio.play_sfx("snap", 0.9)
+		await wait(1.0)
+		await say("thought", "Просто ветка… Просто ветка.")
+	elif not has_pills and walk_s < 38.0 and not _events.has("p_whisper"):
+		_events["p_whisper"] = true
+		var w := AudioStreamPlayer3D.new()
+		w.stream = load("res://sanatorium/assets/sfx/whisper_far.wav")
+		w.volume_db = 6.0
+		w.unit_size = 6.0
+		add_child(w)
+		w.global_position = hero.global_position + Vector3(randf_range(-4.0, 4.0), 7.0, randf_range(-4.0, 4.0))
+		w.finished.connect(w.queue_free)
+		w.play()
+		await wait(1.4)
+		await say("thought", "Кто здесь?..")
+	elif has_pills and walk_s > 45.0 and not _events.has("p_crow"):
+		_events["p_crow"] = true
+		audio.play_sfx("crow", 0.6)
+
+
+func _buy_pills() -> void:
+	if has_pills:
+		return
+	has_pills = true
+	ui.set_prompt("")
+	audio.play_sfx("click", 0.6)
+	await wait(0.6)
+	audio.play_sfx("click", 0.4)
+	ui.hint("Цитрамон — у тебя", 3.0)
+	ui.set_objective("Отнеси таблетку маме — палата 204")
+	if not _preload:
+		_preload = true
+		ResourceLoader.load_threaded_request(GameState.SANATORIUM)
+
+
+## С таблеткой — в тамбур: дверь закрывается за спиной, дальше санаторий (настоящая больница) с этого места.
+func _enter_real_hospital() -> void:
+	phase = "end"
+	drive_model.stop()
+	ui.set_objective("")
+	ui.set_prompt("")
+	chair_model.set_input(0.0, 0.0, 0.05)
+	audio.set_motor(0.0)
+	if entrance:
+		await entrance.close(1.0)
+	audio.set_forest(0.0, 0.0)
+	await wait(0.4)
+	var inv: Transform3D = site_xf.affine_inverse()
+	GameState.entry = {"pos": inv * hero.global_position, "yaw": wrapf(hero.rotation.y - float(site["building"]["yaw"]), -PI, PI)}
+	GameState.go(GameState.SANATORIUM, "real", _preload)
 
 
 func _unhandled_input(event: InputEvent) -> void:

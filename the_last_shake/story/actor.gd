@@ -1,5 +1,5 @@
 extends Node3D
-## Персонаж сюжета (дед Анвар, мама Барно, мужчина в белом) из GLB со скелетом и анимациями
+## Персонаж сюжета (дед Анвар, мама Дилором, мужчина в белом) из GLB со скелетом и анимациями
 ## (characters/*.glb: idle_loop, talk_loop, walk_loop, run_loop, ... — склеены tools/godot_assets/merge_chars.py).
 ## Узел смотрит в −Z (как все в Godot); модель внутри развёрнута (Mixamo смотрит в +Z).
 ## Ходит по точкам (с высотой — можно по лестнице), поворачивается по ходу, поворачивает голову к цели.
@@ -165,6 +165,14 @@ func set_arm(target: Variant) -> void:
 		if target != null:
 			look.arm_target_left = null
 			look.arm_weight = 1.0
+
+
+## Сесть (на стул высотой seat_h, м) или встать. Актёр опускается так, чтобы таз оказался на сиденье.
+func set_sit(on: bool, seat_h := 0.46) -> void:
+	if look:
+		look.sit = 1.0 if on else 0.0
+	if model:
+		model.position.y = -(0.93 - seat_h) * model.scale.y if on else 0.0
 
 
 func set_lean(a: float) -> void:
