@@ -668,7 +668,7 @@ func _seg_void() -> void:
 	if shoot:
 		var ts2 := Engine.time_scale
 		Engine.time_scale = 0.0001
-		await snap("11_mom_at_lift")
+		await snap("11_mom_at_lift", d.mom.global_position + Vector3(0, 1.5, 0))
 		Engine.time_scale = ts2
 	await wait_for(func(): return pl.global_position.x > 35.6 or d.faceless_state != "run", 20, "drive to the lift 2")
 	pl.input_override = null
@@ -678,7 +678,7 @@ func _seg_void() -> void:
 	step("at the lift: state=%s nearest faceless %.1f m" % [d.faceless_state, near])
 	await tp(Vector3(37.5, 4.5, -5.0), PI)
 	await wait_for(func(): return d.faceless_state == "door", 20, "in the cabin")
-	await secs(0.5)
+	await wait_for(func(): return d._nearest_faceless(d.VOID_LIFT) < 1.6 or d.lift.state == "moving", 20, "crowd at the doors")
 	await snap("12_faceless_at_doors", Vector3(37.5, 5.6, -8.0))
 	await wait_for(func(): return d.act == "f3_call", 90, "lift with mom to 3, she leaves")
 	step("mom vanishes on 3")

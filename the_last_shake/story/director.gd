@@ -1161,6 +1161,10 @@ var faceless_state := "off"       # off, run, door, caught
 var _mom_ride := false            # мама едет в кабине: её высота — по полу кабины
 var _hold_lift := false           # сюжет держит двери лифта открытыми
 var _bang_t2 := 0.0
+var _chase_lamps: Array = []
+var _strobe_t := 0.0
+## Блоки пустого этажа (лестницы, палата деда): толпа их обходит, а не проходит насквозь. [x0, z0, x1, z1]
+const VOID_BLOCKS := [[3.0, -15.8, 9.0, -9.6], [6.0, -6.6, 12.0, -0.3], [30.0, -6.6, 39.0, -0.3], [66.0, -15.8, 72.0, -9.6]]
 
 
 func _build_faceless() -> void:
@@ -1179,6 +1183,24 @@ func _build_faceless() -> void:
 		a.set_meta("spd", randf_range(2.45, 2.85))
 		a.set_meta("slot", Vector3(randf_range(-1.8, 1.8), 0.0, randf_range(-1.3, 1.3)))
 		_faceless.append(a)
+	# свет погони: две холодные лампы над тёмной частью зала мигают — видно толпу; одна у лифта
+	for lp in [Vector3(2.2, 6.9, -3.6), Vector3(2.6, 6.9, -9.0), Vector3(37.5, 6.7, -8.4)]:
+		var l := OmniLight3D.new()
+		l.light_color = Color(0.72, 0.82, 1.0)
+		l.omni_range = 7.5 if lp.x < 10.0 else 4.5
+		l.omni_attenuation = 1.2
+		l.light_energy = 0.0
+		l.visible = false
+		l.set_meta("base", 1.3 if lp.x < 10.0 else 0.7)
+		game.add_child(l)
+		l.global_position = lp
+		_chase_lamps.append(l)
+
+
+func _chase_lights(on: bool) -> void:
+	for l in _chase_lamps:
+		(l as OmniLight3D).visible = on
+		(l as OmniLight3D).light_energy = 0.0
 
 
 ## Топот и хрипы толпы (свой звук crowd_run.wav — если есть, иначе несколько слоёв бега).
@@ -1230,12 +1252,20 @@ func _faceless_chase() -> void:
 	mom.visible = true
 	var p: Vector3 = ppos()
 	for a in _faceless:
-		a.global_position = Vector3(clampf(p.x - randf_range(7.5, 12.5), 0.8, 70.0), 4.5, clampf(p.z - randf_range(0.5, 7.0), -15.4, -7.0))
+		var sp := Vector3(clampf(p.x - randf_range(7.5, 12.5), 0.8, 70.0), 4.5, clampf(p.z - randf_range(0.5, 2.0), -9.2, -7.0))
+		for k in 40:                                  # тёмная часть зала за спиной: не ближе 7 м и не в блоке
+			var c := Vector3(randf_range(0.8, 5.6), 4.5, randf_range(-1.0, -9.2))
+			if c.distance_to(Vector3(p.x, 4.5, p.z)) >= 7.0 and not _in_block(c, 0.4):
+				sp = c
+				break
+		a.global_position = sp
 		a.face(p, true)
 		a.visible = true
 		a.play("run_loop", 0.0, 0.75)
 	_crowd_sound(true)
-	game.play_at("flicker", ppos() + Vector3(0, 2.6, 0), -2.0, 0.8, 20.0)
+	_chase_lights(true)
+	_strobe_t = 0.0
+	game.play_at("flicker", Vector3(2.4, 6.9, -6.0), 2.0, 0.8, 30.0)
 	snd("stinger", null, -2.0, 0.85)
 	if player.speed_level < 3:
 		player.speed_level = 3
@@ -1259,7 +1289,10 @@ func _faceless_chase() -> void:
 	if faceless_state != "run":
 		return
 	faceless_state = "door"
+	objective("")
 	player.view_offset = Transform3D.IDENTITY
+	# кнопку Азиз жмёт, когда толпа уже близко: двери закрываются прямо перед ними
+	await until(func(): return _nearest_faceless(VOID_LIFT) < 4.0, 2.5)
 	await _cab_center_and_go(2)
 	await until(func(): return lift.state == "moving")
 	_mom_ride = true
@@ -1269,6 +1302,7 @@ func _faceless_chase() -> void:
 		a.visible = false
 		a.stop()
 	_crowd_sound(false)
+	_chase_lights(false)
 	_drone.volume_db = -18.0
 	await say("hero", "Мам, что это было?!")
 	mom.face(ppos())
@@ -1316,6 +1350,7 @@ func _faceless_caught() -> void:
 	ui.set_damage(0.6)
 	await GameState.fade_to(1.0, 1.6)
 	_crowd_sound(false)
+	_chase_lights(false)
 	for a in _faceless:
 		a.visible = false
 		a.stop()
@@ -1356,6 +1391,7 @@ func _update_faceless(dt: float) -> void:
 				np.z = minf(np.z, -6.85)             # в кабину и в шахту — нельзя
 			np.x = clampf(np.x, 0.7, 74.3)
 			np.z = clampf(np.z, -15.5, -0.6)
+			np = _out_of_blocks(np, 0.35)
 			a.global_position = np
 			a.face(np + to)
 			a.play("run_loop", 0.2, spd / 3.6)
@@ -1366,6 +1402,12 @@ func _update_faceless(dt: float) -> void:
 		var egg: MeshInstance3D = _eggs[i]
 		egg.global_position = a.head_pos() + Vector3(0, 0.02, 0)
 		egg.rotation.y = a.rotation.y
+	_strobe_t -= dt
+	if _strobe_t <= 0.0:                              # лампы погони: то горят, то гаснут
+		_strobe_t = randf_range(0.05, 0.35)
+		for l in _chase_lamps:
+			var on: bool = randf() < (0.8 if l.global_position.x > 10.0 else 0.6)
+			(l as OmniLight3D).light_energy = (l.get_meta("base") as float) * (randf_range(0.7, 1.0) if on else 0.0)
 	if at_door:
 		_bang_t2 -= dt
 		if _bang_t2 <= 0.0 and lift.state != "moving":
@@ -1381,6 +1423,44 @@ func _update_faceless(dt: float) -> void:
 		randf_range(-1, 1) * 0.008) * k), Vector3.ZERO)
 	if faceless_state == "run" and nearest < 1.05 and not lift.player_in_cabin():
 		_faceless_caught()
+
+
+func _in_block(p: Vector3, m: float) -> bool:
+	for b in VOID_BLOCKS:
+		if p.x > b[0] - m and p.x < b[2] + m and p.z > b[1] - m and p.z < b[3] + m:
+			return true
+	return false
+
+
+## Точка внутри блока — вытолкнуть к ближайшему краю (толпа скользит вдоль стены).
+func _out_of_blocks(p: Vector3, m: float) -> Vector3:
+	for b in VOID_BLOCKS:
+		var x0: float = b[0] - m
+		var z0: float = b[1] - m
+		var x1: float = b[2] + m
+		var z1: float = b[3] + m
+		if p.x > x0 and p.x < x1 and p.z > z0 and p.z < z1:
+			var dx0: float = p.x - x0
+			var dx1: float = x1 - p.x
+			var dz0: float = p.z - z0
+			var dz1: float = z1 - p.z
+			var mn: float = minf(minf(dx0, dx1), minf(dz0, dz1))
+			if mn == dx0:
+				p.x = x0
+			elif mn == dx1:
+				p.x = x1
+			elif mn == dz0:
+				p.z = z0
+			else:
+				p.z = z1
+	return p
+
+
+func _nearest_faceless(to: Vector3) -> float:
+	var n := 99.0
+	for a in _faceless:
+		n = minf(n, Vector2(a.global_position.x - to.x, a.global_position.z - to.z).length())
+	return n
 
 
 ## 3-й этаж: «Стой здесь…» — мама выходит, сворачивает за угол и исчезает. В кабине — «[E] Позвать маму»:
