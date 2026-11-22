@@ -93,7 +93,8 @@ func apply() -> void:
 	if game.player and game.player.cam:
 		var ca: CameraAttributesPractical = game.player.cam.attributes
 		if ca == null:
-			ca = CameraAttributesPractical.new()
+			# те же настройки камеры, что у мира: с адаптацией глаза (автоэкспозиция, game.gd)
+			ca = game.cam_attr if game.get("cam_attr") else CameraAttributesPractical.new()
 			ca.dof_blur_far_distance = 15.0
 			ca.dof_blur_far_transition = 12.0
 			ca.dof_blur_amount = 0.05

@@ -557,7 +557,8 @@ func _playthrough() -> void:
 		get_tree().change_scene_to_file(GameStateRef().PROLOGUE)
 		await wait_for_scene(func(sc): return sc.get("pharmacy") == true and sc.phase == "walk", 240)
 		await _seg_forest()
-		await _seg_real()
+		if _arg("until", "") != "forest":
+			await _seg_real()
 		Engine.time_scale = 1.0
 		return
 	GameStateRef().checkpoint = from
@@ -783,9 +784,18 @@ func _seg_forest() -> void:
 	await secs(2.0)
 	print("STEP pills bought: ", pr.has_pills)
 	await snap("41_kiosk_bought")
+	if shoot:                                              # рассвет по пути назад: середина и почти у здания
+		var from: float = pr.walk_s
+		for k in [0.35, 0.65, 0.9]:
+			tp_route(pr, lerpf(from, pr.door_stop_s - 0.4, k))
+			await secs(2.0)
+			await shot("41_dawn_%d" % int(k * 100))
 	tp_route(pr, pr.door_stop_s - 0.4)
 	await secs(1.0)
 	await snap("42_back_at_door")
+	print("STEP dawn at the door: %.2f" % float(pr.get("dawn")))
+	if _arg("until", "") == "forest":
+		return
 	pr._open_entrance()
 	await secs(3.0)
 	tp_route(pr, pr.path_cum[-1] - 0.05)
@@ -810,6 +820,8 @@ func _seg_real() -> void:
 	await tp(Vector3(8.83, 4.5, -4.0), PI)
 	await secs(1.5)
 	await snap("53_room204", Vector3(10.7, 5.3, -0.74))
+	if _arg("until", "") == "room204":                    # только свет больницы — без конца истории
+		return
 	if shoot:
 		await wait_for(func(): return not is_instance_valid(d) or (d.ui.line_visible() and str(d.ui._sub_text.text).contains("сын")), 90, "real son line")
 		await snap("54_real_son", Vector3(10.25, 5.3, -0.74))
@@ -1080,7 +1092,11 @@ func _tour_test(dir: Node, void_floor: bool) -> void:
 	dir.scares.stop()
 	await secs(2.0)
 	var spots: Array = VOID_TOUR if void_floor else TOUR
+	var only := _arg("spots", "")
+	var settle := float(_arg("settle", "1.5"))           # секунд на привыкание глаза (автоэкспозиция)
 	for i in spots.size():
+		if only != "" and not (str(i) in only.split(",")):
+			continue
 		var sp: Array = spots[i]
 		if sp[3] == "notes":
 			await tp(Vector3(9.0, 4.5, -3.0), 0.0)
@@ -1093,7 +1109,7 @@ func _tour_test(dir: Node, void_floor: bool) -> void:
 		await tp(sp[0], sp[1])
 		pl.look_yaw = 0.0
 		pl.look_pitch = sp[2]
-		await secs(1.5)
+		await secs(settle)
 		await shot("%s_%02d" % ["voidtour" if void_floor else "tour", i])
 
 

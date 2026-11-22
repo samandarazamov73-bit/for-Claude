@@ -102,6 +102,8 @@ var _mom_still := 0.0
 var pharmacy := false             # глава 5: ночью из санатория к аптечному киоску у остановки и назад
 var has_pills := false
 var kiosk_point := Vector3.ZERO   # окошко киоска (мир)
+var dawn := 0.0                   # глава 5, путь назад от аптеки: 0 — ночь, 1 — солнце взошло
+var _dawn_from := -1.0            # где на тропинке купил таблетку (м) — от этого места начинается рассвет
 
 
 func _ready() -> void:
@@ -340,6 +342,61 @@ func set_day(t: float) -> void:
 	env.volumetric_fog_ambient_inject = lerpf(0.12, 0.8, dusk)
 	env.volumetric_fog_emission = Color(0.36, 0.4, 0.48)               # дымка светится, как в лунном тумане
 	env.volumetric_fog_emission_energy = 0.55 * dusk
+
+
+# Рассвет по пути назад от аптеки. [t, высота источника °, цвет, сила, верх неба, горизонт, туман, конец тумана м,
+# рассеянный, насыщенность]. Как в жизни: сначала ночь, потом синий час (солнце на 4–8° под горизонтом, небо
+# густо-синее), потом гражданские сумерки (горизонт розово-оранжевый, прямого света нет), восход (солнце
+# ~2000 K, красно-оранжевое, длинные тени) и «золотой час» (~3000 K). Освещённость: от ~3 лк до ~400 лк.
+const DAWN_KEYS := [
+	[0.0, 32.0, Color(0.66, 0.74, 0.92), 0.32, Color(0.24, 0.28, 0.42), Color(0.46, 0.47, 0.56), Color(0.34, 0.36, 0.45), 95.0, 0.62, 0.66],
+	[0.3, 32.0, Color(0.6, 0.7, 0.95), 0.12, Color(0.2, 0.28, 0.5), Color(0.52, 0.53, 0.66), Color(0.4, 0.43, 0.56), 115.0, 0.72, 0.7],
+	[0.58, -2.0, Color(1.0, 0.5, 0.3), 0.0, Color(0.3, 0.42, 0.66), Color(0.9, 0.64, 0.56), Color(0.62, 0.56, 0.58), 150.0, 0.86, 0.76],
+	[0.8, 2.0, Color(1.0, 0.56, 0.32), 0.55, Color(0.36, 0.5, 0.74), Color(1.0, 0.72, 0.5), Color(0.8, 0.66, 0.56), 190.0, 1.0, 0.8],
+	[1.0, 7.0, Color(1.0, 0.72, 0.48), 1.15, Color(0.4, 0.56, 0.8), Color(1.0, 0.82, 0.64), Color(0.84, 0.75, 0.66), 240.0, 1.1, 0.84],
+]
+
+
+## Рассвет: d 0…1. Луна гаснет в синем часе, солнце встаёт с той стороны, откуда утром светит в окна палат
+## (game.gd set_morning), — когда свет почти пропал, источник меняет направление (без скачка теней).
+func set_dawn(d: float) -> void:
+	dawn = clampf(d, 0.0, 1.0)
+	var i: int = 1
+	while i < DAWN_KEYS.size() - 1 and dawn > float(DAWN_KEYS[i][0]):
+		i += 1
+	var a: Array = DAWN_KEYS[i - 1]
+	var b: Array = DAWN_KEYS[i]
+	var k: float = clampf((dawn - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.0001), 0.0, 1.0)
+	var elev: float = lerpf(float(a[1]), float(b[1]), k)
+	var is_sun: bool = dawn >= 0.5
+	if is_sun:
+		var sd: Vector3 = site_xf.basis * Vector3(-0.5, 0.0, -1.0)      # куда светит утреннее солнце (по земле)
+		sd.y = 0.0
+		sd = sd.normalized()
+		var dir: Vector3 = (sd * cos(deg_to_rad(maxf(elev, 0.5))) + Vector3.DOWN * sin(deg_to_rad(maxf(elev, 0.5)))).normalized()
+		sun.global_transform = Transform3D(Basis.looking_at(dir, Vector3.UP), sun.global_transform.origin)
+	else:
+		sun.rotation_degrees = Vector3(-elev, 150.0, 0.0)
+	sun.light_color = (a[2] as Color).lerp(b[2], k)
+	sun.light_energy = lerpf(float(a[3]), float(b[3]), k) * clampf(absf(dawn - 0.5) / 0.06, 0.0, 1.0)
+	sun.visible = sun.light_energy > 0.01
+	var top: Color = (a[4] as Color).lerp(b[4], k)
+	var hor: Color = (a[5] as Color).lerp(b[5], k)
+	sky_mat.sky_top_color = top
+	sky_mat.sky_horizon_color = hor
+	sky_mat.ground_horizon_color = hor.darkened(0.2)
+	sky_mat.ground_bottom_color = hor.darkened(0.6)
+	sky_mat.sun_angle_max = 35.0 if is_sun else 3.0
+	env.fog_light_color = (a[6] as Color).lerp(b[6], k)
+	env.fog_depth_end = lerpf(float(a[7]), float(b[7]), k)
+	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
+	env.adjustment_saturation = lerpf(float(a[9]), float(b[9]), k)
+	sky_mat.energy_multiplier = lerpf(1.9, 1.25, dawn)
+	env.fog_light_energy = lerpf(2.15, 1.25, dawn)
+	env.volumetric_fog_ambient_inject = lerpf(0.8, 0.35, dawn)
+	env.volumetric_fog_emission_energy = 0.55 * (1.0 - smoothstep(0.2, 0.7, dawn))
+	env.volumetric_fog_albedo = Color(0.3, 0.32, 0.38).lerp(Color(0.92, 0.88, 0.84), smoothstep(0.4, 1.0, dawn))
+	env.fog_sun_scatter = 0.25 * smoothstep(0.7, 1.0, dawn)            # дымка светится вокруг низкого солнца
 
 
 func _apply_graphics(st: Dictionary) -> void:
@@ -976,7 +1033,15 @@ func _update_walk(dt: float) -> void:
 	# темнеет по мере продвижения по лесу (и просто со временем)
 	set_day(maxf(day, lerpf(0.45, 0.88, minf(walk_s / maxf(forest_end_s, 1.0), 1.0))))
 	set_day(day + dt * 0.0006)
-	audio.set_forest(0.0, day)
+	if pharmacy and has_pills:
+		# назад от аптеки — светает: по пройденному пути (к двери — солнце над лесом) и понемногу со временем
+		if _dawn_from < 0.0:
+			_dawn_from = walk_s
+		var along: float = clampf((walk_s - _dawn_from) / maxf(door_stop_s - _dawn_from - 6.0, 10.0), 0.0, 1.0)
+		set_dawn(maxf(dawn + dt / 240.0, along))
+		audio.set_forest(0.0, 1.0 - dawn, smoothstep(0.25, 0.8, dawn))
+	else:
+		audio.set_forest(0.0, day)
 	_drone.volume_db = lerpf(-40.0, -15.0, smoothstep(0.45, 0.9, day))
 	_update_mom_walk(dt)
 	var at_kiosk: bool = pharmacy and not has_pills and Vector2(hero.global_position.x - kiosk_point.x,

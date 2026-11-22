@@ -2271,10 +2271,7 @@ func _setup_real_hospital() -> void:
 		if game.ambience.drone:
 			game.ambience.drone.volume_db = -36.0
 	_drone.volume_db = -80.0
-	for c in game.get_children():
-		if c is WorldEnvironment and (c as WorldEnvironment).environment:
-			var env: Environment = (c as WorldEnvironment).environment
-			env.ambient_light_energy *= 1.6
+	game.set_morning()                                   # утро: солнце в окнах, голубое небо, дневной баланс белого
 	var bed := AudioStreamPlayer.new()
 	bed.stream = stream("hospital_alive", true)
 	bed.volume_db = -14.0

@@ -22,6 +22,19 @@ const SHADOWS := 8
 var max_shadows := SHADOWS   # set by quality.gd
 const SHADOW_DIST := 15.0
 const DIM := 0.5              # the whole building darker than the fixtures' nominal output (horror)
+## Затухание ближе к физическому (1/d² — это omni_attenuation = 2). Плафон и трубка — светящаяся площадь, а не
+## точка: вблизи они не выжигают потолок, поэтому 1,3 — компромисс, как обычно делают для таких ламп в играх.
+## Под лампой — пятно света, между лампами темнее. Чтобы пол под лампой остался таким же, лампы ярче.
+const ATTEN := 1.3
+const ATTEN_COMP := 1.3
+## Цвет ламп по цветовой температуре (накаливания ~2700 K, люминесцентная «холодная белая» ~4100 K
+## с зеленоватым оттенком) — с поправкой на баланс белого, как у глаза ночью в помещении (~3400 K):
+## лампа накаливания тёплая, но не рыжая; трубка — холодная, чуть зелёная.
+const NIGHT_COLORS := {"plafond": Color(1.0, 0.86, 0.68), "bulb": Color(1.0, 0.84, 0.64),
+	"pendant": Color(1.0, 0.86, 0.68), "lamp": Color(1.0, 0.8, 0.58), "fluo": Color(0.84, 0.95, 0.92)}
+## Днём глаз настроен на дневной свет (~5000 K): те же лампы выглядят заметно теплее.
+const DAY_COLORS := {"plafond": Color(1.0, 0.78, 0.54), "bulb": Color(1.0, 0.76, 0.5),
+	"pendant": Color(1.0, 0.78, 0.54), "lamp": Color(1.0, 0.72, 0.46), "fluo": Color(0.93, 1.0, 0.94)}
 const LIGHT_PER_M2 := 0.2     # light_energy per square metre of an average room (per storey)
 const SHADOW_FADE := 2.5      # shadow opacity per second when a lamp starts or stops casting shadows
 var _fade := {}               # light -> target shadow opacity while it fades in or out
@@ -155,8 +168,6 @@ func setup(g) -> void:
 func _make_light(f: Dictionary) -> OmniLight3D:
 	var kind: String = f["kind"]
 	var l := OmniLight3D.new()
-	var col: Array = f["color"]
-	l.light_color = Color(col[0], col[1], col[2])
 	var e: float = f["energy"]
 	match kind:
 		"pendant":
@@ -171,13 +182,16 @@ func _make_light(f: Dictionary) -> OmniLight3D:
 		_:
 			l.light_energy = e / 44.0
 			l.omni_range = 7.0
-	# лампы накаливания — тёплые (~2700 K), старые люминесцентные трубки — холодно-белые с лёгкой зеленью
-	if kind == "fluo":
-		l.light_color = Color(col[0], col[1], col[2]).lerp(Color(0.9, 1.0, 0.94), 0.25)
-	elif kind == "plafond":
-		l.light_color = Color(col[0], col[1], col[2]).lerp(Color(1.0, 0.8, 0.58), 0.25)
-	l.light_energy *= DIM
-	l.omni_attenuation = 1.0
+	# цвет — по типу лампы; у каждой чуть свой оттенок (старые лампы, разные абажуры)
+	var h: int = absi(hash(str(f["name"])))
+	var tint: float = (float(h % 100) / 100.0 - 0.5) * 0.06
+	var base: Color = NIGHT_COLORS.get(kind, NIGHT_COLORS["plafond"])
+	l.light_color = Color(base.r, clampf(base.g + tint, 0.0, 1.0), clampf(base.b + tint * 1.4, 0.0, 1.0))
+	l.set_meta("kind", kind)
+	l.set_meta("tint", tint)
+	l.light_energy *= DIM * ATTEN_COMP
+	l.omni_range *= 1.15
+	l.omni_attenuation = ATTEN
 	l.light_specular = 0.5
 	l.light_volumetric_fog_energy = 0.5
 	l.shadow_enabled = false
@@ -189,6 +203,10 @@ func _make_light(f: Dictionary) -> OmniLight3D:
 	l.distance_fade_shadow = 14.0
 	add_child(l)
 	l.global_position = game._v3(f["pos"])
+	# потолочный плафон светит вниз и в стороны, а не в потолок: точка света — чуть ниже стекла, иначе
+	# при затухании 1/d² потолок вокруг лампы выгорает в белый круг
+	if kind in ["plafond", "fluo"]:
+		l.global_position.y -= 0.15
 	l.set_meta("base_energy", l.light_energy)
 	confine(l, _storey_for(f["room"], l.global_position.y))
 	# table lamps, floor lamps and sconces never get a shadow: inside their shade it only cut sharp
@@ -213,7 +231,7 @@ func _balance_rooms() -> void:
 			continue
 		var total := 0.0
 		for l in lights_in:
-			total += l.light_energy
+			total += l.light_energy / ATTEN_COMP
 		var k: float = clampf(sqrt(LIGHT_PER_M2 * DIM * area * storeys / total), 0.6, 1.0)
 		for l in lights_in:
 			l.light_energy *= k
@@ -274,9 +292,9 @@ func _stair_fill() -> void:
 			for xz in STAIR_FILL[room]:
 				var l := OmniLight3D.new()
 				l.light_color = Color(1.0, 0.9, 0.78)
-				l.light_energy = 0.22
-				l.omni_range = 3.2
-				l.omni_attenuation = 0.9
+				l.light_energy = 0.22 * ATTEN_COMP
+				l.omni_range = 3.6
+				l.omni_attenuation = ATTEN
 				l.light_specular = 0.0
 				l.light_volumetric_fog_energy = 0.0
 				l.shadow_enabled = false
@@ -453,7 +471,7 @@ func _update_buzz(pp: Vector3) -> void:
 
 
 ## Настоящая больница (акт 6): всё горит ровно и ярче, ничего не мигает — светло и не страшно.
-func hospital_day(k := 1.7) -> void:
+func hospital_day(k := 1.0) -> void:
 	for f in flickers:
 		var l: OmniLight3D = f["light"]
 		if is_instance_valid(l):
@@ -477,5 +495,8 @@ func hospital_day(k := 1.7) -> void:
 			if is_instance_valid(l) and not l.has_meta("day_k"):
 				l.set_meta("day_k", true)
 				l.light_energy *= k
+				var dc: Color = DAY_COLORS.get(str(l.get_meta("kind", "plafond")), DAY_COLORS["plafond"])
+				var tn: float = float(l.get_meta("tint", 0.0))
+				l.light_color = Color(dc.r, clampf(dc.g + tn, 0.0, 1.0), clampf(dc.b + tn * 1.4, 0.0, 1.0))
 				if l.has_meta("base_energy"):
 					l.set_meta("base_energy", float(l.get_meta("base_energy")) * k)

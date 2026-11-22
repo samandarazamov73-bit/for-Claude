@@ -8,6 +8,7 @@ extends Node
 ##   ramp    — выезд пандуса                  wind   — ветер в лесу (петля)
 ##   crickets — сверчки в сумерках (петля)     step   — шаг мамы по тропинке
 ##   click   — щелчок фонаря                  snap   — хруст ветки        crow — карканье
+##   birds   — утренние птицы на рассвете (петля)
 
 const RATE: int = 22050
 const AUDIO_DIR: String = "res://intro/assets/audio/"
@@ -19,6 +20,7 @@ var _road: AudioStreamPlayer
 var _motor: AudioStreamPlayer
 var _wind: AudioStreamPlayer
 var _crickets: AudioStreamPlayer
+var _birds: AudioStreamPlayer
 var engine_gain: float = 1.0          # 1 — в салоне; меньше — автобус уезжает
 var _pool: Array = []
 var _sfx: Dictionary = {}
@@ -33,6 +35,7 @@ func _ready() -> void:
 	_motor = _make_player(_custom("motor", _motor_loop()))
 	_wind = _make_player(_custom("wind", _wind_loop()))
 	_crickets = _make_player(_custom("crickets", _crickets_loop()))
+	_birds = _make_player(_custom("birds", _birds_loop()))
 	for i in 5:
 		var p: AudioStreamPlayer = AudioStreamPlayer.new()
 		add_child(p)
@@ -54,6 +57,7 @@ func _ready() -> void:
 	_set_vol(_motor, 0.0)
 	_set_vol(_wind, 0.0)
 	_set_vol(_crickets, 0.0)
+	_set_vol(_birds, 0.0)
 
 
 func _make_player(stream: AudioStream) -> AudioStreamPlayer:
@@ -89,9 +93,10 @@ func update(speed: float, accel: float, moving: bool) -> void:
 
 
 ## Лес: inside — 1 в салоне (ветер глуше), night — 0 день, 1 ночь (больше сверчков, ветер сильнее).
-func set_forest(inside: float, night: float) -> void:
+func set_forest(inside: float, night: float, birds := 0.0) -> void:
 	_set_vol(_wind, lerpf(0.05, 0.012, inside) * (1.0 + night * 0.8))
 	_set_vol(_crickets, (1.0 - inside) * clampf(night * 1.4 - 0.3, 0.0, 1.0) * 0.05)
+	_set_vol(_birds, (1.0 - inside) * clampf(birds, 0.0, 1.0) * 0.05)
 
 
 func set_motor(level: float) -> void:
@@ -293,6 +298,39 @@ func _crickets_loop() -> AudioStreamWAV:
 						var tt: float = float(i) / float(RATE)
 						s[b0 + i] += sin(TAU * f0 * tt) * sin(PI * tt / 0.025) * 0.18
 			t0 += 0.9 + float(c) * 0.13
+	return _wav(s, true)
+
+
+## Утренние птицы: несколько певчих птиц вдали и ближе — трели из быстрых нот с глиссандо (2–5 кГц),
+## щебет «тси-тси», паузы. 12 с петля, птицы поют вразнобой.
+func _birds_loop() -> AudioStreamWAV:
+	var dur := 12.0
+	var s: PackedFloat32Array = _buf(dur)
+	var r := RandomNumberGenerator.new()
+	r.seed = 77
+	for bird in 4:
+		var base: float = r.randf_range(2300.0, 3600.0)
+		var amp: float = [0.16, 0.1, 0.07, 0.05][bird]
+		var t0: float = r.randf_range(0.0, 2.5)
+		while t0 < dur - 1.6:
+			var kind: int = r.randi() % 3
+			var notes: int = r.randi_range(4, 9)
+			for n in notes:
+				var nd: float = r.randf_range(0.04, 0.11) if kind != 2 else 0.03
+				var f0: float = base * r.randf_range(0.85, 1.35)
+				var sweep: float = r.randf_range(-900.0, 1400.0) if kind == 0 else r.randf_range(-300.0, 300.0)
+				var b0: int = int(t0 * float(RATE))
+				var ph := 0.0
+				for i in int(nd * float(RATE)):
+					if b0 + i >= s.size():
+						break
+					var tt: float = float(i) / float(RATE)
+					var f: float = f0 + sweep * tt / nd + sin(TAU * 38.0 * tt) * 120.0
+					ph += TAU * f / float(RATE)
+					var env_k: float = pow(sin(PI * tt / nd), 2.0)
+					s[b0 + i] += sin(ph) * env_k * amp
+				t0 += nd + (r.randf_range(0.02, 0.07) if kind != 2 else 0.09)
+			t0 += r.randf_range(0.9, 3.2)
 	return _wav(s, true)
 
 

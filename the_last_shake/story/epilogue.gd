@@ -15,6 +15,7 @@ var malika                     # story/actor.gd — дочь умершего (�
 var shukhrat                   # story/actor.gd — сын умершего
 var _scarf: MeshInstance3D
 var flat: AudioStreamPlayer    # монитор: одна сплошная линия
+var mon_light: OmniLight3D
 var beep_t := 0.0
 var beep_rate := 0.45          # с между ударами
 var screen_line: MeshInstance3D
@@ -51,10 +52,17 @@ func _build_room() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.05, 0.06, 0.09)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	# ночная палата: главный свет — люминесцентная трубка, остальное — отражённый от стен свет (SSIL);
+	# ровной «заливки» почти нет, углы и пол под кроватью тёмные
 	env.ambient_light_color = Color(0.55, 0.62, 0.68)
-	env.ambient_light_energy = 0.32
+	env.ambient_light_energy = 0.08
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	env.tonemap_agx_white = 8.0
+	env.tonemap_agx_contrast = 1.3
 	env.ssao_enabled = true
+	env.ssil_enabled = true
+	env.ssil_radius = 4.0
+	env.ssil_intensity = 1.4
 	env.glow_enabled = true
 	env.glow_intensity = 0.8
 	env.adjustment_enabled = true
@@ -88,9 +96,10 @@ func _build_room() -> void:
 	# одна лампа дневного света под потолком — холодная, ночная
 	var fill := OmniLight3D.new()
 	fill.position = Vector3(0.2, 2.8, 0.6)
-	fill.omni_range = 6.5
-	fill.light_energy = 0.9
-	fill.light_color = Color(0.86, 0.95, 0.92)
+	fill.omni_range = 7.5
+	fill.omni_attenuation = 1.3                         # как лампы в санатории (lights.gd)
+	fill.light_energy = 1.5
+	fill.light_color = Color(0.84, 0.95, 0.92)          # «холодная белая» трубка ~4100 K, чуть зелёная
 	fill.shadow_enabled = true
 	add_child(fill)
 	Props.box(self, Vector3(0.2, 2.98, 0.6), Vector3(1.2, 0.05, 0.2), _mat(Color(0.95, 0.98, 0.95), 0.4))
@@ -124,6 +133,14 @@ func _build_room() -> void:
 	line.emission = Color(0.3, 1.0, 0.4)
 	line.emission_energy_multiplier = 3.0
 	line.albedo_color = Color(0.3, 1.0, 0.4)
+	# зелёный отсвет экрана кардиомонитора на стене и тумбе (гаснет, когда монитор выключают)
+	mon_light = OmniLight3D.new()
+	mon_light.light_color = Color(0.35, 1.0, 0.5)
+	mon_light.light_energy = 0.12
+	mon_light.omni_range = 1.4
+	mon_light.omni_attenuation = 2.0
+	mon.add_child(mon_light)
+	mon_light.position = Vector3(0, 0.07, 0.35)
 	if ResourceLoader.exists("res://sanatorium/models/epi_monitor.glb"):
 		var m := Props.glb("res://sanatorium/models/epi_monitor.glb", 1.0)
 		mon.add_child(m)
@@ -305,6 +322,10 @@ func _run() -> void:
 	await _say(malika, "malika", "Не надо. Говорите.")
 	await wait(0.8)
 	flat.stop()                                       # монитор выключают
+	if mon_light:
+		mon_light.visible = false
+	if screen_line:
+		screen_line.visible = false
 	snd("button", -12.0, 0.8)
 	await wait(1.2)
 	await _say(doctor, "doctor", "Ваш отец умер сегодня ночью, в двадцать три четырнадцать. Сердце остановилось во сне.")

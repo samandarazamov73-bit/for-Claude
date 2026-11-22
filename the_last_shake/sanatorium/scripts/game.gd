@@ -38,6 +38,8 @@ var ambience: Node3D
 var quality: Node
 var env: Environment
 var moon: DirectionalLight3D
+var sky_mat: ProceduralSkyMaterial
+var cam_attr: CameraAttributesPractical
 var door_groups := []
 var rng := RandomNumberGenerator.new()
 var stats := {}
@@ -248,34 +250,40 @@ func _setup_environment() -> void:
 	env = Environment.new()
 	var sky := Sky.new()
 	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.02, 0.03, 0.06)
-	sm.sky_horizon_color = Color(0.07, 0.08, 0.11)
-	sm.ground_bottom_color = Color(0.01, 0.01, 0.012)
-	sm.ground_horizon_color = Color(0.05, 0.05, 0.06)
+	sky_mat = sm
+	# ночное небо за окнами: лунный свет примерно в тысячу раз слабее света ламп — окна изнутри почти чёрные
+	sm.sky_top_color = Color(0.006, 0.01, 0.022)
+	sm.sky_horizon_color = Color(0.018, 0.022, 0.036)
+	sm.ground_bottom_color = Color(0.004, 0.004, 0.005)
+	sm.ground_horizon_color = Color(0.014, 0.015, 0.02)
 	sm.sun_angle_max = 1.0
 	sky.sky_material = sm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	# реалистично: ночь, свет только от ламп; почти нейтральный слабый рассеянный свет, без зелени
-	env.ambient_light_color = Color(0.34, 0.35, 0.38)
-	env.ambient_light_energy = 0.06
+	# слабый ровный рассеянный свет — только чтобы тени не были мёртво-чёрными; остальное даёт отражённый
+	# свет SSIL (стены подсвечивают друг друга от ламп), как в настоящем помещении
+	env.ambient_light_color = Color(0.36, 0.37, 0.4)
+	env.ambient_light_energy = 0.04
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
+	env.tonemap_agx_white = 8.0                 # фотореализм: белая точка ниже стандартной 16,3 — светлее полутона
+	env.tonemap_agx_contrast = 1.3
 	env.ssao_enabled = true
 	env.ssao_radius = 0.9
 	env.ssao_intensity = 1.6
 	env.ssao_power = 1.6
 	env.ssao_detail = 0.6
 	env.ssil_enabled = true
-	env.ssil_radius = 4.0
-	env.ssil_intensity = 1.0
+	env.ssil_radius = 5.0
+	env.ssil_intensity = 1.5
 	env.glow_enabled = true
 	env.glow_intensity = 0.35
 	env.glow_bloom = 0.02
 	env.glow_hdr_threshold = 1.4
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.012
+	env.volumetric_fog_density = 0.007          # лёгкая пыльная дымка у ламп, без молочной пелены
 	env.volumetric_fog_albedo = Color(0.8, 0.8, 0.78)
 	env.volumetric_fog_anisotropy = 0.25
 	env.volumetric_fog_emission = Color(0, 0, 0)
@@ -295,15 +303,56 @@ func _setup_environment() -> void:
 	env.adjustment_color_correction = lut
 	var we := WorldEnvironment.new()
 	we.environment = env
+	# адаптация глаза: из тёмного коридора в светлую комнату картинка сначала ярче, потом привыкает;
+	# в темноте глаз «открывается», но немного (страшно должно оставаться темно)
+	cam_attr = CameraAttributesPractical.new()
+	cam_attr.auto_exposure_enabled = true
+	cam_attr.auto_exposure_scale = 0.27
+	cam_attr.auto_exposure_speed = 0.6
+	cam_attr.auto_exposure_min_sensitivity = 60.0
+	cam_attr.auto_exposure_max_sensitivity = 120.0
+	we.camera_attributes = cam_attr
 	add_child(we)
 	moon = DirectionalLight3D.new()
-	moon.light_color = Color(0.55, 0.62, 0.8)
-	moon.light_energy = 0.35
+	moon.light_color = Color(0.5, 0.58, 0.8)
+	moon.light_energy = 0.07
 	moon.shadow_enabled = true
 	moon.directional_shadow_max_distance = 40.0
 	moon.light_volumetric_fog_energy = 0.4
 	moon.rotation_degrees = Vector3(-32, -150, 0)
 	add_child(moon)
+
+
+## Утро (глава 6, настоящая больница): низкое солнце (~3500 K, «золотой час») светит в окна и рисует на полу
+## их пятна, небо голубое; рассеянный свет — холодный, от неба; глаз настроен на дневной свет — лампы
+## накаливания рядом с окнами выглядят тёплыми (lights.hospital_day). Дымка в лучах из окон — объёмный туман.
+func set_morning() -> void:
+	if sky_mat:
+		sky_mat.sky_top_color = Color(0.34, 0.5, 0.76)
+		sky_mat.sky_horizon_color = Color(0.78, 0.8, 0.82)
+		sky_mat.ground_horizon_color = Color(0.5, 0.48, 0.44)
+		sky_mat.ground_bottom_color = Color(0.2, 0.19, 0.17)
+		sky_mat.energy_multiplier = 1.6
+	env.ambient_light_color = Color(0.62, 0.7, 0.82)
+	env.ambient_light_energy = 0.07
+	env.volumetric_fog_density = 0.0025
+	env.volumetric_fog_albedo = Color(0.92, 0.9, 0.86)
+	# стекло пропускает солнце: окна не отбрасывают тень, на полу — светлые пятна окон
+	for n in building.find_children("*Glass*", "GeometryInstance3D", true, false) + \
+			building.find_children("InteriorGlazing*", "GeometryInstance3D", true, false):
+		(n as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	moon.light_color = Color(1.0, 0.87, 0.72)
+	moon.light_energy = 3.2
+	moon.light_volumetric_fog_energy = 0.8
+	moon.shadow_enabled = true
+	# утреннее солнце (~20° над горизонтом) со стороны палат 2-го этажа и чуть сбоку: лучи косо через окна,
+	# пятна окон ложатся на пол посреди палаты
+	var dir := Vector3(-0.5, -0.42, -1.0).normalized()
+	moon.global_transform = Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3.ZERO)
+	if cam_attr:
+		cam_attr.auto_exposure_scale = 0.32
+		cam_attr.auto_exposure_min_sensitivity = 40.0
+		cam_attr.auto_exposure_max_sensitivity = 110.0
 
 
 # Grime that follows causes instead of being sprinkled evenly (textures made by tools/grime_gen.py). The wall
@@ -887,7 +936,8 @@ func _tune_materials() -> void:
 			elif nm in GRIME_FLOOR:
 				_grime(m, g_floor, Vector3(1.0 / 10.0, 1.0, 1.0 / 10.0), Vector3.ZERO)
 			elif nm.begins_with("M_Emissive_"):
-				m.emission_energy_multiplier *= 0.45
+				# матовое стекло плафона намного ярче потолка вокруг — лампа видна как светящийся диск
+				m.emission_energy_multiplier *= 0.8
 			elif nm == "M_Glass_Clear":
 				m.roughness = maxf(m.roughness, 0.22)
 				if m.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
