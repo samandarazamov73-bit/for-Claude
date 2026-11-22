@@ -352,8 +352,8 @@ const DAWN_KEYS := [
 	[0.0, 32.0, Color(0.66, 0.74, 0.92), 0.32, Color(0.24, 0.28, 0.42), Color(0.46, 0.47, 0.56), Color(0.34, 0.36, 0.45), 95.0, 0.62, 0.66],
 	[0.3, 32.0, Color(0.6, 0.7, 0.95), 0.12, Color(0.2, 0.28, 0.5), Color(0.52, 0.53, 0.66), Color(0.4, 0.43, 0.56), 115.0, 0.72, 0.7],
 	[0.58, -2.0, Color(1.0, 0.5, 0.3), 0.0, Color(0.3, 0.42, 0.66), Color(0.9, 0.64, 0.56), Color(0.62, 0.56, 0.58), 150.0, 0.86, 0.76],
-	[0.8, 2.0, Color(1.0, 0.56, 0.32), 0.55, Color(0.36, 0.5, 0.74), Color(1.0, 0.72, 0.5), Color(0.8, 0.66, 0.56), 190.0, 1.0, 0.8],
-	[1.0, 7.0, Color(1.0, 0.72, 0.48), 1.15, Color(0.4, 0.56, 0.8), Color(1.0, 0.82, 0.64), Color(0.84, 0.75, 0.66), 240.0, 1.1, 0.84],
+	[0.8, 2.0, Color(1.0, 0.56, 0.32), 1.0, Color(0.36, 0.5, 0.74), Color(1.0, 0.7, 0.48), Color(0.92, 0.7, 0.56), 190.0, 0.92, 0.84],
+	[1.0, 7.0, Color(1.0, 0.72, 0.48), 2.2, Color(0.4, 0.56, 0.8), Color(1.0, 0.8, 0.6), Color(0.96, 0.8, 0.64), 240.0, 0.85, 0.9],
 ]
 
 
@@ -387,16 +387,18 @@ func set_dawn(d: float) -> void:
 	sky_mat.ground_horizon_color = hor.darkened(0.2)
 	sky_mat.ground_bottom_color = hor.darkened(0.6)
 	sky_mat.sun_angle_max = 35.0 if is_sun else 3.0
+	# восходящее солнце видно на небе (диск и свечение вокруг), ночью луна на небе не рисуется
+	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY if is_sun else DirectionalLight3D.SKY_MODE_LIGHT_ONLY
 	env.fog_light_color = (a[6] as Color).lerp(b[6], k)
 	env.fog_depth_end = lerpf(float(a[7]), float(b[7]), k)
 	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
 	env.adjustment_saturation = lerpf(float(a[9]), float(b[9]), k)
-	sky_mat.energy_multiplier = lerpf(1.9, 1.25, dawn)
-	env.fog_light_energy = lerpf(2.15, 1.25, dawn)
+	sky_mat.energy_multiplier = lerpf(1.9, 1.2, dawn)
+	env.fog_light_energy = lerpf(2.15, 1.0, dawn)
 	env.volumetric_fog_ambient_inject = lerpf(0.8, 0.35, dawn)
 	env.volumetric_fog_emission_energy = 0.55 * (1.0 - smoothstep(0.2, 0.7, dawn))
 	env.volumetric_fog_albedo = Color(0.3, 0.32, 0.38).lerp(Color(0.92, 0.88, 0.84), smoothstep(0.4, 1.0, dawn))
-	env.fog_sun_scatter = 0.25 * smoothstep(0.7, 1.0, dawn)            # дымка светится вокруг низкого солнца
+	env.fog_sun_scatter = 0.55 * smoothstep(0.6, 1.0, dawn)            # дымка светится в стороне низкого солнца
 
 
 func _apply_graphics(st: Dictionary) -> void:
@@ -1037,7 +1039,8 @@ func _update_walk(dt: float) -> void:
 		# назад от аптеки — светает: по пройденному пути (к двери — солнце над лесом) и понемногу со временем
 		if _dawn_from < 0.0:
 			_dawn_from = walk_s
-		var along: float = clampf((walk_s - _dawn_from) / maxf(door_stop_s - _dawn_from - 6.0, 10.0), 0.0, 1.0)
+		# солнце встаёт ещё в лесу (60 % пути), к зданию — «золотой час» (75 %)
+		var along: float = clampf((walk_s - _dawn_from) / maxf((door_stop_s - _dawn_from) * 0.75, 10.0), 0.0, 1.0)
 		set_dawn(maxf(dawn + dt / 240.0, along))
 		audio.set_forest(0.0, 1.0 - dawn, smoothstep(0.25, 0.8, dawn))
 	else:
