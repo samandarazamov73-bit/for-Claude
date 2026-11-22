@@ -337,9 +337,10 @@ func set_morning() -> void:
 	env.ambient_light_energy = 0.07
 	env.volumetric_fog_density = 0.0025
 	env.volumetric_fog_albedo = Color(0.92, 0.9, 0.86)
-	# стекло пропускает солнце: окна не отбрасывают тень, на полу — светлые пятна окон
+	# стекло и тюль пропускают солнце (тюль — большую часть света): на полу — светлые пятна окон
 	for n in building.find_children("*Glass*", "GeometryInstance3D", true, false) + \
-			building.find_children("InteriorGlazing*", "GeometryInstance3D", true, false):
+			building.find_children("InteriorGlazing*", "GeometryInstance3D", true, false) + \
+			building.find_children("Curtains*", "GeometryInstance3D", true, false):
 		(n as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	moon.light_color = Color(1.0, 0.87, 0.72)
 	moon.light_energy = 3.2

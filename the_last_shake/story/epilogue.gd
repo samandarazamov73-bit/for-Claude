@@ -55,7 +55,7 @@ func _build_room() -> void:
 	# ночная палата: главный свет — люминесцентная трубка, остальное — отражённый от стен свет (SSIL);
 	# ровной «заливки» почти нет, углы и пол под кроватью тёмные
 	env.ambient_light_color = Color(0.55, 0.62, 0.68)
-	env.ambient_light_energy = 0.08
+	env.ambient_light_energy = 0.14
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_agx_white = 8.0
 	env.tonemap_agx_contrast = 1.3
@@ -95,14 +95,14 @@ func _build_room() -> void:
 		Props.box(self, Vector3(2.53, 1.7, z), Vector3(0.05, 1.6, 0.06), white)
 	# одна лампа дневного света под потолком — холодная, ночная
 	var fill := OmniLight3D.new()
-	fill.position = Vector3(0.2, 2.8, 0.6)
+	fill.position = Vector3(0.4, 2.8, 1.35)   # над изножьем кровати — лица доктора и родных видны
 	fill.omni_range = 7.5
 	fill.omni_attenuation = 1.3                         # как лампы в санатории (lights.gd)
 	fill.light_energy = 1.5
 	fill.light_color = Color(0.84, 0.95, 0.92)          # «холодная белая» трубка ~4100 K, чуть зелёная
 	fill.shadow_enabled = true
 	add_child(fill)
-	Props.box(self, Vector3(0.2, 2.98, 0.6), Vector3(1.2, 0.05, 0.2), _mat(Color(0.95, 0.98, 0.95), 0.4))
+	Props.box(self, Vector3(0.4, 2.98, 1.35), Vector3(1.2, 0.05, 0.2), _mat(Color(0.95, 0.98, 0.95), 0.4))
 	# кровать: на ней тело под простынёй (своя модель epi_bed — если есть)
 	if not _model("epi_bed", Vector3(-0.6, 0.0, 0.3), 0.0):
 		Props.box(self, Vector3(-0.6, 0.55, 0.3), Vector3(1.0, 0.18, 2.1), white)
@@ -110,7 +110,7 @@ func _build_room() -> void:
 		for z in [-0.75, 1.35]:
 			Props.box(self, Vector3(-0.6, 0.75, z), Vector3(1.05, 0.9, 0.05), metal)
 	_model("epi_cabinet", Vector3(-2.2, 0.0, 2.2), PI * 0.5)
-	_model("epi_lamp", Vector3(0.2, 3.0, 0.6), 0.0)
+	_model("epi_lamp", Vector3(0.4, 3.0, 1.35), 0.0)
 	# тело под простынёй — округлые формы, чтобы читался силуэт: голова, грудь, ноги, стопы приподнимают ткань
 	var sheet := _mat(Color(0.84, 0.85, 0.86), 0.95)
 	_blob(_capsule(0.2, 0.8), Vector3(-0.6, 0.8, -0.02), Vector3(PI * 0.5, 0, 0), Vector3(1.2, 1.0, 0.62), sheet)   # грудь, живот
