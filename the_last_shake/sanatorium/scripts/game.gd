@@ -343,7 +343,10 @@ void sky() {
 """
 ## Подобрано по кадрам tests/shots.gd --case=lightlab рядом с фотографией: amb — рассеянный свет, win —
 ## множитель света окон, sun — солнце, sky — яркость вида за окном, agx_c — контраст тональной кривой.
-const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5}
+## exp — экспозиция (больше — светлее), aim — насколько свет окна направлен вниз (свет неба падает на пол,
+## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
+const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
+	"aim": 0.45, "cone": 80.0, "sat": 1.0}
 var _win_base: Array = []
 var _pano_mat: ShaderMaterial
 var _glass_mats: Array = []
@@ -388,8 +391,7 @@ func set_morning() -> void:
 	var dir := Vector3(-0.5, -0.42, -1.0).normalized()
 	moon.global_transform = Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3.ZERO)
 	if cam_attr:
-		cam_attr.auto_exposure_scale = 0.3
-		cam_attr.auto_exposure_min_sensitivity = 40.0
+		cam_attr.auto_exposure_min_sensitivity = 20.0     # глаз привыкает к яркому дню: окна не выгорают
 		cam_attr.auto_exposure_max_sensitivity = 110.0
 	_daylight_windows(-dir)
 	_win_base = []
@@ -404,9 +406,16 @@ func apply_day_look(v: Dictionary) -> void:
 	env.ambient_light_energy = float(v["amb"])
 	env.tonemap_agx_contrast = float(v["agx_c"])
 	env.ssil_intensity = float(v["ssil"])
+	env.adjustment_saturation = float(v["sat"])
 	moon.light_energy = float(v["sun"])
+	if cam_attr:
+		cam_attr.auto_exposure_scale = float(v["exp"])
 	for i in mini(_window_lights.size(), _win_base.size()):
-		_window_lights[i].light_energy = float(_win_base[i]) * float(v["win"])
+		var l: SpotLight3D = _window_lights[i]
+		l.light_energy = float(_win_base[i]) * float(v["win"])
+		l.spot_angle = float(v["cone"])
+		var inward: Vector3 = l.get_meta("in")
+		l.global_transform.basis = Basis.looking_at((inward + Vector3(0, -float(v["aim"]), 0)).normalized(), Vector3.UP)
 	if _pano_mat:
 		_pano_mat.set_shader_parameter("energy", float(v["sky"]))
 
@@ -542,6 +551,7 @@ func _daylight_windows(to_sun: Vector3) -> void:
 		add_child(l)
 		var p: Vector3 = (w["pos"] as Vector3) + inward * 0.12 + Vector3(0, 0.95, 0)
 		l.global_transform = Transform3D(Basis.looking_at((inward + Vector3(0, -0.45, 0)).normalized(), Vector3.UP), p)
+		l.set_meta("in", inward)
 		lights.confine(l, lights.storey_of(p.y))
 		daylight_rooms[w["room"]] = true
 		_window_lights.append(l)

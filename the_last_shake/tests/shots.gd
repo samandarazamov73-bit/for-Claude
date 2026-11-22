@@ -1034,12 +1034,12 @@ func _beatpose_test(g: Node, d: Node) -> void:
 ## Свет утренней палаты 204: один запуск — несколько вариантов настроек (рассеянный свет, свет окон, солнце,
 ## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
 const LAB_VARIANTS := [
-	{"name": "A", "amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5},
-	{"name": "B", "amb": 0.08, "win": 2.6, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5},
-	{"name": "C", "amb": 0.22, "win": 1.6, "sun": 0.9, "sky": 1.6, "agx_c": 1.5, "ssil": 1.5},
-	{"name": "D", "amb": 0.1, "win": 2.6, "sun": 2.2, "sky": 2.2, "agx_c": 1.35, "ssil": 1.5},
-	{"name": "E", "amb": 0.1, "win": 2.6, "sun": 0.9, "sky": 1.1, "agx_c": 1.35, "ssil": 2.4},
-	{"name": "F", "amb": 0.12, "win": 2.3, "sun": 1.4, "sky": 2.6, "agx_c": 1.4, "ssil": 1.9},
+	{"name": "G", "amb": 0.1, "win": 2.2, "sun": 0.9, "sky": 8.0, "exp": 0.3, "aim": 0.8, "cone": 70.0},
+	{"name": "H", "amb": 0.1, "win": 2.2, "sun": 0.9, "sky": 14.0, "exp": 0.3, "aim": 0.8, "cone": 70.0},
+	{"name": "I", "amb": 0.12, "win": 1.6, "sun": 0.9, "sky": 8.0, "exp": 0.2, "aim": 0.8, "cone": 70.0},
+	{"name": "J", "amb": 0.12, "win": 1.6, "sun": 0.9, "sky": 14.0, "exp": 0.2, "aim": 0.8, "cone": 70.0, "agx_c": 1.25},
+	{"name": "K", "amb": 0.14, "win": 1.4, "sun": 0.9, "sky": 10.0, "exp": 0.16, "aim": 1.0, "cone": 65.0, "sat": 0.92},
+	{"name": "L", "amb": 0.1, "win": 2.0, "sun": 1.6, "sky": 10.0, "exp": 0.2, "aim": 0.8, "cone": 70.0, "sat": 0.92},
 ]
 
 
@@ -1060,7 +1060,9 @@ func _lightlab() -> void:
 	for v in LAB_VARIANTS:
 		if only != "" and not only.contains(v["name"]):
 			continue
-		g.apply_day_look(v)
+		var look: Dictionary = g.DAY_LOOK.duplicate()
+		look.merge(v, true)
+		g.apply_day_look(look)
 		await secs(3.0)
 		await snap("lab_" + v["name"], Vector3(10.7, 5.3, -0.74))
 		print("LAB ", v)
