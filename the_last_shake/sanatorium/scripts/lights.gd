@@ -164,6 +164,14 @@ func setup(g) -> void:
 ## Small rooms (bathrooms, WCs) had one ceiling light as strong as a ward's: 2 to 2.5 times more light per
 ## square metre than an average room, and with a 7 m reach it shone through the walls too. Rooms brighter
 ## than average are toned down, and in small rooms the light's reach is kept to about the room.
+## Днём в комнатах с окнами лампы выключены — свет идёт из окон (game.gd _daylight_windows). В коридорах,
+## на лестницах и в помещениях без окон лампы горят.
+func day_rooms(with_windows: Dictionary) -> void:
+	for room in with_windows:
+		if groups.has(room):
+			set_room(room, false, false)
+
+
 ## Источник света лампы из плана здания (энергия, радиус, цвет — по типу лампы).
 func _make_light(f: Dictionary) -> OmniLight3D:
 	var kind: String = f["kind"]

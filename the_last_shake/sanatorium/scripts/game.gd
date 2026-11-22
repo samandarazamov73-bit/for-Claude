@@ -353,7 +353,121 @@ func set_morning() -> void:
 	if cam_attr:
 		cam_attr.auto_exposure_scale = 0.32
 		cam_attr.auto_exposure_min_sensitivity = 40.0
-		cam_attr.auto_exposure_max_sensitivity = 110.0
+		cam_attr.auto_exposure_max_sensitivity = 140.0
+	_daylight_windows(-dir)
+
+
+## Дневной свет из окон. Окна находим по подоконникам (WindowSills_*): каждый подоконник — своя группа
+## треугольников; по ней — центр, ширина и в какую комнату смотрит окно. В каждое окно изнутри — мягкий
+## прожектор: свет неба падает в комнату и на пол, а стену вокруг окна не освещает (она темнее, как в жизни).
+## Окна на солнечной стороне — теплее и ярче. В комнатах с окнами лампы днём выключены (lights.day_rooms).
+var daylight_rooms := {}            # комнаты, где есть окна (днём свет — от них)
+var _window_lights: Array = []
+
+
+func find_windows() -> Array:
+	var out: Array = []
+	for mi in building.find_children("WindowSills*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = mi
+		if m.mesh == null:
+			continue
+		var xf: Transform3D = m.global_transform
+		var f: PackedVector3Array = m.mesh.get_faces()
+		var tris: Array = []                      # [центр, 3 вершины]
+		for i in range(0, f.size(), 3):
+			var a: Vector3 = xf * f[i]
+			var b: Vector3 = xf * f[i + 1]
+			var c: Vector3 = xf * f[i + 2]
+			tris.append([(a + b + c) / 3.0, a, b, c])
+		# группы: соседние треугольники ближе 0,6 м по горизонтали (подоконники разных окон — дальше)
+		var parent: Array = []
+		for i in tris.size():
+			parent.append(i)
+		var grid := {}
+		for i in tris.size():
+			var p: Vector3 = tris[i][0]
+			var key := Vector3i(floori(p.x / 0.6), floori(p.y / 0.6), floori(p.z / 0.6))
+			for dx in [-1, 0, 1]:
+				for dy in [-1, 0, 1]:
+					for dz in [-1, 0, 1]:
+						var k2: Vector3i = key + Vector3i(dx, dy, dz)
+						if grid.has(k2):
+							for j in grid[k2]:
+								var q: Vector3 = tris[j][0]
+								if Vector2(p.x - q.x, p.z - q.z).length() < 0.6 and absf(p.y - q.y) < 0.3:
+									var ra: int = _win_root(parent, i)
+									var rb: int = _win_root(parent, j)
+									if ra != rb:
+										parent[ra] = rb
+			if not grid.has(key):
+				grid[key] = []
+			grid[key].append(i)
+		var groups := {}
+		for i in tris.size():
+			var r: int = _win_root(parent, i)
+			if not groups.has(r):
+				groups[r] = AABB(tris[i][1], Vector3.ZERO)
+			var bb: AABB = groups[r]
+			for v in [tris[i][1], tris[i][2], tris[i][3]]:
+				bb = bb.expand(v)
+			groups[r] = bb
+		for r in groups:
+			var bb: AABB = groups[r]
+			var along_x: bool = bb.size.x >= bb.size.z
+			var width: float = bb.size.x if along_x else bb.size.z
+			if width < 0.5 or width > 4.5:
+				continue
+			var c: Vector3 = bb.get_center()
+			c.y = bb.end.y
+			var n: Vector3 = Vector3(0, 0, 1) if along_x else Vector3(1, 0, 0)
+			var inside_a: Dictionary = room_at(c + n * 0.8 + Vector3(0, 0.5, 0))
+			var inside_b: Dictionary = room_at(c - n * 0.8 + Vector3(0, 0.5, 0))
+			if inside_a.is_empty() == inside_b.is_empty():
+				continue                          # окно между комнатами или вне здания
+			var inward: Vector3 = n if not inside_a.is_empty() else -n
+			var room: Dictionary = inside_a if not inside_a.is_empty() else inside_b
+			out.append({"pos": c, "in": inward, "width": width, "room": str(room["id"])})
+	return out
+
+
+static func _win_root(parent: Array, i: int) -> int:
+	while parent[i] != i:
+		parent[i] = parent[parent[i]]
+		i = parent[i]
+	return i
+
+
+func _daylight_windows(to_sun: Vector3) -> void:
+	for l in _window_lights:
+		if is_instance_valid(l):
+			l.queue_free()
+	_window_lights.clear()
+	var wins: Array = find_windows()
+	var flat_sun := Vector3(to_sun.x, 0.0, to_sun.z).normalized()
+	for w in wins:
+		var inward: Vector3 = w["in"]
+		var sunny: float = clampf(-inward.dot(flat_sun), 0.0, 1.0)      # окно смотрит на солнце
+		var l := SpotLight3D.new()
+		l.light_color = Color(0.8, 0.87, 1.0).lerp(Color(1.0, 0.9, 0.76), sunny)   # небо — холоднее, солнце — теплее
+		l.light_energy = (1.6 + 1.4 * sunny) * clampf(float(w["width"]) / 1.4, 0.7, 1.6)
+		l.spot_range = 7.5
+		l.spot_angle = 72.0
+		l.spot_angle_attenuation = 0.6
+		l.spot_attenuation = 1.0
+		l.light_specular = 0.25
+		l.light_volumetric_fog_energy = 0.15
+		l.shadow_enabled = false
+		l.distance_fade_enabled = true
+		l.distance_fade_begin = 28.0
+		l.distance_fade_length = 10.0
+		add_child(l)
+		var p: Vector3 = (w["pos"] as Vector3) + inward * 0.12 + Vector3(0, 0.95, 0)
+		l.global_transform = Transform3D(Basis.looking_at((inward + Vector3(0, -0.45, 0)).normalized(), Vector3.UP), p)
+		lights.confine(l, lights.storey_of(p.y))
+		daylight_rooms[w["room"]] = true
+		_window_lights.append(l)
+	stats["daylight_windows"] = wins.size()
+	lights.day_rooms(daylight_rooms)
 
 
 # Grime that follows causes instead of being sprinkled evenly (textures made by tools/grime_gen.py). The wall
