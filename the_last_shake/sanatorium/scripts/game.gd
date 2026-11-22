@@ -345,8 +345,10 @@ void sky() {
 ## множитель света окон, sun — солнце, sky — яркость вида за окном, agx_c — контраст тональной кривой.
 ## exp — экспозиция (больше — светлее), aim — насколько свет окна направлен вниз (свет неба падает на пол,
 ## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
+## curt — сколько дневного света просвечивает сквозь шторы (ткань светится тёплым, как на фото).
 const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
-	"aim": 0.45, "cone": 80.0, "sat": 1.0}
+	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0}
+var _curtain_mats: Array = []
 var _win_base: Array = []
 var _pano_mat: ShaderMaterial
 var _glass_mats: Array = []
@@ -379,6 +381,20 @@ func set_morning() -> void:
 			building.find_children("InteriorGlazing*", "GeometryInstance3D", true, false) + \
 			building.find_children("Curtains*", "GeometryInstance3D", true, false):
 		(n as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# шторы днём просвечивают: копия материала со свечением по их же текстуре (ночью шторы прежние)
+	_curtain_mats.clear()
+	for n in building.find_children("Curtains*", "MeshInstance3D", true, false):
+		var mi: MeshInstance3D = n
+		for i in mi.mesh.get_surface_count():
+			var cm = mi.get_active_material(i)
+			if cm is BaseMaterial3D:
+				var dm: BaseMaterial3D = cm.duplicate()
+				dm.emission_enabled = true
+				dm.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+				dm.emission = Color(1.0, 0.9, 0.75)
+				dm.emission_texture = dm.albedo_texture
+				mi.set_surface_override_material(i, dm)
+				_curtain_mats.append(dm)
 	for m in _glass_mats:                                # чистое стекло днём почти не видно — за ним лес
 		var gm: BaseMaterial3D = m
 		gm.albedo_color.a = 0.1
@@ -418,6 +434,8 @@ func apply_day_look(v: Dictionary) -> void:
 		l.global_transform.basis = Basis.looking_at((inward + Vector3(0, -float(v["aim"]), 0)).normalized(), Vector3.UP)
 	if _pano_mat:
 		_pano_mat.set_shader_parameter("energy", float(v["sky"]))
+	for m in _curtain_mats:
+		(m as BaseMaterial3D).emission_energy_multiplier = float(v["curt"])
 
 
 ## Дневной свет из окон. Окна находим по подоконникам (WindowSills_*): каждый подоконник — своя группа
