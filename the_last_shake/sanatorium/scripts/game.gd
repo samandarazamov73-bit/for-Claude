@@ -326,35 +326,89 @@ func _setup_environment() -> void:
 ## Утро (глава 6, настоящая больница): низкое солнце (~3500 K, «золотой час») светит в окна и рисует на полу
 ## их пятна, небо голубое; рассеянный свет — холодный, от неба; глаз настроен на дневной свет — лампы
 ## накаливания рядом с окнами выглядят тёплыми (lights.hospital_day). Дымка в лучах из окон — объёмный туман.
+## Утро как на настоящей фотографии палаты: главный свет — из окон (мягкий свет неба, тени под кроватями),
+## заполняющего света немного — от него стены не плоские; цвета полные, без дымки и свечения; за стёклами
+## виден лес (панорама снята в прологе: tests/shots.gd --case=panorama → tools/user_assets/make_window_panorama.py),
+## окна светлее комнаты, но не белые пятна. Ночные эффекты плёнки днём почти убраны (hud.set_day).
+const MORNING_PANORAMA := "res://sanatorium/assets/morning_panorama.jpg"
+const MORNING_SKY_SHADER := """
+shader_type sky;
+uniform sampler2D pano : source_color, filter_linear, repeat_enable;
+uniform float energy = 1.0;
+void sky() {
+	vec3 d = normalize(EYEDIR);
+	vec2 uv = vec2(atan(d.x, -d.z) / (2.0 * PI), acos(clamp(d.y, -1.0, 1.0)) / PI);
+	COLOR = textureLod(pano, vec2(fract(uv.x), uv.y), 0.0).rgb * energy;
+}
+"""
+## Подобрано по кадрам tests/shots.gd --case=lightlab рядом с фотографией: amb — рассеянный свет, win —
+## множитель света окон, sun — солнце, sky — яркость вида за окном, agx_c — контраст тональной кривой.
+const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5}
+var _win_base: Array = []
+var _pano_mat: ShaderMaterial
+var _glass_mats: Array = []
+
+
 func set_morning() -> void:
 	if sky_mat:
-		sky_mat.sky_top_color = Color(0.34, 0.5, 0.76)
-		sky_mat.sky_horizon_color = Color(0.78, 0.8, 0.82)
-		sky_mat.ground_horizon_color = Color(0.5, 0.48, 0.44)
-		sky_mat.ground_bottom_color = Color(0.2, 0.19, 0.17)
-		sky_mat.energy_multiplier = 1.6
-	env.ambient_light_color = Color(0.62, 0.7, 0.82)
-	env.ambient_light_energy = 0.07
-	env.volumetric_fog_density = 0.0025
-	env.volumetric_fog_albedo = Color(0.92, 0.9, 0.86)
-	# стекло и тюль пропускают солнце (тюль — большую часть света): на полу — светлые пятна окон
+		sky_mat.sky_top_color = Color(0.4, 0.55, 0.82)
+		sky_mat.sky_horizon_color = Color(0.8, 0.85, 0.9)
+		sky_mat.ground_horizon_color = Color(0.55, 0.56, 0.52)
+		sky_mat.ground_bottom_color = Color(0.3, 0.3, 0.27)
+		sky_mat.energy_multiplier = 1.0
+	if ResourceLoader.exists(MORNING_PANORAMA):
+		var sh := Shader.new()
+		sh.code = MORNING_SKY_SHADER
+		_pano_mat = ShaderMaterial.new()
+		_pano_mat.shader = sh
+		_pano_mat.set_shader_parameter("pano", load(MORNING_PANORAMA))
+		env.sky.sky_material = _pano_mat
+	env.ambient_light_color = Color(0.94, 0.96, 1.0)    # свет неба, отражённый стенами, — нейтральный
+	env.ssao_intensity = 2.0                             # мягкие контактные тени под мебелью, как на фото
+	env.volumetric_fog_density = 0.0                     # днём воздух чистый, без дымки
+	env.adjustment_color_correction = null               # нейтральный баланс белого
+	env.adjustment_contrast = 1.04
+	env.adjustment_saturation = 1.0
+	env.glow_enabled = false                             # без свечения вокруг окон — картинка чистая
+	env.tonemap_agx_white = 8.0
+	# стекло и тюль пропускают солнце: на полу — светлые пятна окон
 	for n in building.find_children("*Glass*", "GeometryInstance3D", true, false) + \
 			building.find_children("InteriorGlazing*", "GeometryInstance3D", true, false) + \
 			building.find_children("Curtains*", "GeometryInstance3D", true, false):
 		(n as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	moon.light_color = Color(1.0, 0.87, 0.72)
-	moon.light_energy = 3.2
-	moon.light_volumetric_fog_energy = 0.8
+	for m in _glass_mats:                                # чистое стекло днём почти не видно — за ним лес
+		var gm: BaseMaterial3D = m
+		gm.albedo_color.a = 0.1
+		gm.roughness = 0.05
+	moon.light_color = Color(1.0, 0.96, 0.9)
+	moon.light_angular_distance = 3.0
+	moon.light_volumetric_fog_energy = 0.0
 	moon.shadow_enabled = true
-	# утреннее солнце (~20° над горизонтом) со стороны палат 2-го этажа и чуть сбоку: лучи косо через окна,
-	# пятна окон ложатся на пол посреди палаты
+	# утреннее солнце (~20° над горизонтом) со стороны палат 2-го этажа и чуть сбоку: лучи косо через окна
 	var dir := Vector3(-0.5, -0.42, -1.0).normalized()
 	moon.global_transform = Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3.ZERO)
 	if cam_attr:
-		cam_attr.auto_exposure_scale = 0.32
+		cam_attr.auto_exposure_scale = 0.3
 		cam_attr.auto_exposure_min_sensitivity = 40.0
-		cam_attr.auto_exposure_max_sensitivity = 180.0
+		cam_attr.auto_exposure_max_sensitivity = 110.0
 	_daylight_windows(-dir)
+	_win_base = []
+	for l in _window_lights:
+		_win_base.append(l.light_energy)
+	if hud:
+		hud.set_day(true)
+	apply_day_look(DAY_LOOK)
+
+
+func apply_day_look(v: Dictionary) -> void:
+	env.ambient_light_energy = float(v["amb"])
+	env.tonemap_agx_contrast = float(v["agx_c"])
+	env.ssil_intensity = float(v["ssil"])
+	moon.light_energy = float(v["sun"])
+	for i in mini(_window_lights.size(), _win_base.size()):
+		_window_lights[i].light_energy = float(_win_base[i]) * float(v["win"])
+	if _pano_mat:
+		_pano_mat.set_shader_parameter("energy", float(v["sky"]))
 
 
 ## Дневной свет из окон. Окна находим по подоконникам (WindowSills_*): каждый подоконник — своя группа
@@ -473,10 +527,10 @@ func _daylight_windows(to_sun: Vector3) -> void:
 		var inward: Vector3 = w["in"]
 		var sunny: float = clampf(-inward.dot(flat_sun), 0.0, 1.0)      # окно смотрит на солнце
 		var l := SpotLight3D.new()
-		l.light_color = Color(0.8, 0.87, 1.0).lerp(Color(1.0, 0.9, 0.76), sunny)   # небо — холоднее, солнце — теплее
-		l.light_energy = (2.1 + 1.6 * sunny) * clampf(float(w["width"]) / 1.4, 0.7, 1.6)
-		l.spot_range = 7.5
-		l.spot_angle = 72.0
+		l.light_color = Color(0.95, 0.97, 1.0).lerp(Color(1.0, 0.97, 0.92), sunny)   # дневной свет — нейтральный
+		l.light_energy = (1.5 + 0.6 * sunny) * clampf(float(w["width"]) / 1.4, 0.7, 1.6)
+		l.spot_range = 8.0
+		l.spot_angle = 80.0
 		l.spot_angle_attenuation = 0.6
 		l.spot_attenuation = 1.0
 		l.light_specular = 0.25
@@ -1082,6 +1136,7 @@ func _tune_materials() -> void:
 			elif nm == "M_Glass_Clear":
 				m.roughness = maxf(m.roughness, 0.22)
 				if m.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+					_glass_mats.append(m)
 					m.albedo_color = Color(m.albedo_color.r * 0.85, m.albedo_color.g * 0.88, m.albedo_color.b * 0.8,
 						maxf(m.albedo_color.a, 0.3))
 	stats["materials"] = seen.size()

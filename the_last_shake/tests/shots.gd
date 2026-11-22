@@ -57,6 +57,10 @@ func _run() -> void:
 			await _skytest()
 		"sanatorium", "chase", "void", "floor3", "chair", "chase2", "trap", "void2", "brothers", "beatpose", "tour", "voidtour", "mompose", "items":
 			await _sanatorium()
+		"panorama":
+			await _panorama()
+		"lightlab":
+			await _lightlab()
 		"epilogue":
 			get_tree().change_scene_to_file("res://story/epilogue.tscn")
 			for k in 3:
@@ -1027,6 +1031,105 @@ func _beatpose_test(g: Node, d: Node) -> void:
 
 
 ## Лифт на 3-м этаже: двери закрываются медленно, мама увозит человека в коляске.
+## Свет утренней палаты 204: один запуск — несколько вариантов настроек (рассеянный свет, свет окон, солнце,
+## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
+const LAB_VARIANTS := [
+	{"name": "A", "amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5},
+	{"name": "B", "amb": 0.08, "win": 2.6, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5},
+	{"name": "C", "amb": 0.22, "win": 1.6, "sun": 0.9, "sky": 1.6, "agx_c": 1.5, "ssil": 1.5},
+	{"name": "D", "amb": 0.1, "win": 2.6, "sun": 2.2, "sky": 2.2, "agx_c": 1.35, "ssil": 1.5},
+	{"name": "E", "amb": 0.1, "win": 2.6, "sun": 0.9, "sky": 1.1, "agx_c": 1.35, "ssil": 2.4},
+	{"name": "F", "amb": 0.12, "win": 2.3, "sun": 1.4, "sky": 2.6, "agx_c": 1.4, "ssil": 1.9},
+]
+
+
+func _lightlab() -> void:
+	shoot = true
+	GameStateRef().checkpoint = "real"
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(2.0)
+	var g: Node = get_tree().current_scene
+	d = g.get_node("Director")
+	await wait_for(func(): return d.act == "real", 120, "real")
+	pl = d.player
+	await secs(2.0)
+	await tp(Vector3(8.83, 4.5, -4.0), PI)
+	await secs(2.0)
+	g.cam_attr.auto_exposure_speed = 8.0
+	var only := _arg("variants", "")
+	for v in LAB_VARIANTS:
+		if only != "" and not only.contains(v["name"]):
+			continue
+		g.apply_day_look(v)
+		await secs(3.0)
+		await snap("lab_" + v["name"], Vector3(10.7, 5.3, -0.74))
+		print("LAB ", v)
+
+
+## Вид из окон утренней больницы: лес на рассвете вокруг здания (пролог, глава 5, солнце взошло). Шесть кадров
+## куба 90° из точки на месте здания на высоте 2-го этажа, само здание скрыто; оси — как у здания (site_xf).
+## Из них tools/godot_assets/make_window_panorama.py склеивает панораму неба для санатория (game.gd set_morning).
+func _panorama() -> void:
+	GameStateRef().checkpoint = "pharmacy_out"
+	get_tree().change_scene_to_file("res://story/prologue.tscn")
+	await wait_for_scene(func(sc): return sc.get("pharmacy") == true and sc.phase == "walk", 300)
+	var pr: Node = get_tree().current_scene
+	await secs(2.0)
+	pr.has_pills = true
+	pr.set_process(false)                                   # пролог больше не двигает рассвет сам
+	pr.set_physics_process(false)
+	pr.set_dawn(1.0)
+	# в больнице уже ясное утро: солнце ~20° над лесом, воздух прозрачный, небо голубое
+	var sd: Vector3 = pr.site_xf.basis * Vector3(-0.5, 0.0, -1.0)
+	sd.y = 0.0
+	var sdir: Vector3 = (sd.normalized() * cos(deg_to_rad(20.0)) + Vector3.DOWN * sin(deg_to_rad(20.0))).normalized()
+	pr.sun.global_transform = Transform3D(Basis.looking_at(sdir, Vector3.UP), Vector3.ZERO)
+	pr.sun.light_color = Color(1.0, 0.93, 0.84)
+	pr.sun.light_energy = 2.6
+	pr.sky_mat.sky_top_color = Color(0.3, 0.47, 0.8)
+	pr.sky_mat.sky_horizon_color = Color(0.78, 0.84, 0.9)
+	pr.sky_mat.ground_horizon_color = Color(0.6, 0.62, 0.6)
+	pr.sky_mat.energy_multiplier = 1.25
+	pr.env.fog_light_color = Color(0.8, 0.85, 0.92)
+	pr.env.fog_depth_end = 700.0
+	pr.env.volumetric_fog_density *= 0.25
+	pr.env.ambient_light_energy = 1.0
+	pr.env.adjustment_saturation = 1.0
+	pr.env.fog_sun_scatter = 0.1
+	pr.torch.visible = false
+	if pr.building:
+		pr.building.visible = false
+	pr.hero.visible = false
+	var xf: Transform3D = pr.site_xf
+	var center: Vector3 = xf * Vector3(37.0, 5.8, -8.0)
+	var vp := SubViewport.new()
+	vp.size = Vector2i(1024, 1024)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	pr.add_child(vp)
+	var cam := Camera3D.new()
+	cam.fov = 90.0
+	cam.far = 4000.0
+	cam.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF   # грань — сразу в своём повороте
+	vp.add_child(cam)
+	cam.current = true
+	# грани куба: +X, -X, +Y, -Y, +Z, -Z (в осях здания)
+	var faces := {"px": [Vector3(1, 0, 0), Vector3.UP], "nx": [Vector3(-1, 0, 0), Vector3.UP],
+		"py": [Vector3(0, 1, 0), Vector3(0, 0, 1)], "ny": [Vector3(0, -1, 0), Vector3(0, 0, -1)],
+		"pz": [Vector3(0, 0, 1), Vector3.UP], "nz": [Vector3(0, 0, -1), Vector3.UP]}
+	for k in faces:
+		var fwd: Vector3 = xf.basis * (faces[k][0] as Vector3)
+		var up: Vector3 = xf.basis * (faces[k][1] as Vector3)
+		cam.global_transform = Transform3D(Basis.looking_at(fwd, up), center)
+		cam.reset_physics_interpolation()
+		RenderingServer.global_shader_parameter_set("main_camera_pos", center)
+		pr.terrain.update_lods(center, true)
+		pr.forest.lod_manager.update_now(cam)
+		await secs(2.5)
+		var img: Image = vp.get_texture().get_image()
+		img.save_png("%s/cube_%s.png" % [out, k])
+		print("SHOT cube_", k)
+
+
 ## Стиральная машина (закрыта и с открытым люком), крыса и таракан — крупно, при свете.
 func _critters_shots(g: Node, cam: Camera3D, lamp: OmniLight3D) -> void:
 	var Props: Script = load("res://story/props.gd")

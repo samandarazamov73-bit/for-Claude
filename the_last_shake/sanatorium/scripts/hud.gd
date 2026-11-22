@@ -214,6 +214,15 @@ func set_lens(on: bool) -> void:
 		_fx.material = _lens_mat if on else _overlay_mat
 
 
+## Утро в настоящей больнице: картинка чистая, как в жизни — почти без зерна плёнки, тёмных углов
+## и цветных кромок (ночью они остаются: это ужас и страх).
+func set_day(on: bool) -> void:
+	for m in [_overlay_mat, _lens_mat]:
+		m.set_shader_parameter("vignette", 0.16 if on else 0.45)
+		m.set_shader_parameter("grain", 0.006 if on else 0.02)
+	_lens_mat.set_shader_parameter("aberration", 0.0002 if on else 0.0008)
+
+
 func menu_open() -> bool:
 	return menu.visible
 
