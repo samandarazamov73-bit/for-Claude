@@ -353,7 +353,7 @@ func set_morning() -> void:
 	if cam_attr:
 		cam_attr.auto_exposure_scale = 0.32
 		cam_attr.auto_exposure_min_sensitivity = 40.0
-		cam_attr.auto_exposure_max_sensitivity = 140.0
+		cam_attr.auto_exposure_max_sensitivity = 180.0
 	_daylight_windows(-dir)
 
 
@@ -465,12 +465,16 @@ func _daylight_windows(to_sun: Vector3) -> void:
 	_window_lights.clear()
 	var wins: Array = find_windows()
 	var flat_sun := Vector3(to_sun.x, 0.0, to_sun.z).normalized()
+	var used := 0
 	for w in wins:
+		if (w["pos"] as Vector3).y > 7.0:
+			continue                              # в главе 6 — только 1-й и 2-й этажи (меньше источников для M1)
+		used += 1
 		var inward: Vector3 = w["in"]
 		var sunny: float = clampf(-inward.dot(flat_sun), 0.0, 1.0)      # окно смотрит на солнце
 		var l := SpotLight3D.new()
 		l.light_color = Color(0.8, 0.87, 1.0).lerp(Color(1.0, 0.9, 0.76), sunny)   # небо — холоднее, солнце — теплее
-		l.light_energy = (1.6 + 1.4 * sunny) * clampf(float(w["width"]) / 1.4, 0.7, 1.6)
+		l.light_energy = (2.1 + 1.6 * sunny) * clampf(float(w["width"]) / 1.4, 0.7, 1.6)
 		l.spot_range = 7.5
 		l.spot_angle = 72.0
 		l.spot_angle_attenuation = 0.6
@@ -487,8 +491,8 @@ func _daylight_windows(to_sun: Vector3) -> void:
 		lights.confine(l, lights.storey_of(p.y))
 		daylight_rooms[w["room"]] = true
 		_window_lights.append(l)
-	stats["daylight_windows"] = wins.size()
-	print("Daylight: %d windows, %d rooms with windows" % [wins.size(), daylight_rooms.size()])
+	stats["daylight_windows"] = used
+	print("Daylight: %d windows lit (of %d), %d rooms with windows" % [used, wins.size(), daylight_rooms.size()])
 	lights.day_rooms(daylight_rooms)
 
 
