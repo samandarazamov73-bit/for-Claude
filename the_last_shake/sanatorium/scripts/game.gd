@@ -367,10 +367,17 @@ var _window_lights: Array = []
 
 func find_windows() -> Array:
 	var out: Array = []
-	for mi in building.find_children("WindowSills*", "MeshInstance3D", true, false):
+	var meshes: Array = building.find_children("WindowSills*", "MeshInstance3D", true, false)
+	# стеклянные стены холла и окна входного блока — без подоконников: окна по самим стёклам
+	for nm in ["EntranceBlock_Window_Glass", "Lobby_CurtainWall_Doors"]:
+		var g = node(nm)
+		if g is MeshInstance3D:
+			meshes.append(g)
+	for mi in meshes:
 		var m: MeshInstance3D = mi
 		if m.mesh == null:
 			continue
+		var is_glass: bool = not String(m.name).begins_with("WindowSills")
 		var xf: Transform3D = m.global_transform
 		var f: PackedVector3Array = m.mesh.get_faces()
 		var tris: Array = []                      # [центр, 3 вершины]
@@ -415,19 +422,33 @@ func find_windows() -> Array:
 			var bb: AABB = groups[r]
 			var along_x: bool = bb.size.x >= bb.size.z
 			var width: float = bb.size.x if along_x else bb.size.z
-			if width < 0.5 or width > 4.5:
+			if width < 0.5 or (not is_glass and width > 4.5):
 				continue
-			var c: Vector3 = bb.get_center()
-			c.y = bb.end.y
 			var n: Vector3 = Vector3(0, 0, 1) if along_x else Vector3(1, 0, 0)
-			var inside_a: Dictionary = room_at(c + n * 0.8 + Vector3(0, 0.5, 0))
-			var inside_b: Dictionary = room_at(c - n * 0.8 + Vector3(0, 0.5, 0))
-			if inside_a.is_empty() == inside_b.is_empty():
-				continue                          # окно между комнатами или вне здания
-			var inward: Vector3 = n if not inside_a.is_empty() else -n
-			var room: Dictionary = inside_a if not inside_a.is_empty() else inside_b
-			out.append({"pos": c, "in": inward, "width": width, "room": str(room["id"])})
+			var ax: Vector3 = Vector3(1, 0, 0) if along_x else Vector3(0, 0, 1)
+			# длинная стеклянная стена — участками по ~2 м
+			var segs: int = maxi(1, roundi(width / 2.2))
+			for k in segs:
+				var c: Vector3 = bb.get_center() + ax * ((float(k) + 0.5) / float(segs) - 0.5) * width
+				c.y = bb.position.y + 0.1 if is_glass else bb.end.y
+				if is_glass and _near_window(out, c):
+					continue
+				var inside_a: Dictionary = room_at(c + n * 0.8 + Vector3(0, 0.5, 0))
+				var inside_b: Dictionary = room_at(c - n * 0.8 + Vector3(0, 0.5, 0))
+				if inside_a.is_empty() == inside_b.is_empty():
+					continue                      # окно между комнатами или вне здания
+				var inward: Vector3 = n if not inside_a.is_empty() else -n
+				var room: Dictionary = inside_a if not inside_a.is_empty() else inside_b
+				out.append({"pos": c, "in": inward, "width": width / float(segs), "room": str(room["id"])})
 	return out
+
+
+static func _near_window(wins: Array, p: Vector3) -> bool:
+	for w in wins:
+		var q: Vector3 = w["pos"]
+		if Vector2(p.x - q.x, p.z - q.z).length() < 1.0 and absf(p.y - q.y) < 1.5:
+			return true
+	return false
 
 
 static func _win_root(parent: Array, i: int) -> int:
@@ -467,6 +488,7 @@ func _daylight_windows(to_sun: Vector3) -> void:
 		daylight_rooms[w["room"]] = true
 		_window_lights.append(l)
 	stats["daylight_windows"] = wins.size()
+	print("Daylight: %d windows, %d rooms with windows" % [wins.size(), daylight_rooms.size()])
 	lights.day_rooms(daylight_rooms)
 
 

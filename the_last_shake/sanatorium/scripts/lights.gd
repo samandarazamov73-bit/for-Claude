@@ -166,9 +166,17 @@ func setup(g) -> void:
 ## than average are toned down, and in small rooms the light's reach is kept to about the room.
 ## Днём в комнатах с окнами лампы выключены — свет идёт из окон (game.gd _daylight_windows). В коридорах,
 ## на лестницах и в помещениях без окон лампы горят.
+const DAY_LAMPS_ON := ["corridor", "corridor_patient", "service_corridor", "stair_main", "stair_end", "shaft",
+	"machine_room"]
+const DAY_GLAZED := ["hall", "foyer", "vestibule", "lounge", "dining", "phytobar", "registration", "info"]
+
+
 func day_rooms(with_windows: Dictionary) -> void:
-	for room in with_windows:
-		if groups.has(room):
+	for room in groups:
+		var kind: String = str(game.rooms.get(room, {}).get("kind", ""))
+		if kind in DAY_LAMPS_ON:
+			continue                                     # в коридорах больницы лампы горят и днём
+		if with_windows.has(room) or kind in DAY_GLAZED:
 			set_room(room, false, false)
 
 
