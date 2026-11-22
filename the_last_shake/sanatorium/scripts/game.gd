@@ -347,8 +347,9 @@ void sky() {
 ## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
 ## curt — сколько дневного света просвечивает сквозь шторы (ткань светится тёплым, как на фото).
 const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
-	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0}
+	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6}
 var _curtain_mats: Array = []
+var is_day := false                  # quality.gd: днём дальний план не размывается
 var _win_base: Array = []
 var _pano_mat: ShaderMaterial
 var _glass_mats: Array = []
@@ -406,7 +407,9 @@ func set_morning() -> void:
 	# утреннее солнце (~20° над горизонтом) со стороны палат 2-го этажа и чуть сбоку: лучи косо через окна
 	var dir := Vector3(-0.5, -0.42, -1.0).normalized()
 	moon.global_transform = Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3.ZERO)
+	is_day = true
 	if cam_attr:
+		cam_attr.dof_blur_far_enabled = false             # днём лес за окном резкий, как на фото
 		cam_attr.auto_exposure_min_sensitivity = 20.0     # глаз привыкает к яркому дню: окна не выгорают
 		cam_attr.auto_exposure_max_sensitivity = 110.0
 	_daylight_windows(-dir)
@@ -430,6 +433,7 @@ func apply_day_look(v: Dictionary) -> void:
 		var l: SpotLight3D = _window_lights[i]
 		l.light_energy = float(_win_base[i]) * float(v["win"])
 		l.spot_angle = float(v["cone"])
+		l.spot_angle_attenuation = float(v["att"])     # больше — свет окна мягко сходит на нет к краям
 		var inward: Vector3 = l.get_meta("in")
 		l.global_transform.basis = Basis.looking_at((inward + Vector3(0, -float(v["aim"]), 0)).normalized(), Vector3.UP)
 	if _pano_mat:

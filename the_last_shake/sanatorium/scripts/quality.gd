@@ -99,7 +99,7 @@ func apply() -> void:
 			ca.dof_blur_far_transition = 12.0
 			ca.dof_blur_amount = 0.05
 			game.player.cam.attributes = ca
-		ca.dof_blur_far_enabled = DOF_FAR[level]
+		ca.dof_blur_far_enabled = DOF_FAR[level] and not game.get("is_day")
 	RenderingServer.environment_set_volumetric_fog_volume_size(FOG_SIZE[level][0], FOG_SIZE[level][1])
 	RenderingServer.positional_soft_shadow_filter_set_quality(SOFT_SHADOWS[level])
 	RenderingServer.directional_soft_shadow_filter_set_quality(SOFT_SHADOWS[level])
