@@ -261,27 +261,24 @@ func note(title: String, text: String) -> void:
 	dim.queue_free()
 
 
-## Реплика диалога: висит, пока не нажмёшь пробел / Enter — но не дольше 15 секунд, потом идёт дальше сама
-## (автотест — по времени: GameState.auto_lines).
-const LINE_MAX_WAIT := 15.0
+## Реплика диалога идёт сама — нажимать ничего не нужно: висит столько, сколько нужно, чтобы спокойно
+## прочитать (короткая — 2,5–3 с, обычная — около 5 с, длинная — 8–10 с). Пробел / Enter — пропустить.
+static func line_seconds(text: String) -> float:
+	return clampf(1.8 + text.length() * 0.05, 2.5, 10.0)
 
 
 func line(who: String, text: String, seconds := 0.0) -> void:
-	var t: float = say(who, text, seconds, not GameState.auto_lines)
-	var waited := 0.0
+	var t: float = seconds if seconds > 0.0 else line_seconds(text)
+	say(who, text, t, true)
+	_sub_next.visible = false                          # без подсказки «пробел»: реплика уходит сама
 	_line_done = false
 	while not _line_done:
 		await get_tree().process_frame
 		if get_tree().paused:
 			continue
-		var dt: float = get_process_delta_time()
-		waited += dt
-		if waited >= LINE_MAX_WAIT:
+		t -= get_process_delta_time()
+		if t <= 0.0:
 			break
-		if GameState.auto_lines:
-			t -= dt
-			if t <= 0.0:
-				break
 	hide_line()
 
 

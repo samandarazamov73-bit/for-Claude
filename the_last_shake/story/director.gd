@@ -142,6 +142,7 @@ func begin(g) -> void:
 			sd.set_angle(0.0)
 	_drone = AudioStreamPlayer.new()
 	_drone.stream = stream("drone_low", true)
+	_drone.bus = "Background"
 	_drone.volume_db = -60.0
 	add_child(_drone)
 	_drone.play()
@@ -252,7 +253,7 @@ func until(cond: Callable, timeout := -1.0) -> void:
 			return
 
 
-## Реплика с подписью; ждёт, пока её прочитают (Enter / пробел — дальше).
+## Реплика с подписью; идёт сама, по времени чтения (Enter / пробел — пропустить).
 func say(who: String, text: String, sec := 0.0) -> void:
 	_skip = false
 	# кто стоит и говорит — жестикулирует только во время своей реплики, потом снова спокойно стоит
@@ -514,7 +515,7 @@ func _act2_scream() -> void:
 	var d = door(DOOR_SCREAM)
 	_moan_t = 10.0
 	# пока не откроет дверь — изредка из комнаты слышен стон
-	await until(func(): return (d != null and d.angle > 18.0) or room_id() == "L0.R17")
+	await until(func(): return (d != null and absf(d.angle) > 18.0) or room_id() == "L0.R17")
 	_scream_door_open = true
 	game.lights.set_room("L0.R17", true)
 	await wait(0.6)
@@ -1006,6 +1007,7 @@ func _act3() -> void:
 	await wait(1.2)
 	await say("thought", "Какого хрена… Где всё? Тут же были палаты… Осталась одна дверь.")
 	objective("Найди палату деда — №204", ROOM204_DOOR + Vector3(0, 0, -0.3))
+	_bang_from_204()
 	await until(func(): return room_id() == "L1.F2")
 	# в палате — бумаги деда: про маму, про него самого и его записка про это место
 	objective("Осмотри палату деда")
@@ -1285,6 +1287,7 @@ func _faceless_chase() -> void:
 		return
 	mom.set_look(null)
 	mom.go([Vector3(CAB_CORNER.x, 4.5, CAB_CORNER.z)], 1.6)
+	_mom_face_in_cab()
 	await until(func(): return faceless_state != "run" or lift.player_in_cabin())
 	if faceless_state != "run":
 		return
@@ -1314,6 +1317,13 @@ func _faceless_chase() -> void:
 	_hold_lift = true
 	GameState.checkpoint = "floor3"
 	await _mom_vanishes()
+
+
+## Мама дошла до угла кабины — сразу поворачивается лицом в кабину, к дверям (не стоит спиной).
+func _mom_face_in_cab() -> void:
+	await until(func(): return not mom.is_moving(), 20.0)
+	var y: float = mom.global_position.y
+	mom.face(Vector3(37.5, y, -6.6), true)
 
 
 ## Заехал в кабину: Азиз сам доезжает до середины (иначе двери упираются в коляску) и жмёт кнопку этажа.
@@ -1639,26 +1649,29 @@ func _room_scare() -> void:
 	mom.stop()
 	objective("Загляни в палату")
 	await until(func(): return room_id() == room or Vector2(ppos().x - dc.x, ppos().z - dc.z).length() < 1.3)
-	# скример: выскакивает из темноты прямо перед ним
+	# в палате — никого и тишина. Потом мама просто оказывается сзади: стоит, ничего не делает. Коляска резко
+	# разворачивается к ней — вместе с камерой. Без прыжков, криков и анимации.
 	freeze(true)
+	await wait(1.4)
 	var fwd: Vector3 = -player.global_transform.basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized()
-	mom.global_position = Vector3(ppos().x, 7.8, ppos().z) + fwd * 0.95
+	mom.stop()
+	mom.global_position = Vector3(ppos().x, 7.8, ppos().z) - fwd * 1.05
 	mom.face(ppos(), true)
-	mom.visible = true
-	mom.play_once("attack", 0.0, 1.4)
-	mom.set_look(player.head.global_position)
-	snd("stinger", null, 6.0, 1.0)
-	snd("mom_scream", mom.head_pos(), 6.0, 1.05)
-	ui.flash(Color(1.0, 1.0, 1.0, 0.5), 0.25)
-	shake(1.2, 0.5)
-	await look_at_point(mom.head_pos(), 0.12)
-	await wait(0.7)
-	await say("hero", "Твою ж мать!! Ты чё творишь?!")
-	mom.play("idle_loop", 0.4)
-	await say("mom", "Тише, тише. Первый раз в жизни испугался? Пошли.")
+	mom.play("idle_loop", 0.0)
 	mom.set_look(null)
+	mom.visible = true
+	snd("stinger", null, -2.0, 0.95)
+	var y0: float = player.rotation.y
+	player.look_yaw = 0.0
+	var turn := create_tween()
+	turn.tween_property(player, "rotation:y", y0 + PI, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	turn.parallel().tween_property(player, "look_pitch", 0.12, 0.32)
+	await turn.finished
+	await wait(0.9)
+	await say("hero", "Твою ж мать!! Ты чё творишь?!")
+	await say("mom", "Тише, тише. Первый раз в жизни испугался? Пошли.")
 	freeze(false)
 
 
@@ -2178,6 +2191,9 @@ func _act5() -> void:
 	_drone.volume_db = -26.0
 	lift.locked = true
 	lift.lock_text = ""
+	_hold_lift = true                                  # пока говорят и мама не вышла — двери открыты
+	if lift.state not in ["opening", "open"]:
+		lift.open_here()
 	if GameState.fade_target() > 0.5:
 		await GameState.fade_to(0.0, 1.5)
 	freeze(true)
@@ -2198,8 +2214,10 @@ func _act5() -> void:
 		Vector3(8.83, 4.5, -7.3), Vector3(8.83, 4.5, -5.4)], 1.1)
 	_mom_into_204()
 	objective("Сходи в аптеку у остановки")
-	lift.locked = false
 	lift.forced_floor = 0
+	# двери отпускаем, только когда мама вышла из кабины (иначе она шла бы сквозь закрытые двери)
+	await until(func(): return mom.global_position.z < -6.6 or not mom.is_moving(), 15.0)
+	lift.locked = false
 	_hold_lift = false
 	await until(func(): return lift.player_in_cabin() and lift.state == "moving")
 	await say("thought", "Лишь бы мы отсюда нормально ушли.")
@@ -2225,7 +2243,7 @@ func _mom_into_204() -> void:
 	if d:
 		d.locked = false
 	await until(func(): return mom.global_position.distance_to(Vector3(8.83, 4.5, -7.3)) < 0.7, 90.0)
-	if d and d.angle < 60.0:
+	if d and absf(d.angle) < 60.0:
 		d.swing_to(95.0, 0.8)
 	await until(func(): return not mom.is_moving(), 20.0)
 	mom.visible = false
@@ -2250,14 +2268,16 @@ func _act6() -> void:
 	var e: Dictionary = GameState.entry
 	GameState.entry = {}
 	place_player(e.get("pos", SPAWN) as Vector3, float(e.get("yaw", SPAWN_YAW)))
-	mom.visible = false
 	lift.locked = false
 	lift.forced_floor = -1
 	lift.park_closed(0)
+	_place_son_scene()
 	await GameState.fade_to(0.0, 1.6)
 	objective("Отнеси таблетку маме — палата 204")
 	ui.hint("Лифт — в конце холла, направо", 5.0)
-	await until(func(): return room_id() in ["L1.F2", "L1.F2b"] or (ppos().y > 4.0 and ppos().distance_to(Vector3(8.83, 4.5, -5.6)) < 1.4))
+	# Дилором и сын уже сидят в палате; разговор — только когда Азиз въехал внутрь (не в дверях)
+	await until(func(): return ppos().y > 4.0 and ppos().y < 6.5 and ppos().z > -4.9 and ppos().z < 1.0 \
+			and ppos().x > 6.4 and ppos().x < 12.6)
 	await _real_son()
 
 
@@ -2275,6 +2295,7 @@ func _setup_real_hospital() -> void:
 	var bed := AudioStreamPlayer.new()
 	bed.stream = stream("hospital_alive", true)
 	bed.volume_db = -14.0
+	bed.bus = "Background"
 	add_child(bed)
 	bed.play()
 	var hall := AudioStreamPlayer3D.new()               # гомон в холле и у регистратуры
@@ -2364,9 +2385,11 @@ func _hall_seats() -> Array:
 	return out
 
 
-## Палата 204: у кровати деда сидят Дилором и парень. Разговор — и паническая атака.
-func _real_son() -> void:
-	act = "son"
+## Палата 204: у кровати деда сидят Дилором и парень — с самого начала главы (не появляются из воздуха).
+var _son: Node3D
+
+
+func _place_son_scene() -> void:
 	for c in [SON_CHAIR, MOM_CHAIR]:
 		var ch := Props.glb("res://sanatorium/models/chair.glb", 1.0)
 		game.add_child(ch)
@@ -2388,6 +2411,7 @@ func _real_son() -> void:
 		a.set_hands(SON_CHAIR + Vector3(0.12, 0.55, -0.38), SON_CHAIR + Vector3(-0.12, 0.55, -0.38), 0.8)
 		son = a
 	_people.append(son)
+	_son = son
 	mom.visible = true
 	mom.stop()
 	mom.global_position = MOM_CHAIR
@@ -2395,6 +2419,12 @@ func _real_son() -> void:
 	mom.set_sit(true)
 	mom.set_hands(MOM_CHAIR + Vector3(0.11, 0.55, -0.36), MOM_CHAIR + Vector3(-0.11, 0.55, -0.36), 0.9)
 	mom.play("idle_loop", 0.0)
+
+
+## Разговор — и паническая атака.
+func _real_son() -> void:
+	act = "son"
+	var son: Node3D = _son
 	freeze(true)
 	objective("")
 	await look_at_point(MOM_CHAIR + Vector3(0, 1.0, 0), 0.8)
@@ -2410,6 +2440,17 @@ func _real_son() -> void:
 	await say("hero", "Вы чё, издеваетесь надо мной?")
 	await say("hero", "Мы же вместе приехали! На автобусе, к деду на второй этаж! Нас человек пятнадцать хотели поймать, мы на лифте ушли… Ты сама попросила сходить за таблеткой — вот, я пришёл! Чёрт… что происходит?!")
 	await _panic_attack()
+
+
+## На пустом этаже, когда Азиз подъезжает к палате деда: изнутри два глухих удара в дверь. Внутри — никого.
+func _bang_from_204() -> void:
+	await until(func(): return act != "void" or ppos().distance_to(ROOM204_DOOR) < 5.5)
+	if act != "void" or room_id() == "L1.F2":
+		return
+	var p: Vector3 = ROOM204_DOOR + Vector3(0, 1.1, 0.4)
+	snd("grandpa_bang", p, 4.0, 1.0, 22.0)
+	await wait(0.9)
+	snd("grandpa_bang", p, 1.0, 0.94, 22.0)
 
 
 ## Паническая атака: дыхание и сердце всё чаще, картинка плывёт и темнеет, Азиз падает из коляски на пол.
@@ -2431,6 +2472,7 @@ func _panic_attack() -> void:
 	ring.volume_db = -40.0
 	add_child(ring)
 	ring.play()
+	snd("quake_rumble", null, -14.0, 0.7)                # низкий гул в голове — мир «плывёт»
 	var t := 0.0
 	while t < 6.0:
 		await get_tree().process_frame

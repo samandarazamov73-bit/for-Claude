@@ -110,7 +110,7 @@ func _closed_door_near(pp: Vector3, r: float):
 	for dg in d.game.door_groups:
 		if dg.ext or dg.locked or _used_doors.has(dg):
 			continue
-		if dg.center.y < pp.y or dg.center.y > pp.y + 2.5 or dg.angle > 3.0:
+		if dg.center.y < pp.y or dg.center.y > pp.y + 2.5 or absf(dg.angle) > 3.0:
 			continue
 		var dist: float = Vector2(dg.center.x - pp.x, dg.center.z - pp.z).length()
 		if dist < bd:

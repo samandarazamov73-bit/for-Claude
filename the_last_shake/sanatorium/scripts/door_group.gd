@@ -64,7 +64,7 @@ func prompt(_by) -> String:
 		return "Заперто"
 	if locked:
 		return "Дверь заперта" if not ext else "Выход заперт"
-	return "[E] Закрыть дверь" if target > 1.0 else "[E] Открыть дверь"
+	return "[E] Закрыть дверь" if absf(target) > 1.0 else "[E] Открыть дверь"
 
 
 func interact(_by) -> void:
@@ -72,13 +72,30 @@ func interact(_by) -> void:
 		game.play_at("door_locked", center, -4.0, randf_range(0.95, 1.05), 20.0)
 		game.hud.message(locked_text if locked_text != "" else ("Заперто" if not ext else "Заперто снаружи"), 2.6)
 		return
-	if target > 1.0:
+	if absf(target) > 1.0:
 		target = 0.0
 	else:
-		target = max_angle
+		# дверь открывается от коляски — в ту сторону, где Азиза нет (петли в обе стороны, как в больнице):
+		# на себя на коляске не открыть
+		target = max_angle * _away_sign(_by)
 		var s: String = "door_open_metal" if style.begins_with("metal") else ("door_open_wood" if randf() < 0.6 else "door_open_wood2")
 		game.play_at(s, center, -3.0, randf_range(0.92, 1.06), 25.0)
 	set_physics_process(true)
+
+
+## +1 — открывать «как задумано» (по знаку створки), −1 — в другую сторону: створка уходит от того, кто открывает.
+func _away_sign(by) -> float:
+	var who: Node3D = by if by is Node3D else game.player
+	if who == null or leaves.is_empty():
+		return 1.0
+	var lf: Dictionary = leaves[0]
+	var c0: Vector3 = _leaf_xf(lf, 0.0) * lf["center"]
+	var c1: Vector3 = _leaf_xf(lf, 35.0) * lf["center"]
+	var swing: Vector3 = c1 - c0
+	swing.y = 0.0
+	var to_who: Vector3 = who.global_position - center
+	to_who.y = 0.0
+	return -1.0 if swing.dot(to_who) > 0.0 else 1.0
 
 
 func set_angle(a: float) -> void:
@@ -109,7 +126,7 @@ func _blocked(a: float) -> bool:
 
 
 func _physics_process(dt: float) -> void:
-	var spd: float = 95.0 if target > angle else 130.0
+	var spd: float = 95.0 if absf(target) > absf(angle) else 130.0
 	var nxt: float = move_toward(angle, target, spd * dt)
 	if _blocked(nxt):
 		target = angle
@@ -120,7 +137,7 @@ func _physics_process(dt: float) -> void:
 	_apply(angle)
 	if is_equal_approx(angle, target):
 		set_physics_process(false)
-		if target <= 0.01:
+		if absf(target) <= 0.01:
 			var s: String = "door_close_metal" if style.begins_with("metal") else "door_close_wood"
 			game.play_at(s, center, -2.0, randf_range(0.95, 1.05), 28.0)
 			game.critters.scare(center, 5.0)

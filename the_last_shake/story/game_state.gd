@@ -24,7 +24,7 @@ const CHAPTERS := [
 
 var checkpoint := "start"       # где начать: start, key, chase, void, floor3, floor3b, pharmacy, pharmacy_out (лес), real
 var deaths := 0
-var auto_lines := false          # автотест: реплики идут сами по времени (в игре — только по пробелу)
+var auto_lines := false          # автотест: записки закрываются сами (реплики и так идут по времени)
 var entry := {}                  # откуда заехали в здание (пролог → санаторий): pos, yaw, mom — координаты здания
 var _fade: ColorRect
 var _layer: CanvasLayer

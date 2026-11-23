@@ -7,7 +7,8 @@ var drone: AudioStreamPlayer
 var timer := 8.0
 var rng := RandomNumberGenerator.new()
 const EVENTS := [["creak_far_1", 3.0, -8.0], ["creak_far_2", 3.0, -9.0], ["drip", 3.0, -10.0],
-	["pipes_knock", 2.0, -9.0], ["wind_gust", 2.0, -12.0], ["door_slam_far", 0.8, -6.0], ["whisper_far", 0.3, -18.0]]
+	["pipes_knock", 2.0, -9.0], ["wind_gust", 2.0, -12.0], ["door_slam_far", 0.8, -6.0], ["whisper_far", 0.3, -18.0],
+	["beam_hit", 0.7, -14.0]]                        # где-то далеко упало что-то железное
 
 
 func setup(g) -> void:
@@ -16,6 +17,7 @@ func setup(g) -> void:
 	drone = AudioStreamPlayer.new()
 	drone.stream = g.sfx("ambience_loop", true)
 	drone.volume_db = -15.0
+	drone.bus = "Background"
 	add_child(drone)
 	drone.play()
 

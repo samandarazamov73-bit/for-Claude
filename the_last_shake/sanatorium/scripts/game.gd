@@ -231,6 +231,13 @@ func _setup_input() -> void:
 
 
 func _setup_audio_buses() -> void:
+	# фон внутри здания (гул, низкий дрон, гомон утренней больницы) — на своей шине, на 5 дБ тише остального
+	if AudioServer.get_bus_index("Background") < 0:
+		AudioServer.add_bus()
+		var b := AudioServer.bus_count - 1
+		AudioServer.set_bus_name(b, "Background")
+		AudioServer.set_bus_send(b, "Master")
+		AudioServer.set_bus_volume_db(b, -5.0)
 	if AudioServer.get_bus_index("World") >= 0:
 		return
 	AudioServer.add_bus()
