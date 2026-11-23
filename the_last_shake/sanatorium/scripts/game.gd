@@ -347,7 +347,7 @@ void sky() {
 ## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
 ## curt — сколько дневного света просвечивает сквозь шторы (ткань светится тёплым, как на фото).
 const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
-	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6}
+	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6, "gi": 0.0}
 var _curtain_mats: Array = []
 var is_day := false                  # quality.gd: днём дальний план не размывается
 var _win_base: Array = []
@@ -440,6 +440,20 @@ func apply_day_look(v: Dictionary) -> void:
 		_pano_mat.set_shader_parameter("energy", float(v["sky"]))
 	for m in _curtain_mats:
 		(m as BaseMaterial3D).emission_energy_multiplier = float(v["curt"])
+	# gi > 0 — настоящее глобальное освещение (SDFGI): свет неба и солнца входит только через окна,
+	# отражается от пола и стен; тени под мебелью и у окон получаются сами, как в жизни
+	var gi: float = float(v["gi"])
+	env.sdfgi_enabled = gi > 0.0
+	if gi > 0.0:
+		env.sdfgi_use_occlusion = true
+		env.sdfgi_read_sky_light = true
+		env.sdfgi_cascades = 4
+		env.sdfgi_min_cell_size = 0.15
+		env.sdfgi_y_scale = Environment.SDFGI_Y_SCALE_75_PERCENT
+		env.sdfgi_energy = gi
+		env.sdfgi_bounce_feedback = 0.6
+		env.sdfgi_normal_bias = 1.1
+		env.sdfgi_probe_bias = 1.1
 
 
 ## Дневной свет из окон. Окна находим по подоконникам (WindowSills_*): каждый подоконник — своя группа

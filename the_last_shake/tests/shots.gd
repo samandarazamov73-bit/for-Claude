@@ -1035,16 +1035,19 @@ func _beatpose_test(g: Node, d: Node) -> void:
 ## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
 const LAB_VARIANTS := [
 	{"name": "M", "amb": 0.18, "win": 1.0, "sky": 20.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6},
-	{"name": "N", "amb": 0.14, "win": 1.3, "sky": 20.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 1.0},
-	{"name": "O", "amb": 0.2, "win": 0.8, "sky": 28.0, "exp": 0.15, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.8},
-	{"name": "P", "amb": 0.16, "win": 1.2, "sun": 1.6, "sky": 24.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.8},
-	{"name": "Q", "amb": 0.18, "win": 1.0, "sky": 20.0, "exp": 0.16, "aim": 1.2, "cone": 85.0, "att": 3.0, "sat": 0.92, "curt": 0.6},
-	{"name": "R", "amb": 0.22, "win": 1.0, "sky": 24.0, "exp": 0.14, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.8, "agx_c": 1.25},
+	{"name": "S", "amb": 0.02, "win": 0.0, "sky": 20.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 1.0, "ssil": 0.6},
+	{"name": "T", "amb": 0.02, "win": 0.0, "sky": 20.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 2.0, "ssil": 0.6},
+	{"name": "U", "amb": 0.02, "win": 0.0, "sky": 40.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 1.0, "ssil": 0.6},
+	{"name": "V", "amb": 0.04, "win": 0.35, "sky": 24.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.8},
+	{"name": "W", "amb": 0.02, "win": 0.0, "sun": 1.8, "sky": 24.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.6},
 ]
 
 
+## Свет палаты 204: каждый вариант — свой кадр. Сюжет на время съёмки стоит (дерево на паузе: реплики не идут,
+## паническая атака не начинается), картинка и адаптация глаза при этом рисуются.
 func _lightlab() -> void:
 	shoot = true
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	GameStateRef().checkpoint = "real"
 	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
 	await secs(2.0)
@@ -1054,7 +1057,13 @@ func _lightlab() -> void:
 	pl = d.player
 	await secs(2.0)
 	await tp(Vector3(8.83, 4.5, -4.0), PI)
-	await secs(2.0)
+	await secs(1.0)
+	var to: Vector3 = Vector3(10.7, 5.3, -0.74) - pl.head.global_position
+	pl.rotation.y = atan2(-to.x, -to.z)
+	pl.look_yaw = 0.0
+	pl.look_pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -0.9, 0.9)
+	await secs(1.5)
+	get_tree().paused = true
 	g.cam_attr.auto_exposure_speed = 8.0
 	var only := _arg("variants", "")
 	for v in LAB_VARIANTS:
@@ -1063,9 +1072,10 @@ func _lightlab() -> void:
 		var look: Dictionary = g.DAY_LOOK.duplicate()
 		look.merge(v, true)
 		g.apply_day_look(look)
-		await secs(3.0)
-		await snap("lab_" + v["name"], Vector3(10.7, 5.3, -0.74))
+		await secs(6.0 if float(look["gi"]) > 0.0 else 3.0)
+		await shot("lab_" + v["name"])
 		print("LAB ", v)
+	get_tree().paused = false
 
 
 ## Вид из окон утренней больницы: лес на рассвете вокруг здания (пролог, глава 5, солнце взошло). Шесть кадров
