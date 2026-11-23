@@ -357,13 +357,13 @@ void sky() {
 ## sat — насыщенность, agx_c — контраст тональной кривой.
 ## wb — нейтральный баланс белого (убирает желтизну от тёплого пола и штор), squeeze/haze — лес за окном
 ## ниже и дальше (см. MORNING_SKY_SHADER).
-const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
-	"exp": 0.36, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "bounce": 1.0, "floor": 1.0,
-	"wb": 0.0, "squeeze": 1.0, "haze": 0.0}
+const DAY_LOOK := {"amb": 0.13, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
+	"exp": 0.3, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 1.5, "bounce": 1.0, "floor": 1.0,
+	"wb": 1.0, "squeeze": 1.4, "haze": 0.03}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
 const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
-	"exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 0.0, "bounce": 0.0, "floor": 1.0,
-	"wb": 0.0, "squeeze": 1.0, "haze": 0.0}
+	"exp": 0.15, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 0.0, "bounce": 0.0, "floor": 1.0,
+	"wb": 1.0, "squeeze": 1.4, "haze": 0.03}
 
 
 func day_look() -> Dictionary:
@@ -487,24 +487,29 @@ func apply_day_look(v: Dictionary) -> void:
 		if not fm.has_meta("night_color"):
 			fm.set_meta("night_color", fm.albedo_color)
 		fm.albedo_color = (fm.get_meta("night_color") as Color) * Color(1, 1, 1).lerp(Color(0.84, 0.9, 0.98), float(v["floor"])) \
-				* Color(1, 1, 1).lerp(Color(0.9, 0.95, 1.0), clampf(float(v["wb"]), 0.0, 1.0))   # меньше рыжего отсвета от пола
+				* Color(1, 1, 1).lerp(Color(0.85, 0.9, 1.0), clampf(float(v["wb"]), 0.0, 1.0))   # меньше рыжего отсвета от пола
 	# gi > 0 — настоящее глобальное освещение (SDFGI): свет неба и солнца входит только через окна,
 	# отражается от пола и стен; тени под мебелью и у окон получаются сами, как в жизни
 	var gi: float = float(v["gi"])
-	env.sdfgi_enabled = gi > 0.0
+	if env.sdfgi_enabled != (gi > 0.0):
+		env.sdfgi_enabled = gi > 0.0
 	# отражения неба: с SDFGI они закрыты стенами; без него небо отражалось бы в коже и лаке прямо сквозь
 	# стены — мебель серела. Тогда отражения только от экрана (SSR) и от света ламп.
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_BG if gi > 0.0 else Environment.REFLECTION_SOURCE_DISABLED
-	if gi > 0.0:
+	# задаём только то, что поменялось: любая смена сетки SDFGI сбрасывает накопленный свет
+	if gi > 0.0 and (env.sdfgi_cascades != 4 or not is_equal_approx(env.sdfgi_min_cell_size, 0.15)):
 		env.sdfgi_use_occlusion = true
 		env.sdfgi_read_sky_light = true
 		env.sdfgi_cascades = 4
 		env.sdfgi_min_cell_size = 0.15
 		env.sdfgi_y_scale = Environment.SDFGI_Y_SCALE_75_PERCENT
-		env.sdfgi_energy = gi
-		env.sdfgi_bounce_feedback = float(v["bounce"])
 		env.sdfgi_normal_bias = 1.1
 		env.sdfgi_probe_bias = 1.1
+	if gi > 0.0:
+		if not is_equal_approx(env.sdfgi_energy, gi):
+			env.sdfgi_energy = gi
+		if not is_equal_approx(env.sdfgi_bounce_feedback, float(v["bounce"])):
+			env.sdfgi_bounce_feedback = float(v["bounce"])
 
 
 ## Дневной свет из окон. Окна находим по подоконникам (WindowSills_*): каждый подоконник — своя группа
