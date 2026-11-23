@@ -336,10 +336,16 @@ shader_type sky;
 uniform sampler2D pano : source_color, filter_linear, repeat_enable;
 uniform float energy = 1.0;        // свет улицы, который входит в окна (освещение и отражения)
 uniform float view_energy = 1.0;   // как улица видна в окне: ярче стен, но не белое пятно (как на фото)
+uniform float squeeze = 1.0;       // > 1 — лес ниже над горизонтом, будто дальше от здания
+uniform float haze = 0.0;          // воздушная дымка у горизонта: дальний лес светлее и голубее
+uniform vec3 haze_color = vec3(0.8, 0.84, 0.88);
 void sky() {
 	vec3 d = normalize(EYEDIR);
-	vec2 uv = vec2(atan(d.x, -d.z) / (2.0 * PI), acos(clamp(d.y, -1.0, 1.0)) / PI);
-	COLOR = textureLod(pano, vec2(fract(uv.x), uv.y), 0.0).rgb * (AT_CUBEMAP_PASS ? energy : view_energy);
+	float el = asin(clamp(d.y, -1.0, 1.0));
+	vec2 uv = vec2(atan(d.x, -d.z) / (2.0 * PI), clamp(0.5 - el * squeeze / PI, 0.0, 1.0));
+	vec3 c = textureLod(pano, vec2(fract(uv.x), uv.y), 0.0).rgb;
+	c = mix(c, haze_color, haze * exp(-abs(el) * 6.0));
+	COLOR = c * (AT_CUBEMAP_PASS ? energy : view_energy);
 }
 """
 ## Подобрано по кадрам tests/shots.gd --case=lightlab рядом с фотографией настоящей палаты (утро, свет из окон):
@@ -349,11 +355,15 @@ void sky() {
 ## amb — ровный рассеянный свет; win — мягкий свет окон на пол (aim — насколько вниз, cone — ширина пучка,
 ## att — мягкость края); sun — солнце; curt — свет сквозь шторы; floor — пол без оранжевого оттенка;
 ## sat — насыщенность, agx_c — контраст тональной кривой.
+## wb — нейтральный баланс белого (убирает желтизну от тёплого пола и штор), squeeze/haze — лес за окном
+## ниже и дальше (см. MORNING_SKY_SHADER).
 const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
-	"exp": 0.36, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "bounce": 1.0, "floor": 1.0}
+	"exp": 0.36, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "bounce": 1.0, "floor": 1.0,
+	"wb": 0.0, "squeeze": 1.0, "haze": 0.0}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
 const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
-	"exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 0.0, "bounce": 0.0, "floor": 1.0}
+	"exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 0.0, "bounce": 0.0, "floor": 1.0,
+	"wb": 0.0, "squeeze": 1.0, "haze": 0.0}
 
 
 func day_look() -> Dictionary:
@@ -460,6 +470,20 @@ func apply_day_look(v: Dictionary) -> void:
 	if _pano_mat:
 		_pano_mat.set_shader_parameter("energy", float(v["sky"]))
 		_pano_mat.set_shader_parameter("view_energy", float(v["view"]) if float(v["view"]) > 0.0 else float(v["sky"]))
+		_pano_mat.set_shader_parameter("squeeze", float(v["squeeze"]))
+		_pano_mat.set_shader_parameter("haze", float(v["haze"]))
+	# баланс белого после тональной кривой: по каналам, белый → чуть холоднее (как на фото — без желтизны)
+	var wb: float = float(v["wb"])
+	if wb > 0.0:
+		var gr := Gradient.new()
+		gr.set_color(0, Color(0, 0, 0))
+		gr.set_color(1, Color(1, 1, 1).lerp(Color(0.92, 0.965, 1.0), wb))
+		var gt := GradientTexture1D.new()
+		gt.gradient = gr
+		gt.width = 256
+		env.adjustment_color_correction = gt
+	else:
+		env.adjustment_color_correction = null
 	for m in _curtain_mats:
 		(m as BaseMaterial3D).emission_energy_multiplier = float(v["curt"])
 	for m in _floor_mats:
