@@ -44,6 +44,10 @@ func setup(path: String, scale_k := 1.0) -> void:
 	var players: Array = model.find_children("*", "AnimationPlayer", true, false)
 	if not players.is_empty():
 		anim = players[0]
+		# ходьба новой мамы (своя, от автора: цикл 1,17 с, шаг короче) — без скольжения ног при ~0,9 м/с
+		var wn := anim_name("walk_loop")
+		if wn != "" and anim.get_animation(wn).length < 1.5:
+			natural["walk_loop"] = 0.9
 	var skels: Array = model.find_children("*", "Skeleton3D", true, false)
 	if not skels.is_empty():
 		skel = skels[0]
