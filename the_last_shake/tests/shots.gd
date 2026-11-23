@@ -61,6 +61,24 @@ func _run() -> void:
 			await _panorama()
 		"pharmacy":
 			await _pharmacy_shots()
+		"look":                                            # кадр из точки --from=x,y,z на --at=x,y,z (глава --cp)
+			GameStateRef().checkpoint = _arg("cp", "start")
+			get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+			await secs(3.0)
+			var g: Node = get_tree().current_scene
+			d = g.get_node("Director")
+			await secs(5.0)
+			GameStateRef().set_fade(0.0)
+			d.scares.stop()
+			pl = d.player
+			shoot = true
+			for k in _arg("rooms", "").split(",", false):
+				g.lights.set_room(k, true)
+			var fr: PackedStringArray = _arg("from", "0,0,0").split(",")
+			var at: PackedStringArray = _arg("at", "0,0,0").split(",")
+			await tp(Vector3(float(fr[0]), float(fr[1]), float(fr[2])), 0.0)
+			await secs(1.0)
+			await snap("look", Vector3(float(at[0]), float(at[1]), float(at[2])))
 		"buydebug":
 			GameStateRef().checkpoint = "pharmacy_out"
 			get_tree().change_scene_to_file(GameStateRef().PROLOGUE)
