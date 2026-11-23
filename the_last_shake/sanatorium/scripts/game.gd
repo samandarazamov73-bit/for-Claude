@@ -342,13 +342,24 @@ void sky() {
 	COLOR = textureLod(pano, vec2(fract(uv.x), uv.y), 0.0).rgb * (AT_CUBEMAP_PASS ? energy : view_energy);
 }
 """
-## Подобрано по кадрам tests/shots.gd --case=lightlab рядом с фотографией: amb — рассеянный свет, win —
-## множитель света окон, sun — солнце, sky — яркость вида за окном, agx_c — контраст тональной кривой.
-## exp — экспозиция (больше — светлее), aim — насколько свет окна направлен вниз (свет неба падает на пол,
-## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
-## curt — сколько дневного света просвечивает сквозь шторы (ткань светится тёплым, как на фото).
-const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
-	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6, "gi": 0.0, "view": 0.0, "bounce": 0.6, "floor": 0.0}
+## Подобрано по кадрам tests/shots.gd --case=lightlab рядом с фотографией настоящей палаты (утро, свет из окон):
+## gi — глобальное освещение SDFGI (свет улицы входит только через окна и отражается от пола и стен; тени под
+## мебелью и у окон — сами), bounce — сколько света переотражается; sky — сила света улицы для освещения,
+## view — как ярко улица видна в окне (ярче стен, но лес различим); exp — экспозиция (больше — светлее);
+## amb — ровный рассеянный свет; win — мягкий свет окон на пол (aim — насколько вниз, cone — ширина пучка,
+## att — мягкость края); sun — солнце; curt — свет сквозь шторы; floor — пол без оранжевого оттенка;
+## sat — насыщенность, agx_c — контраст тональной кривой.
+const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
+	"exp": 0.36, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "bounce": 1.0, "floor": 1.0}
+## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
+const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 20.0, "agx_c": 1.35, "ssil": 0.0,
+	"exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 0.0, "bounce": 0.0, "floor": 1.0}
+
+
+func day_look() -> Dictionary:
+	return DAY_LOOK if quality == null or quality.level >= 1 else DAY_LOOK_LOW
+
+
 var _floor_mats: Array = []          # полы: днём без оранжевого оттенка (под лампами накаливания он был к месту)
 var _curtain_mats: Array = []
 var is_day := false                  # quality.gd: днём дальний план не размывается
@@ -400,7 +411,7 @@ func set_morning() -> void:
 				_curtain_mats.append(dm)
 	for m in _glass_mats:                                # чистое стекло днём почти не видно — за ним лес
 		var gm: BaseMaterial3D = m
-		gm.albedo_color.a = 0.1
+		gm.albedo_color.a = 0.05
 		gm.roughness = 0.05
 	moon.light_color = Color(1.0, 0.96, 0.9)
 	moon.light_angular_distance = 3.0
@@ -420,7 +431,7 @@ func set_morning() -> void:
 		_win_base.append(l.light_energy)
 	if hud:
 		hud.set_day(true)
-	apply_day_look(DAY_LOOK)
+	apply_day_look(day_look())
 
 
 func apply_day_look(v: Dictionary) -> void:

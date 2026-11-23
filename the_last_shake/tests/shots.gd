@@ -1034,10 +1034,8 @@ func _beatpose_test(g: Node, d: Node) -> void:
 ## Свет утренней палаты 204: один запуск — несколько вариантов настроек (рассеянный свет, свет окон, солнце,
 ## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
 const LAB_VARIANTS := [
-	{"name": "A2", "win": 0.35, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "ssil": 0.8, "floor": 1.0, "amb": 0.06, "exp": 0.3, "bounce": 1.0},
-	{"name": "B2", "win": 0.35, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "ssil": 0.8, "floor": 1.0, "amb": 0.08, "exp": 0.36, "bounce": 1.0},
-	{"name": "C2", "win": 0.35, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 2.0, "ssil": 0.8, "floor": 1.0, "amb": 0.06, "exp": 0.3, "bounce": 1.3},
-	{"name": "D2", "win": 0.6, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "ssil": 0.8, "floor": 1.0, "amb": 0.06, "exp": 0.3, "bounce": 1.0},
+	{"name": "final"},
+	{"name": "low", "low": 1},
 ]
 
 
@@ -1069,7 +1067,7 @@ func _lightlab() -> void:
 	for v in LAB_VARIANTS:
 		if only != "" and not only.contains(v["name"]):
 			continue
-		var look: Dictionary = g.DAY_LOOK.duplicate()
+		var look: Dictionary = (g.DAY_LOOK_LOW if v.has("low") else g.DAY_LOOK).duplicate()
 		look.merge(v, true)
 		g.apply_day_look(look)
 		var f0: int = Engine.get_frames_drawn()

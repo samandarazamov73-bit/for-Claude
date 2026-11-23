@@ -79,6 +79,8 @@ func _save(key: String, value) -> void:
 
 func apply() -> void:
 	var env: Environment = game.env
+	if game.get("is_day"):
+		game.apply_day_look.call_deferred(game.day_look())   # утро: свет под выбранное качество
 	env.volumetric_fog_enabled = fog_supported()
 	env.ssao_enabled = SSAO[level]
 	env.ssil_enabled = SSIL[level]
