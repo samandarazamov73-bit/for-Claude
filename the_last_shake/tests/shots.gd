@@ -1328,6 +1328,15 @@ func _mompose_test(g: Node, dir: Node) -> void:
 		lamp.global_position = cam.global_position + Vector3(0, 0.8, 0)
 		await secs(0.8)
 		await shot("mompose_%d" % i)
+	# в движении: шаг и бег — спереди и сбоку
+	for an in ["walk_loop", "run_loop"]:
+		m.play(an, 0.0)
+		for i in [0, 1]:
+			cam.global_position = c + views[i] + Vector3(0, 0.25, 0)
+			cam.look_at(c, Vector3.UP)
+			lamp.global_position = cam.global_position + Vector3(0, 0.8, 0)
+			await secs(0.7)
+			await shot("mompose_%s_%d" % [an, i])
 
 
 func _caught_test() -> void:
