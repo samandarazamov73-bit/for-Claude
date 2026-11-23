@@ -349,7 +349,7 @@ void sky() {
 ## amb — ровный рассеянный свет; win — мягкий свет окон на пол (aim — насколько вниз, cone — ширина пучка,
 ## att — мягкость края); sun — солнце; curt — свет сквозь шторы; floor — пол без оранжевого оттенка;
 ## sat — насыщенность, agx_c — контраст тональной кривой.
-const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 1.5, "agx_c": 1.35, "ssil": 0.8,
+const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
 	"exp": 0.36, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "bounce": 1.0, "floor": 1.0}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
 const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
@@ -401,8 +401,13 @@ func set_morning() -> void:
 		var mi: MeshInstance3D = n
 		for i in mi.mesh.get_surface_count():
 			var cm = mi.get_active_material(i)
-			# только плотные шторы; тюль (полупрозрачный) не светится — сквозь него виден лес
-			if cm is BaseMaterial3D and (cm as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_ALPHA:
+			if cm is BaseMaterial3D and (cm as BaseMaterial3D).transparency == BaseMaterial3D.TRANSPARENCY_ALPHA:
+				# тюль днём — тонкая прозрачная сетка: на солнце не белая пелена, сквозь неё виден лес
+				var tm: BaseMaterial3D = cm.duplicate()
+				tm.albedo_color.a *= 0.3
+				mi.set_surface_override_material(i, tm)
+				continue
+			if cm is BaseMaterial3D:
 				var dm: BaseMaterial3D = cm.duplicate()
 				dm.emission_enabled = true
 				dm.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
