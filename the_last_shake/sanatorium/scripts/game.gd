@@ -489,7 +489,7 @@ func apply_day_look(v: Dictionary) -> void:
 		if not fm.has_meta("night_color"):
 			fm.set_meta("night_color", fm.albedo_color)
 		fm.albedo_color = (fm.get_meta("night_color") as Color) * Color(1, 1, 1).lerp(Color(0.84, 0.9, 0.98), float(v["floor"])) \
-				* Color(1, 1, 1).lerp(Color(0.85, 0.9, 1.0), clampf(float(v["wb"]), 0.0, 1.0))   # меньше рыжего отсвета от пола
+				* Color(1, 1, 1).lerp(Color(0.74, 0.87, 1.0), clampf(float(v["wb"]), 0.0, 1.0))   # линолеум бежевее, меньше рыжего отсвета
 	# gi > 0 — настоящее глобальное освещение (SDFGI): свет неба и солнца входит только через окна,
 	# отражается от пола и стен; тени под мебелью и у окон получаются сами, как в жизни
 	var gi: float = float(v["gi"])
