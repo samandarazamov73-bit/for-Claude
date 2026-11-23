@@ -362,7 +362,7 @@ const DAY_LOOK := {"amb": 0.13, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 3.
 	"wb": 1.0, "squeeze": 1.4, "haze": 0.03, "minsens": 28.0}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
 const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
-	"exp": 0.17, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 0.0, "bounce": 0.0, "floor": 1.0,
+	"exp": 0.19, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 0.0, "bounce": 0.0, "floor": 1.0,
 	"wb": 1.0, "squeeze": 1.4, "haze": 0.03, "minsens": 20.0}
 
 
