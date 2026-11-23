@@ -695,7 +695,7 @@ func _build_house() -> void:
 			bb = b if first else bb.merge(b)
 			first = false
 		ph.position = Vector3(-5.85, 0.1 + 0.32 - bb.position.y, -4.95)   # на высоком табурете: прилавок ~1,1 м
-		ph.rotation.y = 0.0
+		ph.rotation.y = PI                                # лицом к окошку (модель смотрит в −Z)
 
 
 ## Дверь аптеки открывается, когда коляска подъезжает (анимация из модели) — провизор впускает.
