@@ -1036,7 +1036,8 @@ func _beatpose_test(g: Node, d: Node) -> void:
 const LAB_VARIANTS := [
 	{"name": "final"},
 	{"name": "low", "low": 1},
-	{"name": "H1", "exp": 0.28},
+	{"name": "J1", "sky": 26.0, "minsens": 12.0},
+	{"name": "J2", "sky": 26.0},
 ]
 
 
