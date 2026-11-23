@@ -643,7 +643,7 @@ func _seg_start() -> void:
 	await secs(4.0)
 	await tp(Vector3(52.5, 1.2, -8.4), 0.0)
 	door.interact(pl)
-	await wait_for(func(): return door.angle > 18.0, 20, "scream door opens")
+	await wait_for(func(): return absf(door.angle) > 18.0, 20, "scream door opens")
 	await secs(1.0)
 	await tp(Vector3(52.5, 1.2, -12.6), PI)
 	await wait_for(func(): return d.act == "locked", 30, "locked in")
