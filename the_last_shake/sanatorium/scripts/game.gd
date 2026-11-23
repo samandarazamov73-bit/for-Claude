@@ -401,7 +401,8 @@ func set_morning() -> void:
 		var mi: MeshInstance3D = n
 		for i in mi.mesh.get_surface_count():
 			var cm = mi.get_active_material(i)
-			if cm is BaseMaterial3D and (cm as BaseMaterial3D).transparency == BaseMaterial3D.TRANSPARENCY_ALPHA:
+			if cm is BaseMaterial3D and not (cm as BaseMaterial3D).transparency in [BaseMaterial3D.TRANSPARENCY_DISABLED,
+					BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR]:
 				# тюль днём — тонкая прозрачная сетка: на солнце не белая пелена, сквозь неё виден лес
 				var tm: BaseMaterial3D = cm.duplicate()
 				tm.albedo_color.a *= 0.3

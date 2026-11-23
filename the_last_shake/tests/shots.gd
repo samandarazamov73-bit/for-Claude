@@ -1060,6 +1060,19 @@ func _lightlab() -> void:
 	pl.look_pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -0.9, 0.9)
 	await secs(1.5)
 	get_tree().paused = true
+	if _arg("probe", "") != "":                          # что висит в окне палаты: сетки и материалы
+		var wpos := Vector3(11.4, 6.0, 1.2)
+		for w in g.find_windows():
+			if (w["pos"] as Vector3).distance_to(Vector3(10.7, 4.6, 0.0)) < (wpos - Vector3(0, 1.3, 0)).distance_to(Vector3(10.7, 4.6, 0.0)):
+				wpos = (w["pos"] as Vector3) + Vector3(0, 1.2, 0)
+		print("PROBE window at ", wpos)
+		for n in g.building.find_children("*", "MeshInstance3D", true, false):
+			var mi: MeshInstance3D = n
+			var bb: AABB = mi.global_transform * mi.get_aabb()
+			if bb.grow(0.4).has_point(wpos) and bb.size.length() < 60.0:
+				for i in mi.mesh.get_surface_count():
+					var m = mi.get_active_material(i)
+					print("PROBE ", mi.name, " ", m.resource_name if m else "-", " tr=", m.transparency if m is BaseMaterial3D else -1, " a=", m.albedo_color.a if m is BaseMaterial3D else -1.0)
 	pl.process_mode = Node.PROCESS_MODE_ALWAYS             # камера игрока обновляется и на паузе
 	RenderingServer.environment_set_sdfgi_frames_to_converge(RenderingServer.ENV_SDFGI_CONVERGE_IN_5_FRAMES)
 	g.cam_attr.auto_exposure_speed = 8.0
