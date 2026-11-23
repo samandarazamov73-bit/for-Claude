@@ -357,9 +357,9 @@ void sky() {
 ## sat — насыщенность, agx_c — контраст тональной кривой.
 ## wb — нейтральный баланс белого (убирает желтизну от тёплого пола и штор), squeeze/haze — лес за окном
 ## ниже и дальше (см. MORNING_SKY_SHADER).
-const DAY_LOOK := {"amb": 0.13, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
+const DAY_LOOK := {"amb": 0.13, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 3.2, "agx_c": 1.35, "ssil": 0.8,
 	"exp": 0.26, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 1.5, "bounce": 1.0, "floor": 1.0,
-	"wb": 1.0, "squeeze": 1.4, "haze": 0.03, "minsens": 20.0}
+	"wb": 1.0, "squeeze": 1.4, "haze": 0.03, "minsens": 28.0}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
 const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
 	"exp": 0.17, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 0.0, "bounce": 0.0, "floor": 1.0,
@@ -460,7 +460,8 @@ func apply_day_look(v: Dictionary) -> void:
 	moon.light_energy = float(v["sun"])
 	if cam_attr:
 		cam_attr.auto_exposure_scale = float(v["exp"])
-		cam_attr.auto_exposure_min_sensitivity = float(v.get("minsens", 20.0))   # насколько глаз «прищуривается» на ярком свету
+		# нижний порог яркости для автоэкспозиции: выше — комната темнее (глаз не «вытягивает» её до белого)
+		cam_attr.auto_exposure_min_sensitivity = float(v.get("minsens", 20.0))
 	for i in mini(_window_lights.size(), _win_base.size()):
 		var l: SpotLight3D = _window_lights[i]
 		l.light_energy = float(_win_base[i]) * float(v["win"])
