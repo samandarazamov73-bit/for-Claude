@@ -348,7 +348,8 @@ void sky() {
 ## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
 ## curt — сколько дневного света просвечивает сквозь шторы (ткань светится тёплым, как на фото).
 const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
-	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6, "gi": 0.0, "view": 0.0}
+	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6, "gi": 0.0, "view": 0.0, "bounce": 0.6, "floor": 0.0}
+var _floor_mats: Array = []          # полы: днём без оранжевого оттенка (под лампами накаливания он был к месту)
 var _curtain_mats: Array = []
 var is_day := false                  # quality.gd: днём дальний план не размывается
 var _win_base: Array = []
@@ -442,6 +443,11 @@ func apply_day_look(v: Dictionary) -> void:
 		_pano_mat.set_shader_parameter("view_energy", float(v["view"]) if float(v["view"]) > 0.0 else float(v["sky"]))
 	for m in _curtain_mats:
 		(m as BaseMaterial3D).emission_energy_multiplier = float(v["curt"])
+	for m in _floor_mats:
+		var fm: BaseMaterial3D = m
+		if not fm.has_meta("night_color"):
+			fm.set_meta("night_color", fm.albedo_color)
+		fm.albedo_color = (fm.get_meta("night_color") as Color) * Color(1, 1, 1).lerp(Color(0.84, 0.9, 0.98), float(v["floor"]))
 	# gi > 0 — настоящее глобальное освещение (SDFGI): свет неба и солнца входит только через окна,
 	# отражается от пола и стен; тени под мебелью и у окон получаются сами, как в жизни
 	var gi: float = float(v["gi"])
@@ -453,7 +459,7 @@ func apply_day_look(v: Dictionary) -> void:
 		env.sdfgi_min_cell_size = 0.15
 		env.sdfgi_y_scale = Environment.SDFGI_Y_SCALE_75_PERCENT
 		env.sdfgi_energy = gi
-		env.sdfgi_bounce_feedback = 0.6
+		env.sdfgi_bounce_feedback = float(v["bounce"])
 		env.sdfgi_normal_bias = 1.1
 		env.sdfgi_probe_bias = 1.1
 
@@ -1178,6 +1184,7 @@ func _tune_materials() -> void:
 				_grime(m, g_ceiling, Vector3(1.0 / 10.0, 1.0, 1.0 / 10.0), Vector3.ZERO)
 			elif nm in GRIME_FLOOR:
 				_grime(m, g_floor, Vector3(1.0 / 10.0, 1.0, 1.0 / 10.0), Vector3.ZERO)
+				_floor_mats.append(m)
 			elif nm.begins_with("M_Emissive_"):
 				# матовое стекло плафона намного ярче потолка вокруг — лампа видна как светящийся диск
 				m.emission_energy_multiplier *= 0.8

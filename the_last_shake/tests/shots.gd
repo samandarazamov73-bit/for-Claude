@@ -1034,11 +1034,10 @@ func _beatpose_test(g: Node, d: Node) -> void:
 ## Свет утренней палаты 204: один запуск — несколько вариантов настроек (рассеянный свет, свет окон, солнце,
 ## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
 const LAB_VARIANTS := [
-	{"name": "M", "amb": 0.18, "win": 1.0, "sky": 20.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6},
-	{"name": "V", "amb": 0.04, "win": 0.35, "sky": 30.0, "view": 6.0, "exp": 0.2, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.8},
-	{"name": "X", "amb": 0.05, "win": 0.6, "sky": 30.0, "view": 6.0, "exp": 0.2, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.8},
-	{"name": "Y", "amb": 0.04, "win": 0.35, "sky": 40.0, "view": 6.0, "exp": 0.22, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.6, "gi": 2.0, "ssil": 0.8},
-	{"name": "Z", "amb": 0.05, "win": 0.5, "sun": 1.4, "sky": 30.0, "view": 6.0, "exp": 0.24, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.5, "gi": 1.5, "ssil": 0.8},
+	{"name": "A2", "win": 0.35, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "ssil": 0.8, "floor": 1.0, "amb": 0.06, "exp": 0.3, "bounce": 1.0},
+	{"name": "B2", "win": 0.35, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "ssil": 0.8, "floor": 1.0, "amb": 0.08, "exp": 0.36, "bounce": 1.0},
+	{"name": "C2", "win": 0.35, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 2.0, "ssil": 0.8, "floor": 1.0, "amb": 0.06, "exp": 0.3, "bounce": 1.3},
+	{"name": "D2", "win": 0.6, "sky": 30.0, "view": 4.0, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "ssil": 0.8, "floor": 1.0, "amb": 0.06, "exp": 0.3, "bounce": 1.0},
 ]
 
 
