@@ -349,10 +349,10 @@ void sky() {
 ## amb — ровный рассеянный свет; win — мягкий свет окон на пол (aim — насколько вниз, cone — ширина пучка,
 ## att — мягкость края); sun — солнце; curt — свет сквозь шторы; floor — пол без оранжевого оттенка;
 ## sat — насыщенность, agx_c — контраст тональной кривой.
-const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 2.5, "agx_c": 1.35, "ssil": 0.8,
+const DAY_LOOK := {"amb": 0.1, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 1.5, "agx_c": 1.35, "ssil": 0.8,
 	"exp": 0.36, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 1.5, "bounce": 1.0, "floor": 1.0}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
-const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 20.0, "agx_c": 1.35, "ssil": 0.0,
+const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
 	"exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6, "gi": 0.0, "bounce": 0.0, "floor": 1.0}
 
 
@@ -382,7 +382,7 @@ func set_morning() -> void:
 		_pano_mat.shader = sh
 		_pano_mat.set_shader_parameter("pano", load(MORNING_PANORAMA))
 		env.sky.sky_material = _pano_mat
-	env.ambient_light_color = Color(0.94, 0.96, 1.0)    # свет неба, отражённый стенами, — нейтральный
+	env.ambient_light_color = Color(1.0, 0.98, 0.95)    # свет неба, отражённый кремовыми стенами
 	env.ssao_intensity = 2.0                             # мягкие контактные тени под мебелью, как на фото
 	env.volumetric_fog_density = 0.0                     # днём воздух чистый, без дымки
 	env.adjustment_color_correction = null               # нейтральный баланс белого
@@ -412,6 +412,7 @@ func set_morning() -> void:
 	for m in _glass_mats:                                # чистое стекло днём почти не видно — за ним лес
 		var gm: BaseMaterial3D = m
 		gm.albedo_color.a = 0.05
+		gm.albedo_texture = null                      # без разводов грязи: днём через окно ясно виден лес
 		gm.roughness = 0.05
 	moon.light_color = Color(1.0, 0.96, 0.9)
 	moon.light_angular_distance = 3.0
@@ -597,7 +598,7 @@ func _daylight_windows(to_sun: Vector3) -> void:
 		l.spot_angle = 80.0
 		l.spot_angle_attenuation = 0.6
 		l.spot_attenuation = 1.0
-		l.light_specular = 0.25
+		l.light_specular = 0.0                     # окно — большой мягкий источник: точечного блика на коже и лаке нет
 		l.light_volumetric_fog_energy = 0.15
 		l.shadow_enabled = false
 		l.distance_fade_enabled = true
