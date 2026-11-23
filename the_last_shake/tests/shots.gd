@@ -1035,11 +1035,11 @@ func _beatpose_test(g: Node, d: Node) -> void:
 ## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
 const LAB_VARIANTS := [
 	{"name": "M", "amb": 0.18, "win": 1.0, "sky": 20.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.6},
-	{"name": "S", "amb": 0.02, "win": 0.0, "sky": 20.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 1.0, "ssil": 0.6},
-	{"name": "T", "amb": 0.02, "win": 0.0, "sky": 20.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 2.0, "ssil": 0.6},
-	{"name": "U", "amb": 0.02, "win": 0.0, "sky": 40.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 1.0, "ssil": 0.6},
-	{"name": "V", "amb": 0.04, "win": 0.35, "sky": 24.0, "exp": 0.16, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.8},
-	{"name": "W", "amb": 0.02, "win": 0.0, "sun": 1.8, "sky": 24.0, "exp": 0.16, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.6},
+	{"name": "S", "amb": 0.02, "win": 0.0, "sky": 20.0, "view": 6.0, "exp": 0.2, "sat": 0.95, "curt": 0.6, "gi": 1.0, "ssil": 0.6},
+	{"name": "T", "amb": 0.02, "win": 0.0, "sky": 40.0, "view": 6.0, "exp": 0.2, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.6},
+	{"name": "U", "amb": 0.03, "win": 0.0, "sky": 60.0, "view": 8.0, "exp": 0.2, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.6},
+	{"name": "V", "amb": 0.04, "win": 0.35, "sky": 30.0, "view": 6.0, "exp": 0.2, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.8},
+	{"name": "W", "amb": 0.02, "win": 0.0, "sun": 1.8, "sky": 40.0, "view": 6.0, "exp": 0.2, "sat": 0.95, "curt": 0.6, "gi": 1.5, "ssil": 0.6},
 ]
 
 
@@ -1064,6 +1064,12 @@ func _lightlab() -> void:
 	pl.look_pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -0.9, 0.9)
 	await secs(1.5)
 	get_tree().paused = true
+	await frames(2)
+	pl.rotation.y = atan2(-to.x, -to.z)                   # сюжет мог повернуть голову — смотрим снова туда же
+	pl.look_yaw = 0.0
+	pl.look_pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -0.9, 0.9)
+	pl.reset_physics_interpolation()
+	RenderingServer.environment_set_sdfgi_frames_to_converge(RenderingServer.ENV_SDFGI_CONVERGE_IN_5_FRAMES)
 	g.cam_attr.auto_exposure_speed = 8.0
 	var only := _arg("variants", "")
 	for v in LAB_VARIANTS:
@@ -1072,7 +1078,11 @@ func _lightlab() -> void:
 		var look: Dictionary = g.DAY_LOOK.duplicate()
 		look.merge(v, true)
 		g.apply_day_look(look)
-		await secs(6.0 if float(look["gi"]) > 0.0 else 3.0)
+		var f0: int = Engine.get_frames_drawn()
+		await secs(3.0)
+		if float(look["gi"]) > 0.0:
+			await frames(maxi(0, 45 - (Engine.get_frames_drawn() - f0)))   # глобальное освещение набирает свет
+		print("frames: ", Engine.get_frames_drawn() - f0)
 		await shot("lab_" + v["name"])
 		print("LAB ", v)
 	get_tree().paused = false

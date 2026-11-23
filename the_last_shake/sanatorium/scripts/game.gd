@@ -334,11 +334,12 @@ const MORNING_PANORAMA := "res://sanatorium/assets/morning_panorama.jpg"
 const MORNING_SKY_SHADER := """
 shader_type sky;
 uniform sampler2D pano : source_color, filter_linear, repeat_enable;
-uniform float energy = 1.0;
+uniform float energy = 1.0;        // свет улицы, который входит в окна (освещение и отражения)
+uniform float view_energy = 1.0;   // как улица видна в окне: ярче стен, но не белое пятно (как на фото)
 void sky() {
 	vec3 d = normalize(EYEDIR);
 	vec2 uv = vec2(atan(d.x, -d.z) / (2.0 * PI), acos(clamp(d.y, -1.0, 1.0)) / PI);
-	COLOR = textureLod(pano, vec2(fract(uv.x), uv.y), 0.0).rgb * energy;
+	COLOR = textureLod(pano, vec2(fract(uv.x), uv.y), 0.0).rgb * (AT_CUBEMAP_PASS ? energy : view_energy);
 }
 """
 ## Подобрано по кадрам tests/shots.gd --case=lightlab рядом с фотографией: amb — рассеянный свет, win —
@@ -347,7 +348,7 @@ void sky() {
 ## а не на верх стен), cone — ширина пучка окна (градусы), sat — насыщенность.
 ## curt — сколько дневного света просвечивает сквозь шторы (ткань светится тёплым, как на фото).
 const DAY_LOOK := {"amb": 0.15, "win": 2.0, "sun": 0.9, "sky": 1.6, "agx_c": 1.35, "ssil": 1.5, "exp": 0.3,
-	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6, "gi": 0.0}
+	"aim": 0.45, "cone": 80.0, "sat": 1.0, "curt": 0.0, "att": 0.6, "gi": 0.0, "view": 0.0}
 var _curtain_mats: Array = []
 var is_day := false                  # quality.gd: днём дальний план не размывается
 var _win_base: Array = []
@@ -438,6 +439,7 @@ func apply_day_look(v: Dictionary) -> void:
 		l.global_transform.basis = Basis.looking_at((inward + Vector3(0, -float(v["aim"]), 0)).normalized(), Vector3.UP)
 	if _pano_mat:
 		_pano_mat.set_shader_parameter("energy", float(v["sky"]))
+		_pano_mat.set_shader_parameter("view_energy", float(v["view"]) if float(v["view"]) > 0.0 else float(v["sky"]))
 	for m in _curtain_mats:
 		(m as BaseMaterial3D).emission_energy_multiplier = float(v["curt"])
 	# gi > 0 — настоящее глобальное освещение (SDFGI): свет неба и солнца входит только через окна,
