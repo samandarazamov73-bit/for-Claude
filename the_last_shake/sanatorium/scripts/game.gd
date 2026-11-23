@@ -472,25 +472,22 @@ func apply_day_look(v: Dictionary) -> void:
 		_pano_mat.set_shader_parameter("view_energy", float(v["view"]) if float(v["view"]) > 0.0 else float(v["sky"]))
 		_pano_mat.set_shader_parameter("squeeze", float(v["squeeze"]))
 		_pano_mat.set_shader_parameter("haze", float(v["haze"]))
-	# баланс белого после тональной кривой: по каналам, белый → чуть холоднее (как на фото — без желтизны)
-	var wb: float = float(v["wb"])
-	if wb > 0.0:
-		var gr := Gradient.new()
-		gr.set_color(0, Color(0, 0, 0))
-		gr.set_color(1, Color(1, 1, 1).lerp(Color(0.92, 0.965, 1.0), wb))
-		var gt := GradientTexture1D.new()
-		gt.gradient = gr
-		gt.width = 256
-		env.adjustment_color_correction = gt
-	else:
-		env.adjustment_color_correction = null
+	# баланс белого — светом, как в жизни: wb > 0 — солнце, рассеянный свет и свечение штор нейтральнее
+	# (таблица цвета после тональной кривой в Godot искажала полутона — тёмная пересыщенная картинка)
+	var wb: float = clampf(float(v["wb"]), 0.0, 1.0)
+	env.adjustment_color_correction = null
+	env.ambient_light_color = Color(1.0, 0.98, 0.95).lerp(Color(0.93, 0.96, 1.0), wb)
+	moon.light_color = Color(1.0, 0.96, 0.9).lerp(Color(1.0, 0.99, 0.97), wb)
+	for m in _curtain_mats:
+		(m as BaseMaterial3D).emission = Color(1.0, 0.9, 0.75).lerp(Color(1.0, 0.95, 0.88), wb)
 	for m in _curtain_mats:
 		(m as BaseMaterial3D).emission_energy_multiplier = float(v["curt"])
 	for m in _floor_mats:
 		var fm: BaseMaterial3D = m
 		if not fm.has_meta("night_color"):
 			fm.set_meta("night_color", fm.albedo_color)
-		fm.albedo_color = (fm.get_meta("night_color") as Color) * Color(1, 1, 1).lerp(Color(0.84, 0.9, 0.98), float(v["floor"]))
+		fm.albedo_color = (fm.get_meta("night_color") as Color) * Color(1, 1, 1).lerp(Color(0.84, 0.9, 0.98), float(v["floor"])) \
+				* Color(1, 1, 1).lerp(Color(0.9, 0.95, 1.0), clampf(float(v["wb"]), 0.0, 1.0))   # меньше рыжего отсвета от пола
 	# gi > 0 — настоящее глобальное освещение (SDFGI): свет неба и солнца входит только через окна,
 	# отражается от пола и стен; тени под мебелью и у окон получаются сами, как в жизни
 	var gi: float = float(v["gi"])
