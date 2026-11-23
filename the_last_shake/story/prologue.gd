@@ -694,7 +694,7 @@ func _build_house() -> void:
 			var b: AABB = (m as MeshInstance3D).transform * (m as MeshInstance3D).get_aabb()
 			bb = b if first else bb.merge(b)
 			first = false
-		ph.position = Vector3(-5.85, 0.1 - bb.position.y, -4.95)
+		ph.position = Vector3(-5.85, 0.1 + 0.32 - bb.position.y, -4.95)   # на высоком табурете: прилавок ~1,1 м
 		ph.rotation.y = 0.0
 
 
