@@ -65,6 +65,7 @@ func _ready() -> void:
 	_build_occluders_and_ranges()
 	stats["models_swapped"] = swap_models(building)     # свои 3D-модели из sanatorium/models/
 	stats["models_on_tables"] = dress_tables(building)  # термос, кружка, хлеб на столах; мониторы на столиках
+	stats["reseated"] = reseat_items(building)          # чемоданы, книги, радио… — на верх своей мебели
 	stats["lamps_swapped"] = swap_fixtures()            # свои лампы-трубки и абажуры на месте старых
 	stats["decor"] = Decor.apply(building, model_type, has_model)   # свои картины, циферблаты, экраны, таблички
 	_build_furniture_colliders()
@@ -100,6 +101,8 @@ func _ready() -> void:
 	quality.setup(self)
 	stats["load_ms"] = Time.get_ticks_msec() - t0
 	print("Sanatorium loaded in %d ms: %s" % [stats["load_ms"], str(stats)])
+	if not shrunk.is_empty():
+		print("SHRUNK ", shrunk)
 	var args := OS.get_cmdline_user_args()
 	if "--test" in args or "--shots" in args or "--bench" in args:
 		var tr: Node = load("res://sanatorium/tests/test_runner.gd").new()
@@ -753,7 +756,10 @@ const MODEL_ALIASES := {
 }
 ## Ещё варианты к своим моделям типа (больничная тумбочка — среди тумбочек).
 const MODEL_EXTRA := {"bedside": ["epi_cabinet_2"]}
-## Насколько модель может быть шире (x) и глубже (z) старой коробки; по умолчанию 1.15. Батарея — с трубами вдоль
+## Свои модели автора — в настоящем размере (уже приведены к нему, tools/user_assets/fix_models.py): старые коробки
+## здания бывают меньше настоящих вещей, и раньше модели под них ужимались (каталка — до 67 %, тумбочка — до 62 %).
+## Уменьшаем, только если модель больше коробки во столько раз, что явно не помещается (SWAP_FIT, по умолчанию 2).
+## Насколько модель может быть шире (x) и глубже (z) старой коробки. Батарея — с трубами вдоль
 ## стены, полка — глубже вешалки для полотенец.
 const SWAP_FIT := {"Radiator": Vector2(2.05, 99.0), "towel_rail": Vector2(1.3, 99.0)}
 
@@ -817,6 +823,9 @@ static func _scene_aabb(n: Node3D) -> AABB:
 	return box
 
 
+static var shrunk := {}              # тип → во сколько раз пришлось уменьшить свою модель (отладка)
+
+
 static func swap_models(root: Node) -> int:
 	var have := {}
 	for t in MODEL_TYPES:
@@ -848,12 +857,14 @@ static func swap_models(root: Node) -> int:
 		var ob: AABB = old.mesh.get_aabb()
 		var nb: AABB = _scene_aabb(inst)
 		var k := 1.0
-		var fit: Vector2 = SWAP_FIT.get(t, Vector2(1.15, 1.15))
+		var fit: Vector2 = SWAP_FIT.get(t, Vector2(2.0, 2.0))
 		if nb.size.x > 0.05 and ob.size.x > 0.05:
 			k = minf(k, ob.size.x * fit.x / nb.size.x)
 		if nb.size.z > 0.05 and ob.size.z > 0.05:
 			k = minf(k, ob.size.z * fit.y / nb.size.z)
 		inst.scale = Vector3.ONE * k
+		if k < 0.98:
+			shrunk[t] = minf(float(shrunk.get(t, 1.0)), k)
 		nb = AABB(nb.position * k, nb.size * k)
 		var y: float = ob.position.y - nb.position.y
 		if SWAP_TOP.has(t):
@@ -867,6 +878,73 @@ static func swap_models(root: Node) -> int:
 			gi.layers = old.layers
 		old.visible = false
 		n += 1
+	return n
+
+
+## Мелкие вещи, что лежат на мебели (чемодан на шкафу, книги на полке, радио на тумбочке): после замены мебели
+## на свои модели её верх стал другим — вещь висела в воздухе или уходила внутрь. Ставим каждую на верх того,
+## что под ней на самом деле (самая высокая мебель под её серединой, чей верх недалеко от её низа).
+const ON_TOP := ["suitcase_a", "suitcase_b", "travel_bag", "books", "binders", "carafe", "radio", "telephone",
+	"vase", "kettle", "samovar", "tv_small", "paper_stack", "game_chess", "game_dominoes", "microscope", "inhaler",
+	"projector"]
+
+
+static func _world_aabb(n: Node3D) -> AABB:
+	var out := AABB()
+	var first := true
+	var list: Array = [n] if n is VisualInstance3D else []
+	list.append_array(n.find_children("*", "VisualInstance3D", true, false))
+	for v in list:
+		if not (v as VisualInstance3D).is_visible_in_tree():
+			continue
+		var b: AABB = (v as VisualInstance3D).global_transform * (v as VisualInstance3D).get_aabb()
+		out = b if first else out.merge(b)
+		first = false
+	return out
+
+
+static func reseat_items(root: Node) -> int:
+	var supports: Array = []        # [aabb, node]
+	var items: Array = []           # [node, aabb]
+	for c in root.find_children("*", "Node3D", true, false):
+		var nd: Node3D = c
+		var nm := String(nd.name)
+		var is_holder := nm.ends_with("_model")
+		var t := model_type(nm.trim_suffix("_model"))
+		if t == "":
+			continue
+		if not is_holder and not (nd is MeshInstance3D and nd.visible):
+			continue
+		if not nd.is_visible_in_tree():
+			continue
+		var b := _world_aabb(nd)
+		if b.size.length() < 0.01:
+			continue
+		if t in ON_TOP:
+			items.append([nd, b])
+		elif b.size.y > 0.25:
+			supports.append([b, nd])
+	var n := 0
+	for it in items:
+		var nd: Node3D = it[0]
+		var b: AABB = it[1]
+		var floor_y: float = FIRST_FLOOR + roundf((b.position.y - FIRST_FLOOR) / STOREY) * STOREY
+		if b.position.y - floor_y < 0.12:
+			continue                                    # стоит на полу (чемодан под кроватью) — не трогать
+		var c := b.get_center()
+		var best := -1e9
+		for sp in supports:
+			var sb: AABB = sp[0]
+			if c.x < sb.position.x or c.x > sb.end.x or c.z < sb.position.z or c.z > sb.end.z:
+				continue
+			var top: float = sb.end.y
+			# верх опоры — рядом с низом вещи; если он намного выше, вещь стоит внутри (книги на полке шкафа)
+			if top > b.position.y + 0.6 or top < b.position.y - 0.9:
+				continue
+			best = maxf(best, top)
+		if best > -1e8 and absf(best - b.position.y) > 0.01:
+			nd.global_position.y += best - b.position.y + 0.002
+			n += 1
 	return n
 
 

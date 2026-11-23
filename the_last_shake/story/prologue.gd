@@ -99,7 +99,11 @@ var _preload := false
 var _mom_aside := false
 var _mom_v := 0.0                 # скорость мамы по тропинке (плавная)
 var _mom_still := 0.0
-var pharmacy := false             # глава 5: ночью из санатория к аптечному киоску у остановки и назад
+var pharmacy := false             # глава 5: ночью из санатория в аптеку (дом через дорогу от остановки) и назад
+var pre_s := 0.0                   # глава 5: столько метров пути — от прилавка аптеки до остановки
+var house: Node3D                  # дом с аптекой у остановки (модель автора: props/pharmacy_house.glb)
+var _house_anim: AnimationPlayer
+var _house_door_open := false
 var has_pills := false
 var kiosk_point := Vector3.ZERO   # окошко киоска (мир)
 var dawn := 0.0                   # глава 5, путь назад от аптеки: 0 — ночь, 1 — солнце взошло
@@ -116,6 +120,7 @@ func _ready() -> void:
 	GameState.set_loading(true, "Загрузка леса…")
 	await get_tree().process_frame
 	await get_tree().process_frame
+	pharmacy = GameState.checkpoint == "pharmacy_out"
 	_build_world()
 	_build_bus()
 	_build_hero()
@@ -140,7 +145,6 @@ func _ready() -> void:
 	terrain.update_lods(cam.global_position, true)
 	forest.lod_manager.update_now(cam)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	pharmacy = GameState.checkpoint == "pharmacy_out"
 	if pharmacy:
 		_start_pharmacy()
 		return
@@ -159,11 +163,18 @@ func _build_world() -> void:
 	road.build(JSON.parse_string(FileAccess.get_file_as_string(str(meta["road"]))))
 	forest.build(meta, terrain)
 	site = JSON.parse_string(FileAccess.get_file_as_string("res://resources/world/story_site.json"))
+	# глава 5: путь начинается у прилавка аптеки в доме через дорогу — дверь, пандус, тротуар, дорога, остановка
+	if pharmacy and site.has("house"):
+		var hr: Array = site["house"]["route"]
+		for k in hr.size():
+			var q: Array = hr[k]
+			path.append(Vector3(float(q[0]), float(q[1]), float(q[2])))
+			path_half.append(0.75 if k <= 3 else (0.85 if k <= 6 else 1.8))
 	for p in site["path"]:
 		path.append(Vector3(float(p[0]), float(p[1]), float(p[2])))
+		if path_half.size() < path.size():
+			path_half.append(PATH_HALF)
 	forest_count = path.size()
-	for i in forest_count:
-		path_half.append(PATH_HALF)
 	var b: Dictionary = site["building"]
 	site_xf = Transform3D(Basis(Vector3.UP, float(b["yaw"])), Vector3(float(b["origin"][0]), float(b["origin"][1]), float(b["origin"][2])))
 	# дальше тропинка продолжается маршрутом коляски: вдоль пандуса, вверх с разворотом, к двери и в тамбур
@@ -182,6 +193,8 @@ func _build_world() -> void:
 		acc += (path[i] - path[i - 1]).length()
 		path_cum.append(acc)
 	forest_end_s = path_cum[forest_count - 1]
+	if pharmacy and site.has("house"):
+		pre_s = path_cum[site["house"]["route"].size()]          # длина пути от прилавка до остановки
 	door_stop_s = path_cum[-1]
 	mom_stop_s = path_cum[-1]
 	var inv: Transform3D = site_xf.affine_inverse()
@@ -295,11 +308,15 @@ const DAY_KEYS := [
 	[0.0, 17.0, Color(1.0, 0.95, 0.88), 1.35, Color(0.5, 0.55, 0.6), Color(0.74, 0.76, 0.76), Color(0.66, 0.69, 0.7), 240.0, 1.15, 0.78],
 	[0.38, 7.0, Color(1.0, 0.74, 0.5), 1.15, Color(0.44, 0.47, 0.55), Color(0.8, 0.66, 0.56), Color(0.64, 0.58, 0.54), 190.0, 1.1, 0.75],
 	[0.6, 3.0, Color(1.0, 0.58, 0.4), 0.65, Color(0.40, 0.44, 0.56), Color(0.74, 0.6, 0.55), Color(0.56, 0.51, 0.5), 125.0, 0.9, 0.68],
-	# дальше не ночь, а поздние синие сумерки: небо светлее земли, лес и здание видно без фонаря.
-	# Небо почти целиком закрыто туманом (fog_sky_affect), поэтому его цвет задаёт в основном цвет тумана.
-	[0.8, 25.0, Color(0.66, 0.74, 0.9), 0.3, Color(0.30, 0.35, 0.5), Color(0.56, 0.56, 0.64), Color(0.42, 0.45, 0.54), 110.0, 0.75, 0.7],
-	[1.0, 32.0, Color(0.66, 0.74, 0.92), 0.32, Color(0.24, 0.28, 0.42), Color(0.46, 0.47, 0.56), Color(0.34, 0.36, 0.45), 95.0, 0.62, 0.66],
+	# по лесу темнеет постепенно: синие сумерки — и к дверям санатория уже ночь, такая же, как в окнах внутри
+	# (свет — луна в тумане, дальше нескольких метров — только с фонарём). Небо почти целиком закрыто туманом
+	# (fog_sky_affect), поэтому его цвет задаёт в основном цвет тумана.
+	[0.8, 25.0, Color(0.66, 0.74, 0.9), 0.24, Color(0.2, 0.24, 0.36), Color(0.38, 0.39, 0.47), Color(0.3, 0.32, 0.4), 100.0, 0.5, 0.68],
+	NIGHT_KEY,
 ]
+## Ночь — одна на весь сюжет: у санатория в начале, по пути в аптеку и первая точка рассвета (DAWN_KEYS).
+const NIGHT_KEY := [1.0, 32.0, Color(0.62, 0.7, 0.9), 0.12, Color(0.03, 0.04, 0.07), Color(0.08, 0.09, 0.13),
+	Color(0.07, 0.08, 0.11), 80.0, 0.22, 0.6]
 
 
 ## 0 — пасмурный серый день в тумане, 0.38 — вечер у остановки, 1 — глубокие сумерки у санатория (свет — луна).
@@ -335,13 +352,15 @@ func set_day(t: float) -> void:
 	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
 	env.adjustment_saturation = lerpf(float(a[9]), float(b[9]), k)
 	env.volumetric_fog_albedo = Color(0.9, 0.92, 0.93).lerp(Color(0.3, 0.32, 0.38), smoothstep(0.5, 1.0, day))
-	# сумерки: небо и дымка ещё светятся (иначе туман и цветокоррекция делают небо почти чёрным)
+	# сумерки: небо и дымка ещё светятся (иначе туман и цветокоррекция делают небо почти чёрным);
+	# к ночи свечение гаснет — у здания темно, как в окнах изнутри
 	var dusk: float = smoothstep(0.5, 0.9, day)
-	sky_mat.energy_multiplier = 1.0 + 0.9 * dusk
-	env.fog_light_energy = 1.0 + 1.15 * dusk
-	env.volumetric_fog_ambient_inject = lerpf(0.12, 0.8, dusk)
+	var night: float = smoothstep(0.85, 1.0, day)
+	sky_mat.energy_multiplier = lerpf(1.0 + 0.9 * dusk, 0.9, night)
+	env.fog_light_energy = lerpf(1.0 + 1.15 * dusk, 1.0, night)
+	env.volumetric_fog_ambient_inject = lerpf(lerpf(0.12, 0.8, dusk), 0.4, night)
 	env.volumetric_fog_emission = Color(0.36, 0.4, 0.48)               # дымка светится, как в лунном тумане
-	env.volumetric_fog_emission_energy = 0.55 * dusk
+	env.volumetric_fog_emission_energy = lerpf(0.55 * dusk, 0.12, night)
 
 
 # Рассвет по пути назад от аптеки. [t, высота источника °, цвет, сила, верх неба, горизонт, туман, конец тумана м,
@@ -349,10 +368,10 @@ func set_day(t: float) -> void:
 # густо-синее), потом гражданские сумерки (горизонт розово-оранжевый, прямого света нет), восход (солнце
 # ~2000 K, красно-оранжевое, длинные тени) и «золотой час» (~3000 K). Освещённость: от ~3 лк до ~400 лк.
 const DAWN_KEYS := [
-	[0.0, 32.0, Color(0.66, 0.74, 0.92), 0.32, Color(0.24, 0.28, 0.42), Color(0.46, 0.47, 0.56), Color(0.34, 0.36, 0.45), 95.0, 0.62, 0.66],
-	[0.3, 32.0, Color(0.6, 0.7, 0.95), 0.12, Color(0.2, 0.28, 0.5), Color(0.52, 0.53, 0.66), Color(0.4, 0.43, 0.56), 115.0, 0.72, 0.7],
-	[0.58, -2.0, Color(1.0, 0.5, 0.3), 0.0, Color(0.3, 0.42, 0.66), Color(0.9, 0.64, 0.56), Color(0.62, 0.56, 0.58), 150.0, 0.86, 0.76],
-	[0.8, 2.0, Color(1.0, 0.56, 0.32), 1.0, Color(0.36, 0.5, 0.74), Color(1.0, 0.7, 0.48), Color(0.92, 0.7, 0.56), 190.0, 0.92, 0.84],
+	[0.0, 32.0, Color(0.62, 0.7, 0.9), 0.12, Color(0.03, 0.04, 0.07), Color(0.08, 0.09, 0.13), Color(0.07, 0.08, 0.11), 80.0, 0.22, 0.6],
+	[0.3, 32.0, Color(0.6, 0.7, 0.95), 0.1, Color(0.12, 0.17, 0.34), Color(0.3, 0.33, 0.46), Color(0.24, 0.27, 0.38), 105.0, 0.38, 0.64],
+	[0.58, -2.0, Color(1.0, 0.5, 0.3), 0.0, Color(0.3, 0.42, 0.66), Color(0.9, 0.64, 0.56), Color(0.62, 0.56, 0.58), 150.0, 0.62, 0.74],
+	[0.8, 2.0, Color(1.0, 0.56, 0.32), 1.0, Color(0.36, 0.5, 0.74), Color(1.0, 0.7, 0.48), Color(0.92, 0.7, 0.56), 190.0, 0.8, 0.82],
 	[1.0, 7.0, Color(1.0, 0.72, 0.48), 2.2, Color(0.4, 0.56, 0.8), Color(1.0, 0.8, 0.6), Color(0.96, 0.8, 0.64), 240.0, 0.85, 0.9],
 ]
 
@@ -393,10 +412,12 @@ func set_dawn(d: float) -> void:
 	env.fog_depth_end = lerpf(float(a[7]), float(b[7]), k)
 	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
 	env.adjustment_saturation = lerpf(float(a[9]), float(b[9]), k)
-	sky_mat.energy_multiplier = lerpf(1.9, 1.2, dawn)
-	env.fog_light_energy = lerpf(2.15, 1.0, dawn)
-	env.volumetric_fog_ambient_inject = lerpf(0.8, 0.35, dawn)
-	env.volumetric_fog_emission_energy = 0.55 * (1.0 - smoothstep(0.2, 0.7, dawn))
+	# ночь (как у санатория в начале) → синий час → восход: небо и дымка светлеют постепенно
+	var glow: float = smoothstep(0.0, 0.45, dawn) * (1.0 - smoothstep(0.6, 1.0, dawn))
+	sky_mat.energy_multiplier = lerpf(0.9, 1.2, smoothstep(0.0, 0.6, dawn)) + 0.5 * glow
+	env.fog_light_energy = lerpf(1.0, 1.0, dawn) + 0.8 * glow
+	env.volumetric_fog_ambient_inject = lerpf(0.4, 0.35, dawn) + 0.3 * glow
+	env.volumetric_fog_emission_energy = 0.12 * (1.0 - smoothstep(0.2, 0.7, dawn))
 	env.volumetric_fog_albedo = Color(0.3, 0.32, 0.38).lerp(Color(0.92, 0.88, 0.84), smoothstep(0.4, 1.0, dawn))
 	env.fog_sun_scatter = 0.55 * smoothstep(0.6, 1.0, dawn)            # дымка светится в стороне низкого солнца
 
@@ -617,7 +638,77 @@ func _build_stop() -> void:
 	arrow.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	add_child(arrow)
 	arrow.global_position = p0 + Vector3(1.4, 1.5, 0)
-	_build_kiosk(root.global_position)
+	if site.has("house") and ResourceLoader.exists(HOUSE_PATH):
+		_build_house()
+	else:
+		_build_kiosk(root.global_position)
+
+
+## Дом с аптекой через дорогу от остановки (модель автора игры). Ночью в аптеке горит свет (лампы — по
+## точкам из модели: шар над входом, шесть плафонов в торговом зале, подсобка и склад), входная дверь
+## открывается, когда к ней подъезжаешь; провизор — за прилавком.
+const HOUSE_PATH := "res://props/pharmacy_house.glb"
+const HOUSE_LIGHTS := [  # локально (как в модели): позиция, цвет, сила, радиус
+	[Vector3(-6.35, 2.62, 0.27), Color(1.0, 0.75, 0.45), 1.6, 6.0],
+	[Vector3(-12.6, 3.16, -2.0), Color(1.0, 0.95, 0.88), 1.1, 5.5], [Vector3(-12.6, 3.16, -5.0), Color(1.0, 0.95, 0.88), 1.1, 5.5],
+	[Vector3(-9.3, 3.16, -2.0), Color(1.0, 0.95, 0.88), 1.1, 5.5], [Vector3(-9.3, 3.16, -5.0), Color(1.0, 0.95, 0.88), 1.1, 5.5],
+	[Vector3(-6.0, 3.16, -2.0), Color(1.0, 0.95, 0.88), 1.1, 5.5], [Vector3(-6.0, 3.16, -5.0), Color(1.0, 0.95, 0.88), 1.1, 5.5],
+	[Vector3(-10.2, 3.16, -9.1), Color(1.0, 0.95, 0.88), 0.7, 4.5], [Vector3(-13.05, 3.16, -9.1), Color(1.0, 0.95, 0.88), 0.7, 4.5],
+]
+
+
+func _build_house() -> void:
+	var hd: Dictionary = site["house"]
+	house = (load(HOUSE_PATH) as PackedScene).instantiate() as Node3D
+	add_child(house)
+	house.global_transform = Transform3D(Basis(Vector3.UP, float(hd["yaw"])),
+		Vector3(float(hd["origin"][0]), float(hd["origin"][1]), float(hd["origin"][2])))
+	for l in HOUSE_LIGHTS:
+		var o := OmniLight3D.new()
+		o.light_color = l[1]
+		o.light_energy = float(l[2])
+		o.omni_range = float(l[3])
+		o.omni_attenuation = 1.4
+		o.shadow_enabled = false
+		o.distance_fade_enabled = true
+		o.distance_fade_begin = 70.0
+		o.distance_fade_length = 20.0
+		house.add_child(o)
+		o.position = l[0]
+	var aps: Array = house.find_children("*", "AnimationPlayer", true, false)
+	if aps.size() > 0:
+		_house_anim = aps[0]
+	var counter: Array = hd["route"][0]
+	kiosk_point = Vector3(float(counter[0]), float(counter[1]) + 1.0, float(counter[2]))
+	# провизор сидит за прилавком лицом к окошку (своя модель story_pharmacist.glb, если есть; иначе — пожилая
+	# женщина в платке, сидящая, из пассажиров автобуса)
+	var ph_path := "res://sanatorium/models/story_pharmacist.glb"
+	if not ResourceLoader.exists(ph_path):
+		ph_path = "res://intro/assets/models/people/grandma_scarf.glb"
+	if ResourceLoader.exists(ph_path):
+		var ph: Node3D = (load(ph_path) as PackedScene).instantiate()
+		house.add_child(ph)
+		var bb := AABB()
+		var first := true
+		for m in ph.find_children("*", "MeshInstance3D", true, false):
+			var b: AABB = (m as MeshInstance3D).transform * (m as MeshInstance3D).get_aabb()
+			bb = b if first else bb.merge(b)
+			first = false
+		ph.position = Vector3(-5.85, 0.1 - bb.position.y, -4.95)
+		ph.rotation.y = 0.0
+
+
+## Дверь аптеки открывается, когда коляска подъезжает (анимация из модели) — провизор впускает.
+func _update_house_door() -> void:
+	if _house_anim == null or _house_door_open or not pharmacy:
+		return
+	var hd: Array = site["house"]["route"][3]
+	var dp := Vector3(float(hd[0]), float(hd[1]), float(hd[2]))
+	if hero.global_position.distance_to(dp) < 4.5:
+		_house_door_open = true
+		if _house_anim.has_animation("Pharmacy_EntranceDoor_Open"):
+			_house_anim.play("Pharmacy_EntranceDoor_Open")
+		audio.play_sfx("click", 0.3)
 
 
 ## Аптечный киоск у начала тропинки, витриной к тропинке, на той стороне, что дальше от остановки
@@ -1033,22 +1124,23 @@ func _update_walk(dt: float) -> void:
 		return
 	_drive(dt)
 	# темнеет по мере продвижения по лесу (и просто со временем)
-	set_day(maxf(day, lerpf(0.45, 0.88, minf(walk_s / maxf(forest_end_s, 1.0), 1.0))))
+	set_day(maxf(day, lerpf(0.45, 1.0, minf(walk_s / maxf(forest_end_s, 1.0), 1.0))))
 	set_day(day + dt * 0.0006)
 	if pharmacy and has_pills:
 		# назад от аптеки — светает: по пройденному пути (к двери — солнце над лесом) и понемногу со временем
 		if _dawn_from < 0.0:
 			_dawn_from = walk_s
-		# солнце встаёт ещё в лесу (60 % пути), к зданию — «золотой час» (75 %)
-		var along: float = clampf((walk_s - _dawn_from) / maxf((door_stop_s - _dawn_from) * 0.75, 10.0), 0.0, 1.0)
+		# светает плавно весь путь назад: синий час, восход ещё в лесу, к дверям здания — «золотой час»
+		var along: float = clampf((walk_s - _dawn_from) / maxf((door_stop_s - _dawn_from) * 0.92, 10.0), 0.0, 1.0)
 		set_dawn(maxf(dawn + dt / 240.0, along))
 		audio.set_forest(0.0, 1.0 - dawn, smoothstep(0.25, 0.8, dawn))
 	else:
 		audio.set_forest(0.0, day)
 	_drone.volume_db = lerpf(-40.0, -15.0, smoothstep(0.45, 0.9, day))
 	_update_mom_walk(dt)
+	_update_house_door()
 	var at_kiosk: bool = pharmacy and not has_pills and Vector2(hero.global_position.x - kiosk_point.x,
-		hero.global_position.z - kiosk_point.z).length() < 2.6
+		hero.global_position.z - kiosk_point.z).length() < (1.3 if house else 2.6)
 	if at_kiosk:
 		ui.set_prompt("[E] Купить цитрамон")
 		if Input.is_action_just_pressed("interact"):
@@ -1238,17 +1330,17 @@ func _start_pharmacy() -> void:
 	audio.set_forest(0.0, 1.0)
 	_update_globals()
 	await GameState.fade_to(0.0, 1.5)
-	ui.set_objective("Сходи в аптеку у остановки")
+	ui.set_objective("Сходи в аптеку — через дорогу от остановки")
 	ui.hint("W / S — ехать   ·   A / D — поворот   ·   Q / R — скорость   ·   F — фонарик", 7.0)
 
 
 func _pharmacy_event() -> void:
-	if not has_pills and walk_s < 80.0 and not _events.has("p_snap"):
+	if not has_pills and walk_s - pre_s < 80.0 and walk_s - pre_s > 40.0 and not _events.has("p_snap"):
 		_events["p_snap"] = true
 		audio.play_sfx("snap", 0.9)
 		await wait(1.0)
 		await say("thought", "Просто ветка… Просто ветка.")
-	elif not has_pills and walk_s < 38.0 and not _events.has("p_whisper"):
+	elif not has_pills and walk_s - pre_s < 38.0 and walk_s - pre_s > 6.0 and not _events.has("p_whisper"):
 		_events["p_whisper"] = true
 		var w := AudioStreamPlayer3D.new()
 		w.stream = load("res://sanatorium/assets/sfx/whisper_far.wav")
@@ -1260,7 +1352,7 @@ func _pharmacy_event() -> void:
 		w.play()
 		await wait(1.4)
 		await say("thought", "Кто здесь?..")
-	elif has_pills and walk_s > 45.0 and not _events.has("p_crow"):
+	elif has_pills and walk_s - pre_s > 45.0 and not _events.has("p_crow"):
 		_events["p_crow"] = true
 		audio.play_sfx("crow", 0.6)
 
@@ -1270,6 +1362,10 @@ func _buy_pills() -> void:
 		return
 	has_pills = true
 	ui.set_prompt("")
+	if house:
+		await say("pharmacist", "Слушаю.")
+		await say("hero", "Цитрамон. Вот бумажка.")
+		await say("pharmacist", "Тридцать две копейки.")
 	audio.play_sfx("click", 0.6)
 	await wait(0.6)
 	audio.play_sfx("click", 0.4)

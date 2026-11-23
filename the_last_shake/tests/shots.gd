@@ -59,6 +59,17 @@ func _run() -> void:
 			await _sanatorium()
 		"panorama":
 			await _panorama()
+		"pharmacy":
+			await _pharmacy_shots()
+		"buydebug":
+			GameStateRef().checkpoint = "pharmacy_out"
+			get_tree().change_scene_to_file(GameStateRef().PROLOGUE)
+			await wait_for_scene(func(sc): return sc.get("pharmacy") == true and sc.phase == "walk", 300)
+			var p: Node = get_tree().current_scene
+			p._buy_pills()
+			for i in 14:
+				await secs(1.0)
+				print("BUY t=", i, " vis=", p.ui.line_visible(), " text=", p.ui._sub_text.text, " has=", p.has_pills, " fps=", Engine.get_frames_per_second())
 		"lightlab":
 			await _lightlab()
 		"epilogue":
@@ -1098,6 +1109,43 @@ func _lightlab() -> void:
 		await shot("lab_" + v["name"])
 		print("LAB ", v)
 	get_tree().paused = false
+
+
+## Глава 5: дом с аптекой через дорогу от остановки — ночью от тропинки, у двери, у прилавка; покупка;
+## рассвет по пути назад (кадры на трети и двух третях пути и у двери санатория).
+func _pharmacy_shots() -> void:
+	shoot = true
+	GameStateRef().checkpoint = "pharmacy_out"
+	get_tree().change_scene_to_file(GameStateRef().PROLOGUE)
+	await wait_for_scene(func(sc): return sc.get("pharmacy") == true and sc.phase == "walk", 300)
+	var p: Node = get_tree().current_scene
+	GameStateRef().set_fade(0.0)
+	await secs(2.0)
+	print("PRE_S ", p.pre_s, " door_stop ", p.door_stop_s)
+	for spot in [[p.pre_s + 6.0, "ph_from_path", 0.0], [p.pre_s - 2.5, "ph_crossing", 0.0], [3.2, "ph_door", 0.0],
+			[0.6, "ph_counter", 0.0]]:
+		var sd: float = float(spot[0])
+		p.walk_s = sd
+		var a: Vector3 = p._path_at(sd)
+		var b: Vector3 = p._path_at(maxf(sd - 1.0, 0.0))
+		p.hero.global_position = a
+		p.hero.rotation = Vector3(0.0, atan2(-(b.x - a.x), -(b.z - a.z)), 0.0)
+		p.look_yaw = 0.0
+		p.look_pitch = 0.0
+		await secs(2.5)
+		await shot(String(spot[1]))
+	p._buy_pills()
+	await secs(6.0)
+	await shot("ph_bought")
+	for f in [0.35, 0.7, 0.97]:
+		var sd: float = lerpf(1.0, p.door_stop_s - 1.0, f)
+		p.walk_s = sd
+		var a: Vector3 = p._path_at(sd)
+		var b: Vector3 = p._path_at(sd + 1.0)
+		p.hero.global_position = a
+		p.hero.rotation = Vector3(0.0, atan2(-(b.x - a.x), -(b.z - a.z)), 0.0)
+		await secs(3.0)
+		await shot("ph_back_%d" % int(f * 100))
 
 
 ## Вид из окон утренней больницы: лес на рассвете вокруг здания (пролог, глава 5, солнце взошло). Шесть кадров
