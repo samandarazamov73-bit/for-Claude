@@ -147,8 +147,9 @@ for v in me.vertices:
     if z >= hip_z - 0.02 or z < hem_z - 0.01:
         continue
     top = max(v.groups, key=lambda g: g.weight, default=None)
-    if top is not None and any(k in gi_[top.group] for k in ("Arm", "Hand", "Shoulder")):
-        continue                                          # руки, опущенные вдоль платья
+    if top is not None and any(k in gi_[top.group] for k in ("Arm", "Hand", "Shoulder")) \
+            and abs(v.co.x - (l_x + r_x) * 0.5) > 0.205:
+        continue          # руки, опущенные вдоль платья (снаружи силуэта юбки); ткань у кистей — юбка
     t = min(max((hip_z - z) / max(hip_z - hem_z, 0.05), 0.0), 1.0)
     side = min(max((v.co.x - cx) / half, -1.0), 1.0)
     leg = 0.55 * t * abs(side) ** 1.5
