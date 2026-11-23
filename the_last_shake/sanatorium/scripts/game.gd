@@ -401,7 +401,8 @@ func set_morning() -> void:
 		var mi: MeshInstance3D = n
 		for i in mi.mesh.get_surface_count():
 			var cm = mi.get_active_material(i)
-			if cm is BaseMaterial3D:
+			# только плотные шторы; тюль (полупрозрачный) не светится — сквозь него виден лес
+			if cm is BaseMaterial3D and (cm as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_ALPHA:
 				var dm: BaseMaterial3D = cm.duplicate()
 				dm.emission_enabled = true
 				dm.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
@@ -464,6 +465,9 @@ func apply_day_look(v: Dictionary) -> void:
 	# отражается от пола и стен; тени под мебелью и у окон получаются сами, как в жизни
 	var gi: float = float(v["gi"])
 	env.sdfgi_enabled = gi > 0.0
+	# отражения неба: с SDFGI они закрыты стенами; без него небо отражалось бы в коже и лаке прямо сквозь
+	# стены — мебель серела. Тогда отражения только от экрана (SSR) и от света ламп.
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_BG if gi > 0.0 else Environment.REFLECTION_SOURCE_DISABLED
 	if gi > 0.0:
 		env.sdfgi_use_occlusion = true
 		env.sdfgi_read_sky_light = true
