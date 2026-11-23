@@ -110,6 +110,56 @@ new.select_set(True)
 bpy.context.view_layer.objects.active = new
 bpy.ops.object.modifier_apply(modifier="dt")
 
+# ---------------------------------------------------------------- юбка: за тазом, а не за голенями
+# Длинное платье: веса с прежней модели тянули ткань к обеим ногам — при шаге между ногами вытягивалась
+# «перепонка». Юбку (ниже таза, выше подола) ведёт таз; бока — немного и бедро своей стороны, середина — только таз.
+def bone_head(name):
+    pb = arm.pose.bones[name]
+    return arm.matrix_world @ pb.head
+
+
+me = new.data
+gi_ = {vg.index: vg.name for vg in new.vertex_groups}
+hip_z = bone_head("mixamorig:Hips").z
+l_x = bone_head("mixamorig:LeftUpLeg").x
+r_x = bone_head("mixamorig:RightUpLeg").x
+zs = np.array([v.co.z for v in me.vertices])
+xs = np.array([v.co.x for v in me.vertices])
+# подол: снизу вверх первое сечение, где ширина — уже юбка (> 0.3 м), а не две голени (руки не в счёт: |x| < 0.2)
+hem_z = hip_z * 0.4
+for zz in np.arange(0.15, hip_z, 0.02):
+    m = (zs >= zz) & (zs < zz + 0.04) & (np.abs(xs) < 0.2)
+    if m.sum() > 10 and xs[m].max() - xs[m].min() > 0.3:
+        hem_z = float(zs[m].min())
+        break
+print("hips %.3f hem %.3f legs x %.3f / %.3f" % (hip_z, hem_z, l_x, r_x))
+for nm in ("mixamorig:Hips", "mixamorig:LeftUpLeg", "mixamorig:RightUpLeg"):
+    if nm not in new.vertex_groups:
+        new.vertex_groups.new(name=nm)
+vg_h = new.vertex_groups["mixamorig:Hips"]
+vg_l = new.vertex_groups["mixamorig:LeftUpLeg"]
+vg_r = new.vertex_groups["mixamorig:RightUpLeg"]
+half = abs(l_x - r_x) * 0.5 + 1e-4
+cx = (l_x + r_x) * 0.5
+skirt = 0
+for v in me.vertices:
+    z = v.co.z
+    if z >= hip_z - 0.02 or z < hem_z - 0.01:
+        continue
+    top = max(v.groups, key=lambda g: g.weight, default=None)
+    if top is not None and any(k in gi_[top.group] for k in ("Arm", "Hand", "Shoulder")):
+        continue                                          # руки, опущенные вдоль платья
+    t = min(max((hip_z - z) / max(hip_z - hem_z, 0.05), 0.0), 1.0)
+    side = min(max((v.co.x - cx) / half, -1.0), 1.0)
+    leg = 0.55 * t * abs(side) ** 1.5
+    for g in list(v.groups):
+        new.vertex_groups[gi_[g.group]].remove([v.index])
+    vg_h.add([v.index], 1.0 - leg, "REPLACE")
+    if leg > 0.0:
+        (vg_l if (side > 0) == (l_x > cx) else vg_r).add([v.index], leg, "REPLACE")
+    skirt += 1
+print("skirt vertices", skirt)
+
 # ---------------------------------------------------------------- «распрямить» новую модель в позу покоя
 bones = arm.pose.bones
 skin = {}
