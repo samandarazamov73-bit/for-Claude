@@ -2207,12 +2207,13 @@ func _act5() -> void:
 	mom.go([Vector3(36.85, 4.5, -5.7), Vector3(37.05, 4.5, -6.8), Vector3(36.6, 4.5, -8.1), Vector3(9.5, 4.5, -8.1),
 		Vector3(8.83, 4.5, -7.3), Vector3(8.83, 4.5, -5.4)], 1.1)
 	_mom_into_204()
-	objective("Сходи в аптеку у остановки")
 	lift.forced_floor = 0
-	# двери отпускаем, только когда мама вышла из кабины (иначе она шла бы сквозь закрытые двери)
+	# двери отпускаем, только когда мама вышла из кабины (иначе она шла бы сквозь закрытые двери); задание —
+	# тоже тогда, чтобы кнопка лифта уже работала
 	await until(func(): return mom.global_position.z < -6.6 or not mom.is_moving(), 15.0)
 	lift.locked = false
 	_hold_lift = false
+	objective("Сходи в аптеку — через дорогу от остановки")
 	await until(func(): return lift.player_in_cabin() and lift.state == "moving")
 	await say("thought", "Лишь бы мы отсюда нормально ушли.")
 	await until(func(): return lift.floor_idx == 0 and lift.state in ["opening", "open"])
