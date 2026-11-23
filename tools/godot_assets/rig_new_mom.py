@@ -12,6 +12,7 @@
 Запуск (Blender как модуль python, bpy):
   python -c "import sys; sys.argv=['x','<mom.glb>','<новая модель.glb>','<выход.glb>']; exec(open('rig_new_mom.py').read())"
 """
+import math
 import sys
 
 import bpy
@@ -73,6 +74,41 @@ bpy.context.view_layer.objects.active = new
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 nmin, nmax = world_bbox(new, bpy.context.evaluated_depsgraph_get())
 print("new fitted bbox", nmin.round(3), nmax.round(3), "scale", round(k, 4))
+
+# ---------------------------------------------------------------- руки скелета — туда, где руки новой модели
+# Поза закрепляется (без анимации), плечо поворачивается так, чтобы запястье попало в запястье новой модели:
+# тогда и веса прежней модели, и кости рук совпадают с новой.
+saved = {pb.name: pb.matrix.copy() for pb in arm.pose.bones}
+arm.animation_data.action = None
+for pb in arm.pose.bones:                                 # родители раньше детей
+    pb.matrix = saved[pb.name]
+    bpy.context.view_layer.update()
+P = np.array([v.co[:] for v in new.data.vertices])
+inv_arm = arm.matrix_world.inverted()
+for side, sgn in (("Left", 1.0), ("Right", -1.0)):
+    pb_arm = arm.pose.bones["mixamorig:%sArm" % side]
+    pb_hand = arm.pose.bones["mixamorig:%sHand" % side]
+    shoulder = arm.matrix_world @ pb_arm.head
+    wrist = arm.matrix_world @ pb_hand.head
+    s_sign = 1.0 if shoulder.x > 0 else -1.0
+    side_pts = P[(P[:, 0] * s_sign > 0.2) & (P[:, 2] < shoulder.z - 0.25) & (P[:, 2] > 0.55)]   # кисть, не подол
+    if len(side_pts) < 20:
+        continue
+    zmin = side_pts[:, 2].min()
+    band = side_pts[(side_pts[:, 2] > zmin + 0.07) & (side_pts[:, 2] < zmin + 0.13)]
+    if len(band) < 5:
+        continue
+    target = Vector(band.mean(0))
+    a = (wrist - shoulder).normalized()
+    b = (target - shoulder).normalized()
+    q = a.rotation_difference(b)
+    h = pb_arm.head.copy()                                # в осях скелета
+    q_arm = (inv_arm.to_3x3() @ q.to_matrix() @ arm.matrix_world.to_3x3()).to_4x4()
+    pb_arm.matrix = Matrix.Translation(h) @ q_arm @ Matrix.Translation(-h) @ pb_arm.matrix
+    bpy.context.view_layer.update()
+    print("%s arm: wrist %s -> %s (target %s), turned %.1f deg" % (side, tuple(round(c, 3) for c in wrist),
+          tuple(round(c, 3) for c in (arm.matrix_world @ pb_hand.head)), tuple(round(c, 3) for c in target),
+          math.degrees(q.angle)))
 
 # ---------------------------------------------------------------- копия прежней модели в этой позе → веса на новую
 src = old[0]
@@ -136,6 +172,42 @@ print("hips %.3f hem %.3f legs x %.3f / %.3f" % (hip_z, hem_z, l_x, r_x))
 for nm in ("mixamorig:Hips", "mixamorig:LeftUpLeg", "mixamorig:RightUpLeg"):
     if nm not in new.vertex_groups:
         new.vertex_groups.new(name=nm)
+# руки: по расстоянию до костей руки в этой позе (перенос весов путал опущенную кисть с бедром и платьем)
+def seg_dist(p, a, b):
+    ab = b - a
+    t = max(0.0, min(1.0, (p - a).dot(ab) / max(ab.length_squared, 1e-9)))
+    return (a + ab * t - p).length
+
+
+ARM = {}
+for side in ("Left", "Right"):
+    for bn, rad in (("Arm", 0.075), ("ForeArm", 0.06), ("Hand", 0.065)):
+        nm = "mixamorig:%s%s" % (side, bn)
+        if nm in arm.pose.bones:
+            pb = arm.pose.bones[nm]
+            tail = pb.tail
+            if bn == "Hand":                              # кисть с пальцами длиннее кости
+                tail = pb.head + (pb.tail - pb.head) * 2.2
+            ARM[nm] = (arm.matrix_world @ pb.head, arm.matrix_world @ tail, rad)
+for nm in ARM:
+    if nm not in new.vertex_groups:
+        new.vertex_groups.new(name=nm)
+arm_verts = set()
+for v in me.vertices:
+    p = v.co
+    ds = {nm: seg_dist(p, a, b) for nm, (a, b, r) in ARM.items()}
+    best = min(ds, key=ds.get)
+    if ds[best] > ARM[best][2]:
+        continue
+    near = {nm: d for nm, d in ds.items() if d < ds[best] * 1.35 + 0.005 and ("Left" in nm) == ("Left" in best)}
+    tot = sum(1.0 / max(d, 0.004) ** 4 for d in near.values())
+    for g in list(v.groups):
+        new.vertex_groups[gi_[g.group]].remove([v.index])
+    for nm, d in near.items():
+        new.vertex_groups[nm].add([v.index], (1.0 / max(d, 0.004) ** 4) / tot, "REPLACE")
+    arm_verts.add(v.index)
+print("arm vertices", len(arm_verts))
+gi_ = {vg.index: vg.name for vg in new.vertex_groups}
 vg_h = new.vertex_groups["mixamorig:Hips"]
 vg_l = new.vertex_groups["mixamorig:LeftUpLeg"]
 vg_r = new.vertex_groups["mixamorig:RightUpLeg"]
@@ -146,10 +218,8 @@ for v in me.vertices:
     z = v.co.z
     if z >= hip_z - 0.02 or z < hem_z - 0.01:
         continue
-    top = max(v.groups, key=lambda g: g.weight, default=None)
-    if top is not None and any(k in gi_[top.group] for k in ("Arm", "Hand", "Shoulder")) \
-            and abs(v.co.x - (l_x + r_x) * 0.5) > 0.205:
-        continue          # руки, опущенные вдоль платья (снаружи силуэта юбки); ткань у кистей — юбка
+    if v.index in arm_verts:
+        continue                                          # руки, опущенные вдоль платья
     t = min(max((hip_z - z) / max(hip_z - hem_z, 0.05), 0.0), 1.0)
     side = min(max((v.co.x - cx) / half, -1.0), 1.0)
     leg = 0.55 * t * abs(side) ** 1.5
