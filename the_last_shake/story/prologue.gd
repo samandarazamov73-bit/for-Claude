@@ -315,8 +315,8 @@ const DAY_KEYS := [
 	NIGHT_KEY,
 ]
 ## Ночь — одна на весь сюжет: у санатория в начале, по пути в аптеку и первая точка рассвета (DAWN_KEYS).
-const NIGHT_KEY := [1.0, 32.0, Color(0.62, 0.7, 0.9), 0.12, Color(0.03, 0.04, 0.07), Color(0.08, 0.09, 0.13),
-	Color(0.07, 0.08, 0.11), 80.0, 0.22, 0.6]
+const NIGHT_KEY := [1.0, 32.0, Color(0.62, 0.7, 0.9), 0.12, Color(0.018, 0.022, 0.04), Color(0.045, 0.05, 0.075),
+	Color(0.045, 0.05, 0.07), 80.0, 0.2, 0.55]
 
 
 ## 0 — пасмурный серый день в тумане, 0.38 — вечер у остановки, 1 — глубокие сумерки у санатория (свет — луна).
@@ -360,18 +360,23 @@ func set_day(t: float) -> void:
 	env.fog_light_energy = lerpf(1.0 + 1.15 * dusk, 1.0, night)
 	env.volumetric_fog_ambient_inject = lerpf(lerpf(0.12, 0.8, dusk), 0.4, night)
 	env.volumetric_fog_emission = Color(0.36, 0.4, 0.48)               # дымка светится, как в лунном тумане
-	env.volumetric_fog_emission_energy = lerpf(0.55 * dusk, 0.12, night)
+	env.volumetric_fog_emission_energy = lerpf(0.55 * dusk, 0.04, night)   # ночью туман сам не светится
 
 
-# Рассвет по пути назад от аптеки. [t, высота источника °, цвет, сила, верх неба, горизонт, туман, конец тумана м,
-# рассеянный, насыщенность]. Как в жизни: сначала ночь, потом синий час (солнце на 4–8° под горизонтом, небо
-# густо-синее), потом гражданские сумерки (горизонт розово-оранжевый, прямого света нет), восход (солнце
-# ~2000 K, красно-оранжевое, длинные тени) и «золотой час» (~3000 K). Освещённость: от ~3 лк до ~400 лк.
+# Рассвет по пути назад от аптеки — по настоящим стадиям сумерек. [t, высота источника °, цвет, сила, верх неба,
+# горизонт, туман, конец тумана м, рассеянный, насыщенность].
+#   ночь (солнце ниже −18°): небо почти чёрное, чуть синее у горизонта; туман тёмный и сам не светится;
+#   астрономические и навигационные сумерки (−18…−6°): небо густо-синее, над головой темнее, чем у горизонта,
+#     земля всё ещё тёмная — без фонаря не видно;
+#   гражданские сумерки (−6…0°): небо синее, горизонт со стороны солнца розово-оранжевый, земля различима;
+#   восход (~2000 K) и «золотой час» (~3000 K, 5–10°). Небо светлеет вместе с землёй: оно не бывает белым,
+#   пока вокруг темно. Освещённость земли: ~0,1 лк (луна) → ~3 лк (конец гражданских сумерек) → ~400 лк.
 const DAWN_KEYS := [
-	[0.0, 32.0, Color(0.62, 0.7, 0.9), 0.12, Color(0.03, 0.04, 0.07), Color(0.08, 0.09, 0.13), Color(0.07, 0.08, 0.11), 80.0, 0.22, 0.6],
-	[0.3, 32.0, Color(0.6, 0.7, 0.95), 0.1, Color(0.12, 0.17, 0.34), Color(0.3, 0.33, 0.46), Color(0.24, 0.27, 0.38), 105.0, 0.38, 0.64],
-	[0.58, -2.0, Color(1.0, 0.5, 0.3), 0.0, Color(0.3, 0.42, 0.66), Color(0.9, 0.64, 0.56), Color(0.62, 0.56, 0.58), 150.0, 0.62, 0.74],
-	[0.8, 2.0, Color(1.0, 0.56, 0.32), 1.0, Color(0.36, 0.5, 0.74), Color(1.0, 0.7, 0.48), Color(0.92, 0.7, 0.56), 190.0, 0.8, 0.82],
+	[0.0, 32.0, Color(0.62, 0.7, 0.9), 0.12, Color(0.018, 0.022, 0.04), Color(0.045, 0.05, 0.075), Color(0.045, 0.05, 0.07), 80.0, 0.2, 0.55],
+	[0.25, 30.0, Color(0.6, 0.7, 0.95), 0.08, Color(0.022, 0.032, 0.075), Color(0.065, 0.075, 0.12), Color(0.055, 0.065, 0.095), 90.0, 0.22, 0.6],
+	[0.45, 28.0, Color(0.6, 0.7, 0.95), 0.03, Color(0.045, 0.085, 0.21), Color(0.2, 0.18, 0.27), Color(0.11, 0.12, 0.18), 110.0, 0.32, 0.68],
+	[0.62, -2.0, Color(1.0, 0.5, 0.3), 0.0, Color(0.13, 0.23, 0.47), Color(0.72, 0.46, 0.38), Color(0.4, 0.35, 0.35), 150.0, 0.55, 0.76],
+	[0.78, 1.5, Color(1.0, 0.56, 0.32), 0.9, Color(0.27, 0.41, 0.67), Color(1.0, 0.66, 0.42), Color(0.8, 0.62, 0.48), 190.0, 0.75, 0.82],
 	[1.0, 7.0, Color(1.0, 0.72, 0.48), 2.2, Color(0.4, 0.56, 0.8), Color(1.0, 0.8, 0.6), Color(0.96, 0.8, 0.64), 240.0, 0.85, 0.9],
 ]
 
@@ -387,7 +392,7 @@ func set_dawn(d: float) -> void:
 	var b: Array = DAWN_KEYS[i]
 	var k: float = clampf((dawn - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.0001), 0.0, 1.0)
 	var elev: float = lerpf(float(a[1]), float(b[1]), k)
-	var is_sun: bool = dawn >= 0.5
+	var is_sun: bool = dawn >= 0.62
 	if is_sun:
 		var sd: Vector3 = site_xf.basis * Vector3(-0.5, 0.0, -1.0)      # куда светит утреннее солнце (по земле)
 		sd.y = 0.0
@@ -397,7 +402,7 @@ func set_dawn(d: float) -> void:
 	else:
 		sun.rotation_degrees = Vector3(-elev, 150.0, 0.0)
 	sun.light_color = (a[2] as Color).lerp(b[2], k)
-	sun.light_energy = lerpf(float(a[3]), float(b[3]), k) * clampf(absf(dawn - 0.5) / 0.06, 0.0, 1.0)
+	sun.light_energy = lerpf(float(a[3]), float(b[3]), k) * clampf(absf(dawn - 0.62) / 0.05, 0.0, 1.0)
 	sun.visible = sun.light_energy > 0.01
 	var top: Color = (a[4] as Color).lerp(b[4], k)
 	var hor: Color = (a[5] as Color).lerp(b[5], k)
@@ -412,12 +417,13 @@ func set_dawn(d: float) -> void:
 	env.fog_depth_end = lerpf(float(a[7]), float(b[7]), k)
 	env.ambient_light_energy = lerpf(float(a[8]), float(b[8]), k)
 	env.adjustment_saturation = lerpf(float(a[9]), float(b[9]), k)
-	# ночь (как у санатория в начале) → синий час → восход: небо и дымка светлеют постепенно
-	var glow: float = smoothstep(0.0, 0.45, dawn) * (1.0 - smoothstep(0.6, 1.0, dawn))
-	sky_mat.energy_multiplier = lerpf(0.9, 1.2, smoothstep(0.0, 0.6, dawn)) + 0.5 * glow
-	env.fog_light_energy = lerpf(1.0, 1.0, dawn) + 0.8 * glow
-	env.volumetric_fog_ambient_inject = lerpf(0.4, 0.35, dawn) + 0.3 * glow
-	env.volumetric_fog_emission_energy = 0.12 * (1.0 - smoothstep(0.2, 0.7, dawn))
+	# небо светлеет вместе с землёй (без своего «свечения»); туман закрывает небо ночью, к утру редеет —
+	# видно, что над головой небо темнее и синее, чем у горизонта
+	sky_mat.energy_multiplier = lerpf(0.9, 1.15, smoothstep(0.0, 0.8, dawn))
+	env.fog_sky_affect = lerpf(1.0, 0.6, smoothstep(0.2, 0.75, dawn))
+	env.fog_light_energy = 1.0
+	env.volumetric_fog_ambient_inject = lerpf(0.4, 0.35, dawn)
+	env.volumetric_fog_emission_energy = 0.04 * (1.0 - smoothstep(0.2, 0.6, dawn))   # ночной туман сам не светится
 	env.volumetric_fog_albedo = Color(0.3, 0.32, 0.38).lerp(Color(0.92, 0.88, 0.84), smoothstep(0.4, 1.0, dawn))
 	env.fog_sun_scatter = 0.55 * smoothstep(0.6, 1.0, dawn)            # дымка светится в стороне низкого солнца
 
