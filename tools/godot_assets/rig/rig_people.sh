@@ -11,13 +11,13 @@ while read n ref h anims bag; do
 done <<'TABLE'
 story_doctor psycho 1.76 idle_loop,walk_loop,talk_loop,run_loop
 story_patient grandpa 1.66 idle_loop,walk_loop,talk_loop
-story_people_sit_1 mom 1.58 idle_loop,walk_loop,talk_loop
+story_people_sit_1 mom 1.58 idle_loop,walk_loop,talk_loop,stand_ref
 story_people_sit_2 psycho 1.74 idle_loop,walk_loop,talk_loop
-story_people_sit_3 mom 1.66 idle_loop,walk_loop,talk_loop Right
+story_people_sit_3 mom 1.66 idle_loop,walk_loop,talk_loop,stand_ref Right
 story_people_sit_4 grandpa 1.68 idle_loop,walk_loop,talk_loop
 story_people_sit_5 psycho 1.75 idle_loop,walk_loop,talk_loop
-story_people_sit_6 mom 1.62 idle_loop,walk_loop,talk_loop Right
-story_pharmacist mom 1.63 idle_loop,walk_loop,talk_loop
+story_people_sit_6 mom 1.62 idle_loop,walk_loop,talk_loop,stand_ref Right
+story_pharmacist mom 1.63 idle_loop,walk_loop,talk_loop,stand_ref
 story_shukhrat psycho 1.76 idle_loop,walk_loop,talk_loop,run_loop
 story_son psycho 1.72 idle_loop,walk_loop,talk_loop,run_loop
 TABLE

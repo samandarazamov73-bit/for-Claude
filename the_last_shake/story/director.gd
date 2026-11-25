@@ -2375,7 +2375,8 @@ func _sit_person(path: String, s: Transform3D) -> void:
 	_people.append(a)
 
 
-## Верх сиденья под точкой p (м над полом мебели): самая высокая точка сетки мебели рядом с p не выше 0,75 м.
+## Верх сиденья под точкой p (м над полом мебели): самая высокая горизонтальная грань мебели прямо под p
+## на высоте 0,25–0,58 м (спинка вертикальная, подлокотники — сбоку и выше: не в счёт).
 func _seat_top(s: Transform3D, p: Vector3) -> float:
 	var best := -1.0
 	var inv: Transform3D = s.affine_inverse()
@@ -2384,17 +2385,33 @@ func _seat_top(s: Transform3D, p: Vector3) -> float:
 		var n3: Node3D = nd
 		if n3.global_transform.origin.distance_to(s.origin) > 0.01:
 			continue
-		for g in n3.find_children("*", "MeshInstance3D", true, false):
+		# сама мебель (коробка из модели здания) или своя модель автора рядом с ней («<имя>_model»)
+		var meshes: Array = n3.find_children("*", "MeshInstance3D", true, false)
+		if n3 is MeshInstance3D:
+			meshes.append(n3)
+		var holder: Node = n3.get_parent().get_node_or_null(String(n3.name) + "_model")
+		if holder:
+			meshes.append_array(holder.find_children("*", "MeshInstance3D", true, false))
+		for g in meshes:
 			var mi: MeshInstance3D = g
-			if mi.mesh == null:
+			if mi.mesh == null or not mi.is_visible_in_tree():
 				continue
 			var xf: Transform3D = inv * mi.global_transform
 			for si in mi.mesh.get_surface_count():
-				var verts: PackedVector3Array = mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
-				for v in verts:
-					var q: Vector3 = xf * v
-					if absf(q.x - lp.x) < 0.14 and absf(q.z - lp.z) < 0.14 and q.y < 0.75 and q.y > best:
-						best = q.y
+				var arr: Array = mi.mesh.surface_get_arrays(si)
+				var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+				var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+				var n_tri: int = (idx.size() if idx.size() > 0 else verts.size()) / 3
+				for t in n_tri:
+					var a: Vector3 = xf * verts[idx[t * 3] if idx.size() > 0 else t * 3]
+					var b: Vector3 = xf * verts[idx[t * 3 + 1] if idx.size() > 0 else t * 3 + 1]
+					var c: Vector3 = xf * verts[idx[t * 3 + 2] if idx.size() > 0 else t * 3 + 2]
+					var m: Vector3 = (a + b + c) / 3.0
+					if m.y < 0.25 or m.y > 0.58 or m.y <= best or absf(m.x - lp.x) > 0.12 or absf(m.z - lp.z) > 0.15:
+						continue
+					var nrm: Vector3 = (b - a).cross(c - a)
+					if nrm.length() > 1e-8 and absf(nrm.normalized().y) > 0.8:
+						best = m.y
 	return best if best > 0.25 else 0.45
 
 
@@ -2451,7 +2468,6 @@ func _hall_seats() -> Array:
 		if nm.begins_with("bench") or nm.begins_with("sofa") or nm.begins_with("armchair"):
 			out.append(n.global_transform)
 			_seat_nodes.append(n)
-			print("HALL SEAT ", nm, " ", n.global_position, " yaw ", n.global_rotation.y)
 	return out
 
 
