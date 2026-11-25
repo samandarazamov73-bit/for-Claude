@@ -27,6 +27,7 @@ var _lup := -1
 var _rup := -1
 var _lleg := -1
 var _rleg := -1
+var _bag := -1                       # сумка в руке (кость «Bag» у моделей story_people_sit_*): висит отвесно
 var _yaw := 0.0
 var _pitch := 0.0
 var _last_us := 0
@@ -54,6 +55,7 @@ func find_bones(sk: Skeleton3D) -> void:
 			"RightUpLeg": _rup = i
 			"LeftLeg": _lleg = i
 			"RightLeg": _rleg = i
+			"Bag": _bag = i
 
 
 func _process_modification() -> void:
@@ -79,6 +81,8 @@ func _process_modification() -> void:
 		_reach(sk, inv * (arm_target_left as Vector3), _larm, _lfore, _lhand, Vector3(0.6, -1.0, -0.3))
 	if _neck >= 0 and _head >= 0:
 		_look(sk, inv, dt)
+	if _bag >= 0:                    # сумка: как в покое — отвесно вниз, куда бы ни ушла кисть
+		_set_global_rot(sk, _bag, sk.get_bone_global_rest(_bag).basis)
 
 
 func _look(sk: Skeleton3D, inv: Transform3D, dt: float) -> void:

@@ -13,6 +13,7 @@ const Ambience = preload("res://sanatorium/scripts/ambience.gd")
 const Hud = preload("res://sanatorium/scripts/hud.gd")
 const Switch = preload("res://sanatorium/scripts/switch.gd")
 const Quality = preload("res://sanatorium/scripts/quality.gd")
+const GrimeDecals = preload("res://sanatorium/scripts/grime_decals.gd")
 const Decor = preload("res://sanatorium/scripts/decor.gd")
 
 const L_WORLD := 1
@@ -36,6 +37,7 @@ var lift: Node3D
 var critters: Node3D
 var ambience: Node3D
 var quality: Node
+var grime: Node3D                      # наклейки грязи (grime_decals.gd)
 var env: Environment
 var moon: DirectionalLight3D
 var sky_mat: ProceduralSkyMaterial
@@ -89,6 +91,10 @@ func _ready() -> void:
 	add_child(lift)
 	lift.setup(self)
 	_assign_storey_layers()
+	grime = GrimeDecals.new()
+	grime.name = "GrimeDecals"
+	add_child(grime)
+	grime.place.call_deferred(self)                     # протечки, облупленная краска, трещины, затёртости
 	critters = Critters.new()
 	critters.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF   # they move in _process
 	add_child(critters)
@@ -389,6 +395,8 @@ var _glass_mats: Array = []
 
 
 func set_morning() -> void:
+	if grime:
+		grime.set_strength(0.6)                         # настоящая больница днём: грязь та же, но не так бросается
 	if sky_mat:
 		sky_mat.sky_top_color = Color(0.4, 0.55, 0.82)
 		sky_mat.sky_horizon_color = Color(0.8, 0.85, 0.9)

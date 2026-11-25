@@ -170,10 +170,10 @@ func _build_room() -> void:
 	cal.rotation.y = PI
 	add_child(cal)
 	Props.box(self, Vector3(-0.6, 1.85, 3.0), Vector3(0.6, 0.75, 0.01), _mat(Color(0.95, 0.94, 0.9)))
-	# доктор в белом халате (тот самый «мужчина в белом»)
+	# доктор в белом халате (своя модель врача; без неё — «мужчина в белом»)
 	doctor = Actor.new()
 	add_child(doctor)
-	doctor.setup("res://characters/psycho.glb")
+	doctor.setup(_char("story_doctor", "res://characters/psycho.glb"))
 	doctor.global_position = Vector3(0.35, 0.0, 0.55)
 	# дети умершего — Малика (в платке) и Шухрат; мы стоим у двери за их спинами
 	malika = Actor.new()
@@ -182,11 +182,12 @@ func _build_room() -> void:
 	malika.global_position = Vector3(0.7, 0.0, 1.95)
 	shukhrat = Actor.new()
 	add_child(shukhrat)
-	shukhrat.setup("res://characters/grandpa.glb")
+	var own_sh := ResourceLoader.exists("res://sanatorium/models/story_shukhrat.glb")
+	shukhrat.setup(_char("story_shukhrat", "res://characters/grandpa.glb"))
 	shukhrat.global_position = Vector3(1.35, 0.0, 1.75)
-	# Шухрат — не пациент: та же модель, но вместо больничной рубашки тёмная гражданская (перекрашенная текстура)
+	# без своей модели Шухрат — модель деда, переодетая в тёмную гражданскую одежду (перекрашенная текстура)
 	var civ := "res://characters/grandpa_civil.jpg"
-	if ResourceLoader.exists(civ) and shukhrat.get("model"):
+	if not own_sh and ResourceLoader.exists(civ) and shukhrat.get("model"):
 		var cm := StandardMaterial3D.new()
 		cm.albedo_texture = load(civ)
 		cm.roughness = 0.85
@@ -225,6 +226,12 @@ func _build_room() -> void:
 	doctor.face(Vector3(0.9, 0, 1.9), true)
 	malika.face(doctor.global_position, true)
 	shukhrat.face(doctor.global_position, true)
+
+
+## Персонаж: своя модель sanatorium/models/<nm>.glb (со скелетом), если есть, иначе — запасная.
+func _char(nm: String, fallback: String) -> String:
+	var p := "res://sanatorium/models/%s.glb" % nm
+	return p if ResourceLoader.exists(p) else fallback
 
 
 ## Своя модель из sanatorium/models (если есть): на пол в точке pos, поворот yaw. true — поставлена.

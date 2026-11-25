@@ -119,6 +119,8 @@ func _run() -> void:
 			await _caught_test()
 		"fair":
 			await _fair_test()
+		"charlab":
+			await _charlab()
 		"menu":
 			get_tree().change_scene_to_file("res://story/menu.tscn")
 			await secs(2.0)
@@ -1448,3 +1450,72 @@ func _items_test(g: Node, dir: Node) -> void:
 				g.lights.set_room(String(room["id"]), true)
 			await secs(1.2)
 			await shot("item_%s_%d" % [t, k])
+
+
+## Персонажи по одному на пустой сцене: стоит, идёт, бежит, сидит на стуле — спереди и сбоку.
+## --models=res://a.glb,res://b.glb
+func _charlab() -> void:
+	var Actor: Script = load("res://story/actor.gd")
+	var Props: Script = load("res://story/props.gd")
+	var root := Node3D.new()
+	add_child(root)
+	var we := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.32, 0.33, 0.35)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.55, 0.55, 0.58)
+	env.ambient_light_energy = 0.9
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	we.environment = env
+	root.add_child(we)
+	var sun := DirectionalLight3D.new()
+	sun.rotation = Vector3(-0.8, 0.5, 0)
+	sun.light_energy = 1.6
+	sun.shadow_enabled = true
+	root.add_child(sun)
+	var floor_mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(12, 12)
+	floor_mi.mesh = pm
+	root.add_child(floor_mi)
+	var cam := Camera3D.new()
+	cam.fov = 38.0
+	root.add_child(cam)
+	cam.current = true
+	for path in _arg("models", "").split(",", false):
+		var a = Actor.new()
+		root.add_child(a)
+		a.setup(path)
+		var nm: String = path.get_file().get_basename()
+		var c := Vector3(0, 0.9, 0)
+		var views := {"front": Vector3(0, 0.15, -3.2), "side": Vector3(3.2, 0.15, 0), "q": Vector3(2.3, 0.4, -2.3)}
+		var poses := [["idle_loop", ["front", "side"]], ["walk_loop", ["front", "side"]], ["run_loop", ["side"]]]
+		for pz in poses:
+			a.play(pz[0], 0.0)
+			await secs(0.6)
+			for v in pz[1]:
+				cam.global_position = c + views[v]
+				cam.look_at(c, Vector3.UP)
+				await secs(0.15)
+				await shot("%s_%s_%s" % [nm, pz[0], v])
+		var ch: Node3D = Props.glb("res://sanatorium/models/chair.glb", 1.0)
+		root.add_child(ch)
+		ch.rotation.y = PI
+		a.play("idle_loop", 0.0)
+		a.set_sit(true, 0.49)
+		var kh: float = 0.49 + 0.1
+		a.set_hands(Vector3(0.12, kh, -0.4), Vector3(-0.12, kh, -0.4), 0.8)
+		await secs(1.0)
+		cam.global_position = Vector3(1.6, 0.5, 0)
+		cam.look_at(Vector3(0, 0.5, 0), Vector3.UP)
+		await secs(0.15)
+		await shot("%s_sit_low" % nm)
+		for v in ["front", "side", "q"]:
+			cam.global_position = Vector3(0, 0.6, 0) + views[v] * 0.8
+			cam.look_at(Vector3(0, 0.65, 0), Vector3.UP)
+			await secs(0.15)
+			await shot("%s_sit_%s" % [nm, v])
+		ch.queue_free()
+		a.queue_free()
+		await secs(0.2)

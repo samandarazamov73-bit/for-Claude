@@ -2253,6 +2253,7 @@ func _mom_into_204() -> void:
 ## Паническая атака: Азиз падает из коляски, темнота, только звуки. Дальше — эпилог.
 const SON_CHAIR := Vector3(10.25, 4.5, -0.74)         # стулья за кроватью деда (палата 204), лицом к двери (−Z)
 const MOM_CHAIR := Vector3(11.15, 4.5, -0.74)
+const CHAIR_SEAT := 0.49                               # высота сиденья стула (sanatorium/models/chair.glb)
 var _people: Array = []
 
 
@@ -2309,37 +2310,106 @@ func _setup_real_hospital() -> void:
 		d.set_angle(80.0)
 
 
-## Люди: сидят и ждут в холле (модели пассажиров из пролога или свои story_people_sit_*.glb), врач и пациент
-## ходят по коридору 1-го этажа, в палате 204 — Дилором и её сын.
+## Люди: сидят и ждут в холле (свои story_people_sit_*.glb со скелетом — садятся на диваны и скамьи, руки на
+## коленях; без них — пассажиры из пролога), врач и пожилой пациент ходят по коридору 1-го этажа, в палате 204 —
+## Дилором и её сын.
+const STAND_SPOTS := [[Vector3(34.3, 1.2, 9.2), Vector3(36.0, 1.2, 9.4)]]   # где стоять (точка, куда смотреть): у окошка регистратуры
+
+
 func _spawn_people() -> void:
-	var sitting: Array = []
+	var seats: Array = _hall_seats()
+	var rigged: Array = []
 	for k in range(1, 7):
 		var p := "res://sanatorium/models/story_people_sit_%d.glb" % k
 		if ResourceLoader.exists(p):
-			sitting.append(p)
-	if sitting.is_empty():
-		sitting = ["res://intro/assets/models/people/grandma_scarf.glb", "res://intro/assets/models/people/man_newspaper.glb",
-			"res://intro/assets/models/people/mother_baby.glb"]
-	var seats: Array = _hall_seats()
-	for i in mini(seats.size(), sitting.size() + 1):
-		var s: Transform3D = seats[i]
-		var path: String = sitting[i % sitting.size()]
-		var m := Props.glb(path, 1.0)
-		game.add_child(m)
-		var lift_up: float = _feet_offset(m)
-		m.global_transform = s
-		m.global_position += Vector3(0, lift_up, 0) + s.basis.z * 0.08
-		_people.append(m)
+			rigged.append(p)
+	if rigged.is_empty():
+		_spawn_static_people(seats)
+	else:
+		var standing: Array = []
+		var si := 0
+		for p in rigged:
+			# в длинном пальто сидеть некрасиво (полы торчат вперёд) — она стоит
+			if (p as String).ends_with("_6.glb") or si >= seats.size():
+				standing.append(p)
+				continue
+			_sit_person(p, seats[si])
+			si += 1
+		for i in mini(standing.size(), STAND_SPOTS.size()):
+			var a = _actor(standing[i], "Человек")
+			a.global_position = STAND_SPOTS[i][0]
+			a.face(STAND_SPOTS[i][1], true)
+			a.play("idle_loop", 0.0)
+			_people.append(a)
 	# врач ходит по коридору туда-сюда, пожилой пациент медленно идёт к лестнице
-	var doc = _actor("res://characters/psycho.glb", "Врач")
+	var doc = _actor(_model_or("story_doctor", "res://characters/psycho.glb"), "Врач")
 	doc.natural = {"walk_loop": 1.3}
 	doc.global_position = Vector3(44.0, 1.2, -8.1)
 	_patrol(doc, [Vector3(44.0, 1.2, -8.1), Vector3(56.0, 1.2, -8.1)], 1.0)
-	var old = _actor("res://characters/grandpa.glb", "Пациент")
+	var old = _actor(_model_or("story_patient", "res://characters/grandpa.glb"), "Пациент")
 	old.natural = {"walk_loop": 0.26}
 	old.global_position = Vector3(32.2, 1.2, 9.5)
 	_patrol(old, [Vector3(32.2, 1.2, 9.5), Vector3(32.2, 1.2, 2.5)], 0.35)
 	_people.append_array([doc, old])
+
+
+## Своя модель sanatorium/models/<nm>.glb, если есть, иначе — запасная.
+func _model_or(nm: String, fallback: String) -> String:
+	var p := "res://sanatorium/models/%s.glb" % nm
+	return p if ResourceLoader.exists(p) else fallback
+
+
+## Человек со скелетом садится на место s (мебель: спинка — к её −Z, сиденье смотрит в +Z) — на высоту
+## сиденья, чуть ближе к спинке, кисти на колени.
+func _sit_person(path: String, s: Transform3D) -> void:
+	var a = _actor(path, "Человек")
+	var pos: Vector3 = s.origin - s.basis.z * 0.08
+	a.global_position = Vector3(pos.x, s.origin.y, pos.z)
+	a.face(a.global_position + s.basis.z, true)
+	var seat_h: float = _seat_top(s, pos)
+	a.set_sit(true, seat_h)
+	var b: Basis = a.global_transform.basis
+	var knee: Vector3 = a.global_position + b * Vector3(0, seat_h + 0.1, -0.4)
+	a.set_hands(knee + b * Vector3(0.11, 0, 0), knee + b * Vector3(-0.11, 0, 0), 0.8)
+	a.play("idle_loop", 0.0)
+	_people.append(a)
+
+
+## Верх сиденья под точкой p (м над полом мебели): самая высокая точка сетки мебели рядом с p не выше 0,75 м.
+func _seat_top(s: Transform3D, p: Vector3) -> float:
+	var best := -1.0
+	var inv: Transform3D = s.affine_inverse()
+	var lp: Vector3 = inv * p
+	for nd in _seat_nodes:
+		var n3: Node3D = nd
+		if n3.global_transform.origin.distance_to(s.origin) > 0.01:
+			continue
+		for g in n3.find_children("*", "MeshInstance3D", true, false):
+			var mi: MeshInstance3D = g
+			if mi.mesh == null:
+				continue
+			var xf: Transform3D = inv * mi.global_transform
+			for si in mi.mesh.get_surface_count():
+				var verts: PackedVector3Array = mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+				for v in verts:
+					var q: Vector3 = xf * v
+					if absf(q.x - lp.x) < 0.14 and absf(q.z - lp.z) < 0.14 and q.y < 0.75 and q.y > best:
+						best = q.y
+	return best if best > 0.25 else 0.45
+
+
+## Без своих моделей: сидящие пассажиры из пролога (позы готовые, без скелета).
+func _spawn_static_people(seats: Array) -> void:
+	var sitting := ["res://intro/assets/models/people/grandma_scarf.glb", "res://intro/assets/models/people/man_newspaper.glb",
+		"res://intro/assets/models/people/mother_baby.glb"]
+	for i in mini(seats.size(), sitting.size() + 1):
+		var s: Transform3D = seats[i]
+		var m := Props.glb(sitting[i % sitting.size()], 1.0)
+		game.add_child(m)
+		var lift_up: float = _feet_offset(m)
+		m.global_transform = Transform3D(s.basis * Basis(Vector3.UP, PI), s.origin)   # лицом из кресла (+Z мебели)
+		m.global_position += Vector3(0, lift_up, 0) - s.basis.z * 0.08
+		_people.append(m)
 
 
 func _patrol(a, pts: Array, speed: float) -> void:
@@ -2368,6 +2438,9 @@ func _feet_offset(m: Node3D) -> float:
 
 
 ## Места в холле: диван, скамья, кресла — где они стоят в здании (лицом в зал).
+var _seat_nodes: Array = []
+
+
 func _hall_seats() -> Array:
 	var out: Array = []
 	for g in game.building.find_children("*", "Node3D", true, false):
@@ -2377,6 +2450,8 @@ func _hall_seats() -> Array:
 			continue
 		if nm.begins_with("bench") or nm.begins_with("sofa") or nm.begins_with("armchair"):
 			out.append(n.global_transform)
+			_seat_nodes.append(n)
+			print("HALL SEAT ", nm, " ", n.global_position, " yaw ", n.global_rotation.y)
 	return out
 
 
@@ -2391,28 +2466,21 @@ func _place_son_scene() -> void:
 		ch.global_position = c
 		ch.rotation.y = PI                               # сиденьем к двери (−Z)
 		_people.append(ch)
-	var son_path := "res://sanatorium/models/story_son.glb"
-	var son: Node3D
-	if ResourceLoader.exists(son_path):
-		son = Props.glb(son_path, 1.0)
-		game.add_child(son)
-		son.global_position = SON_CHAIR + Vector3(0, _feet_offset(son), 0)
-		son.rotation.y = PI
-	else:
-		var a = _actor("res://characters/younger.glb", "Сын")
-		a.global_position = SON_CHAIR
-		a.face(SON_CHAIR + Vector3(0, 0, -1), true)
-		a.set_sit(true)
-		a.set_hands(SON_CHAIR + Vector3(0.12, 0.55, -0.38), SON_CHAIR + Vector3(-0.12, 0.55, -0.38), 0.8)
-		son = a
+	var a = _actor(_model_or("story_son", "res://characters/younger.glb"), "Сын")
+	a.global_position = SON_CHAIR
+	a.face(SON_CHAIR + Vector3(0, 0, -1), true)
+	a.set_sit(true, CHAIR_SEAT)
+	a.set_hands(SON_CHAIR + Vector3(0.12, CHAIR_SEAT + 0.1, -0.4), SON_CHAIR + Vector3(-0.12, CHAIR_SEAT + 0.1, -0.4), 0.8)
+	a.play("idle_loop", 0.0)
+	var son: Node3D = a
 	_people.append(son)
 	_son = son
 	mom.visible = true
 	mom.stop()
 	mom.global_position = MOM_CHAIR
 	mom.face(MOM_CHAIR + Vector3(0, 0, -1), true)
-	mom.set_sit(true)
-	mom.set_hands(MOM_CHAIR + Vector3(0.11, 0.55, -0.36), MOM_CHAIR + Vector3(-0.11, 0.55, -0.36), 0.9)
+	mom.set_sit(true, CHAIR_SEAT)
+	mom.set_hands(MOM_CHAIR + Vector3(0.11, CHAIR_SEAT + 0.1, -0.38), MOM_CHAIR + Vector3(-0.11, CHAIR_SEAT + 0.1, -0.38), 0.9)
 	mom.play("idle_loop", 0.0)
 
 

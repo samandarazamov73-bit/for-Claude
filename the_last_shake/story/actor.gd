@@ -171,12 +171,24 @@ func set_arm(target: Variant) -> void:
 			look.arm_weight = 1.0
 
 
-## Сесть (на стул высотой seat_h, м) или встать. Актёр опускается так, чтобы таз оказался на сиденье.
-func set_sit(on: bool, seat_h := 0.46) -> void:
+## Сесть (на стул высотой seat_h, м) или встать. Актёр опускается так, чтобы таз оказался на сиденье:
+## тазобедренный сустав — на толщину бедра (~6 см) выше сиденья; высота таза — своя у каждой модели.
+func set_sit(on: bool, seat_h := 0.47) -> void:
 	if look:
 		look.sit = 1.0 if on else 0.0
 	if model:
-		model.position.y = -(0.93 - seat_h) * model.scale.y if on else 0.0
+		model.position.y = -(hip_height() - 0.06 - seat_h) * model.scale.y if on else 0.0
+
+
+## Высота тазобедренного сустава над полом в покое (м, без масштаба модели).
+func hip_height() -> float:
+	if skel:
+		for nm in ["mixamorig_LeftUpLeg", "mixamorig:LeftUpLeg", "LeftUpLeg"]:
+			var bi: int = skel.find_bone(nm)
+			if bi >= 0:
+				var p: Vector3 = (skel.global_transform * skel.get_bone_global_rest(bi)).origin
+				return (p.y - model.global_position.y) / maxf(model.scale.y, 0.001)
+	return 0.99
 
 
 func set_lean(a: float) -> void:

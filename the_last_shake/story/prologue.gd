@@ -102,6 +102,7 @@ var _mom_still := 0.0
 var pharmacy := false             # глава 5: ночью из санатория в аптеку (дом через дорогу от остановки) и назад
 var pre_s := 0.0                   # глава 5: столько метров пути — от прилавка аптеки до остановки
 var house: Node3D                  # дом с аптекой у остановки (модель автора: props/pharmacy_house.glb)
+var pharmacist                     # story/actor.gd — провизор за прилавком (если есть своя модель)
 var _house_anim: AnimationPlayer
 var _house_door_open := false
 var has_pills := false
@@ -686,11 +687,24 @@ func _build_house() -> void:
 		_house_anim = aps[0]
 	var counter: Array = hd["route"][0]
 	kiosk_point = Vector3(float(counter[0]), float(counter[1]) + 1.0, float(counter[2]))
-	# провизор сидит за прилавком лицом к окошку (своя модель story_pharmacist.glb, если есть; иначе — пожилая
-	# женщина в платке, сидящая, из пассажиров автобуса)
+	# провизор сидит за прилавком на высоком табурете лицом к окошку: своя модель story_pharmacist.glb (со скелетом —
+	# сидит, дышит, смотрит на покупателя), иначе — пожилая женщина в платке, сидящая, из пассажиров автобуса
 	var ph_path := "res://sanatorium/models/story_pharmacist.glb"
-	if not ResourceLoader.exists(ph_path):
-		ph_path = "res://intro/assets/models/people/grandma_scarf.glb"
+	var seat_local := Vector3(-5.85, 0.1, -4.95)
+	if ResourceLoader.exists(ph_path):
+		pharmacist = Actor.new()
+		pharmacist.name = "Провизор"
+		add_child(pharmacist)                             # не в дом: поворот актёра — в мировых координатах
+		pharmacist.setup(ph_path)
+		pharmacist.global_position = house.to_global(seat_local)
+		pharmacist.face(house.to_global(seat_local + Vector3(0, 0, 1)), true)
+		pharmacist.set_sit(true, 0.77)                    # табурет высокий: прилавок ~1,1 м
+		var b: Basis = pharmacist.global_transform.basis
+		var knee: Vector3 = pharmacist.global_position + b * Vector3(0, 0.87, -0.4)
+		pharmacist.set_hands(knee + b * Vector3(0.11, 0, 0), knee + b * Vector3(-0.11, 0, 0), 0.8)
+		pharmacist.play("idle_loop", 0.0)
+		return
+	ph_path = "res://intro/assets/models/people/grandma_scarf.glb"
 	if ResourceLoader.exists(ph_path):
 		var ph: Node3D = (load(ph_path) as PackedScene).instantiate()
 		house.add_child(ph)
@@ -1368,6 +1382,8 @@ func _buy_pills() -> void:
 		return
 	has_pills = true
 	ui.set_prompt("")
+	if pharmacist:
+		pharmacist.set_look(cam.global_position)
 	if house:
 		await say("pharmacist", "Слушаю.")
 		await say("hero", "Цитрамон. Вот бумажка.")
