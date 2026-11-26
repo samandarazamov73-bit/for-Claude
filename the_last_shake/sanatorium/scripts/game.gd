@@ -1102,6 +1102,9 @@ func ground_furniture() -> int:
 	return n
 
 
+var moved_furniture: Array = []     # [план до сдвига (Rect2), низ, верх, сдвиг] — коллизии из level.json сдвигаем так же
+
+
 func separate_furniture() -> int:
 	var items: Array = []          # [узел, тип, AABB в своих координатах, низ, верх]
 	for g in building.find_children("*", "MeshInstance3D", true, false):
@@ -1162,7 +1165,10 @@ func separate_furniture() -> int:
 							continue
 						# сначала вдоль стены (своя ось X — спинка остаётся у стены), не вышло — назад/вперёд (ось Z):
 						# кресла у окна стоят боком к стене, лицом к столику между ними
-						for ax3 in [a.global_transform.basis.x, a.global_transform.basis.z]:
+						var axes: Array = [a.global_transform.basis.x]
+						if not String(room.get("kind", "")).contains("corridor"):
+							axes.append(a.global_transform.basis.z)        # в коридоре кресло вперёд не выдвигаем
+						for ax3 in axes:
 							if hit:
 								break
 							var ax := Vector2(ax3.x, ax3.z).normalized()
@@ -1197,6 +1203,15 @@ func separate_furniture() -> int:
 			a.global_position = start_pos                     # зажат между двумя — сдвиг не помог: как было
 			for tp in tops:
 				(tp as Node3D).global_position = top_pos[tp]
+		if a.global_position != start_pos:                    # коллизия этой мебели поедет следом
+			var fp0: PackedVector2Array = _footprint(Transform3D(a.global_transform.basis, start_pos), items[i][2])
+			var lo := Vector2(INF, INF)
+			var hi := Vector2(-INF, -INF)
+			for q in fp0:
+				lo = Vector2(minf(lo.x, q.x), minf(lo.y, q.y))
+				hi = Vector2(maxf(hi.x, q.x), maxf(hi.y, q.y))
+			moved_furniture.append([Rect2(lo, hi - lo).grow(0.05), float(items[i][3]) - 0.1, float(items[i][4]) + 0.1,
+				a.global_position - start_pos])
 	return moved
 
 
@@ -1860,16 +1875,27 @@ func _build_furniture_colliders() -> void:
 	body.collision_mask = 0
 	add_child(body)
 	for b in level["boxes"]:
-		_box_shape(body, _v3(b["min"]), _v3(b["max"]))
+		var off := _moved_offset((_v3(b["min"]) + _v3(b["max"])) * 0.5)
+		_box_shape(body, _v3(b["min"]) + off, _v3(b["max"]) + off)
 	for b in level["rot_boxes"]:
 		var cs := CollisionShape3D.new()
 		var bs := BoxShape3D.new()
 		bs.size = _v3(b["size"])
 		cs.shape = bs
-		cs.position = _v3(b["center"])
+		cs.position = _v3(b["center"]) + _moved_offset(_v3(b["center"]))
 		cs.rotation.y = float(b["yaw"])
 		body.add_child(cs)
 	stats["furniture_boxes"] = body.get_child_count()
+
+
+## Сдвиг коробки-коллизии вместе с мебелью, которую раздвинула separate_furniture (середина коробки — в её
+## старом плане и по высоте внутри неё).
+func _moved_offset(c: Vector3) -> Vector3:
+	for m in moved_furniture:
+		var r: Rect2 = m[0]
+		if r.has_point(Vector2(c.x, c.z)) and c.y >= float(m[1]) and c.y <= float(m[2]):
+			return m[3]
+	return Vector3.ZERO
 
 
 var _blockers: StaticBody3D
