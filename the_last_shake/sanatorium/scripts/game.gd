@@ -374,7 +374,7 @@ void sky() {
 ## wb — нейтральный баланс белого (убирает желтизну от тёплого пола и штор), squeeze/haze — лес за окном
 ## ниже и дальше (см. MORNING_SKY_SHADER).
 const DAY_LOOK := {"amb": 0.13, "win": 0.35, "sun": 0.9, "sky": 30.0, "view": 3.2, "agx_c": 1.35, "ssil": 0.8,
-	"exp": 0.26, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 1.5, "bounce": 1.0, "floor": 1.0,
+	"exp": 0.26, "aim": 0.8, "cone": 89.0, "att": 2.0, "sat": 0.92, "curt": 0.45, "gi": 2.5, "bounce": 1.0, "floor": 1.0,
 	"wb": 1.0, "squeeze": 1.4, "haze": 0.03, "minsens": 28.0}
 ## Низкое качество (слабые машины): без глобального освещения — свет окон заметнее, рассеянного больше.
 const DAY_LOOK_LOW := {"amb": 0.18, "win": 1.0, "sun": 0.9, "sky": 20.0, "view": 8.0, "agx_c": 1.35, "ssil": 0.0,
@@ -517,9 +517,13 @@ func apply_day_look(v: Dictionary) -> void:
 	# стены — мебель серела. Тогда отражения только от экрана (SSR) и от света ламп.
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_BG if gi > 0.0 else Environment.REFLECTION_SOURCE_DISABLED
 	# задаём только то, что поменялось: любая смена сетки SDFGI сбрасывает накопленный свет
+	# небо в глобальное освещение не берём: оно просачивалось под пол и снизу высвечивало всё, что стоит на полу
+	# (низ кресел, диванов, горшков, люди — белёсые). Свет неба в комнату и так дают окна (их прожекторы) и
+	# рассеянный свет; палата выглядит так же, а вещи — своего цвета.
+	if env.sdfgi_read_sky_light:
+		env.sdfgi_read_sky_light = false
 	if gi > 0.0 and (env.sdfgi_cascades != 4 or not is_equal_approx(env.sdfgi_min_cell_size, 0.15)):
 		env.sdfgi_use_occlusion = true
-		env.sdfgi_read_sky_light = true
 		env.sdfgi_cascades = 4
 		env.sdfgi_min_cell_size = 0.15
 		env.sdfgi_y_scale = Environment.SDFGI_Y_SCALE_75_PERCENT

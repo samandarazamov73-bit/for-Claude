@@ -1064,11 +1064,12 @@ func _beatpose_test(g: Node, d: Node) -> void:
 ## Лифт на 3-м этаже: двери закрываются медленно, мама увозит человека в коляске.
 ## Свет утренней палаты 204: один запуск — несколько вариантов настроек (рассеянный свет, свет окон, солнце,
 ## тональная кривая), по кадру на каждый. Варианты — в LAB_VARIANTS.
+## Варианты света (ключи — как в game.DAY_LOOK; ещё glow, fog, skyread). Кадр — из --from на --at (по умолчанию палата 204).
 const LAB_VARIANTS := [
 	{"name": "final"},
 	{"name": "low", "low": 1},
-	{"name": "J1", "sky": 26.0, "minsens": 12.0},
-	{"name": "J2", "sky": 26.0},
+	{"name": "nogi", "gi": 0.0, "ssil": 0.0},
+	{"name": "skyread", "skyread": 1.0},
 ]
 
 
@@ -1085,9 +1086,11 @@ func _lightlab() -> void:
 	await wait_for(func(): return d.act == "real", 120, "real")
 	pl = d.player
 	await secs(2.0)
-	await tp(Vector3(8.83, 4.5, -4.0), PI)
+	var fr: PackedStringArray = _arg("from", "8.83,4.5,-4.0").split(",")
+	var at: PackedStringArray = _arg("at", "10.7,5.3,-0.74").split(",")
+	await tp(Vector3(float(fr[0]), float(fr[1]), float(fr[2])), PI)
 	await secs(1.0)
-	var to: Vector3 = Vector3(10.7, 5.3, -0.74) - pl.head.global_position
+	var to: Vector3 = Vector3(float(at[0]), float(at[1]), float(at[2])) - pl.head.global_position
 	pl.rotation.y = atan2(-to.x, -to.z)
 	pl.look_yaw = 0.0
 	pl.look_pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -0.9, 0.9)
@@ -1116,6 +1119,12 @@ func _lightlab() -> void:
 		var look: Dictionary = (g.DAY_LOOK_LOW if v.has("low") else g.DAY_LOOK).duplicate()
 		look.merge(v, true)
 		g.apply_day_look(look)
+		if v.has("glow"):
+			g.env.glow_intensity = float(v["glow"])
+		if v.has("fog"):
+			g.env.fog_enabled = float(v["fog"]) > 0.0
+		if v.has("skyread"):
+			g.env.sdfgi_read_sky_light = float(v["skyread"]) > 0.0
 		var f0: int = Engine.get_frames_drawn()
 		await secs(3.0)
 		if float(look["gi"]) > 0.0:
