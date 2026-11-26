@@ -134,6 +134,26 @@ func _run() -> void:
 			await _wallaudit()
 		"floataudit":
 			await _floataudit()
+		"roomaudit":
+			await _roomaudit()
+		"clipaudit":
+			await _clipaudit()
+		"camviews":
+			await _camviews()
+		"dbgsep":
+			GameStateRef().checkpoint = "start"
+			get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+			await secs(4.0)
+			var g: Node = get_tree().current_scene
+			for nm in _arg("names", "").split(","):
+				var nodes: Array = g.building.find_children(nm + "_model", "Node3D", true, false)
+				if nodes.is_empty():
+					nodes = g.building.find_children(nm, "Node3D", true, false)
+				for nd in nodes:
+					var box: AABB = g._scene_aabb(nd) if String(nd.name).ends_with("_model") else (nd as MeshInstance3D).mesh.get_aabb()
+					var fp: PackedVector2Array = g._footprint(nd.global_transform, box)
+					var room: Dictionary = g.room_at(nd.global_position + Vector3(0, 0.4, 0))
+					print("DBG ", nd.name, " pos ", nd.global_position, " basis.x ", nd.global_transform.basis.x, " box ", box, " fp ", fp, " room ", room.get("id", "?"), " out ", g._outside_by(fp, room) if not room.is_empty() else -1.0)
 		"menubg":
 			await _menubg()
 		"menushots":
@@ -1596,50 +1616,58 @@ func _wallaudit() -> void:
 	print("AUDIT DONE")
 
 
-## Вещи, что висят в воздухе: низ выше пола, а под серединой нет верха другой вещи (в пределах 3 см).
+## Вещи, что висят в воздухе. Проверяем то, что должно стоять: мелочь на мебели (ON_TOP и игры, лампы, вазы),
+## мебель и модели на полу. Опора — самый высокий верх другой вещи под серединой предмета (не выше его низа + 6 см)
+## или пол этажа; зазор больше 2.5 см — «висит». Настенное (розетки, шторы, таблички, раковины) не проверяем.
 func _floataudit() -> void:
 	GameStateRef().checkpoint = _arg("cp", "floor3")
 	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
 	await secs(4.0)
 	var g: Node = get_tree().current_scene
 	var Game: Script = load("res://sanatorium/scripts/game.gd")
+	var check_types: Array = Game.ON_TOP + Game.FLOOR_TYPES + ["game_checkers", "game_backgammon", "lamp_table",
+		"lamp_desk", "plant", "palm", "ashtray", "thermos", "mug", "bread", "bowl", "clock_table", "typewriter"]
+	var items: Array = []        # [узел, AABB, тип]
 	var all: Array = []
-	for c in g.building.find_children("*", "VisualInstance3D", true, false):
-		var v: VisualInstance3D = c
-		if not v.is_visible_in_tree() or not (v is GeometryInstance3D):
+	for c in g.building.find_children("*", "Node3D", true, false):
+		var nd: Node3D = c
+		if not nd.is_visible_in_tree():
 			continue
-		var b: AABB = v.global_transform * v.get_aabb()
-		if b.size.length() < 0.02:
+		var nm := String(nd.name)
+		var t: String = Game.model_type(nm.trim_suffix("_model"))
+		var b: AABB
+		if nd is MeshInstance3D and (nd as MeshInstance3D).mesh:
+			b = nd.global_transform * (nd as MeshInstance3D).get_aabb()
+			if b.size.length() > 0.02 and b.size.x < 3.0 and b.size.z < 3.0 and b.size.y < 2.6:
+				all.append([nd, b])
+		elif nm.ends_with("_model"):
+			b = Game._world_aabb(nd)
+		else:
 			continue
-		all.append([v, b])
+		if t != "" and t in check_types and not (nd is MeshInstance3D and nd.get_parent().get_node_or_null(nm + "_model")):
+			items.append([nd, b, t])
 	var n := 0
-	for it in all:
-		var v: VisualInstance3D = it[0]
+	for it in items:
+		var nd: Node3D = it[0]
 		var b: AABB = it[1]
-		if b.size.x > 2.5 or b.size.z > 2.5 or b.size.y > 2.6:
-			continue                                   # стены, полы, большие куски здания
-		var floor_y: float = 1.2 + floorf((b.position.y - 1.2 + 0.05) / 3.3) * 3.3
-		var gap: float = b.position.y - floor_y
-		if gap < 0.04 or gap > 2.2:
-			continue
 		var c: Vector3 = b.get_center()
-		var ok := false
+		var floor_y: float = 1.2 + floorf((b.position.y - 1.2 + 0.05) / 3.3) * 3.3
+		var top := floor_y
+		var who := "пол"
 		for sp in all:
-			if sp[0] == v:
+			var sn: Node3D = sp[0]
+			if sn == nd or nd.is_ancestor_of(sn):
 				continue
 			var sb: AABB = sp[1]
 			if c.x < sb.position.x or c.x > sb.end.x or c.z < sb.position.z or c.z > sb.end.z:
 				continue
-			if sb.size.x > 3.0 or sb.size.z > 3.0 or sb.size.y > 2.6:
-				continue                               # стены и перекрытия — не опора
-			if sb.end.y >= b.position.y - 0.035 and sb.end.y <= b.position.y + 0.06:
-				ok = true                              # верх опоры — под самым низом вещи
-				break
-		if not ok:
-			var nm := String(v.name)
-			var par := String(v.get_parent().name)
-			var room: Dictionary = g.room_at(c)
-			print("FLOAT %s | %s | %s | gap %.2f | size %s | %s" % [room.get("id", "?"), nm, par, gap, b.size, c])
+			if sb.end.y > top and sb.end.y <= b.position.y + 0.06:
+				top = sb.end.y
+				who = String(sn.name) if not String(sn.name).begins_with("@") else String(sn.get_parent().name)
+		var gap: float = b.position.y - top
+		if gap > 0.025 and gap < 1.5:
+			var room: Dictionary = g.room_at(c + Vector3(0, 0.2, 0))
+			print("FLOAT %s | %s (%s) | над «%s» на %.2f м | %s" % [room.get("id", "?"), String(nd.name), it[2], who, gap, c])
 			n += 1
 	print("FLOAT TOTAL ", n)
 
@@ -1733,3 +1761,289 @@ func _menushots() -> void:
 	g.hud.menu._confirm("Выйти в главное меню?", "Продолжить потом можно с начала этой главы.", "Выйти в меню", func(): pass)
 	await secs(0.4)
 	await shot("pause_confirm")
+
+
+## Обход всех комнат: из двух противоположных углов каждого прямоугольника комнаты (длинные коридоры — кусками
+## по 8 м) — кадр как есть и кадр с подсветкой: красным — то, что видно ниже пола / выше потолка своей комнаты
+## ближе 9 м (дыра в другой этаж), зелёным — то же дальше (крыши за окном), синим — то, что за стенами здания
+## (окна — нормально, щели — нет). Второй кадр — только маска: чёрное — всё в порядке.
+## --cp=глава, --levels=0,1,2, --rooms=id,id (только эти), --from=номер (продолжить).
+const AUDIT_SKIP := ["shaft", "machine_room"]
+const AUDIT_SHADER := """
+shader_type spatial;
+render_mode unshaded, depth_test_disabled, depth_draw_never, cull_disabled, shadows_disabled;
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
+uniform sampler2D mask : filter_nearest;
+uniform vec2 origin;
+uniform vec2 size;
+void vertex() {
+	POSITION = vec4(VERTEX.xy, 1.0, 1.0);
+}
+void fragment() {
+	float depth = texture(depth_tex, SCREEN_UV).r;
+	vec3 ndc = vec3(SCREEN_UV * 2.0 - 1.0, depth);
+	vec4 view = INV_PROJECTION_MATRIX * vec4(ndc, 1.0);
+	view.xyz /= view.w;
+	vec3 w = (INV_VIEW_MATRIX * vec4(view.xyz, 1.0)).xyz;
+	vec2 uv = (w.xz - origin) / size;
+	vec4 m = texture(mask, uv);
+	ALPHA = 1.0;
+	ALBEDO = vec3(0.0);
+	if (depth <= 0.000001 || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 || m.a < 0.5) {
+		ALBEDO = vec3(0.0, 0.0, 1.0);
+	} else if (m.b > 0.5 && (w.y < m.r - 0.12 || w.y > m.g + 0.15)) {
+		ALBEDO = length(view.xyz) < 9.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+	}
+}
+"""
+
+
+func _audit_mask(g: Node, lvl: int) -> Dictionary:
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for r in g.room_list:
+		for q in r["rects"]:
+			lo = Vector2(minf(lo.x, q[0]), minf(lo.y, q[2]))
+			hi = Vector2(maxf(hi.x, q[1]), maxf(hi.y, q[3]))
+	lo -= Vector2(2, 2)
+	hi += Vector2(2, 2)
+	var res := 0.1
+	var w := int(ceil((hi.x - lo.x) / res))
+	var h := int(ceil((hi.y - lo.y) / res))
+	var img := Image.create(w, h, false, Image.FORMAT_RGBAF)
+	img.fill(Color(0, 0, 0, 0))
+	# A: план этажа с запасом на толщину стен (0.4 м) — всё, что за ним, это улица
+	for r in g.room_list:
+		if int(r["level"]) != lvl and not String(r["kind"]).begins_with("stair") and String(r["kind"]) != "shaft":
+			continue
+		for q in r["rects"]:
+			for x in range(int((q[0] - 0.4 - lo.x) / res), int((q[1] + 0.4 - lo.x) / res) + 1):
+				for z in range(int((q[2] - 0.4 - lo.y) / res), int((q[3] + 0.4 - lo.y) / res) + 1):
+					if x >= 0 and z >= 0 and x < w and z < h:
+						var c: Color = img.get_pixel(x, z)
+						c.a = 1.0
+						img.set_pixel(x, z, c)
+	# R,G,B: пол и потолок своей комнаты (лестницы и шахта — нет: там видно другие этажи по делу)
+	for r in g.room_list:
+		var kind := String(r["kind"])
+		if int(r["level"]) != lvl or kind.begins_with("stair") or kind == "shaft":
+			continue
+		for q in r["rects"]:
+			for x in range(int((q[0] - lo.x) / res), int((q[1] - lo.x) / res) + 1):
+				for z in range(int((q[2] - lo.y) / res), int((q[3] - lo.y) / res) + 1):
+					if x >= 0 and z >= 0 and x < w and z < h:
+						img.set_pixel(x, z, Color(float(r["floor_y"]), float(r["ceil_y"]), 1.0, 1.0))
+	# лестницы, шахта: пол/потолок не проверяем
+	for r in g.room_list:
+		var kind := String(r["kind"])
+		if not (kind.begins_with("stair") or kind == "shaft"):
+			continue
+		for q in r["rects"]:
+			for x in range(int((q[0] - 0.15 - lo.x) / res), int((q[1] + 0.15 - lo.x) / res) + 1):
+				for z in range(int((q[2] - 0.15 - lo.y) / res), int((q[3] + 0.15 - lo.y) / res) + 1):
+					if x >= 0 and z >= 0 and x < w and z < h:
+						img.set_pixel(x, z, Color(0, 0, 0, 1.0))
+	return {"tex": ImageTexture.create_from_image(img), "origin": lo, "size": Vector2(w, h) * res}
+
+
+func _roomaudit() -> void:
+	GameStateRef().checkpoint = _arg("cp", "start")
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	d = g.get_node("Director")
+	await secs(4.0)
+	d.set_process(false)
+	if d.get("scares"):
+		d.scares.stop()
+	GameStateRef().set_fade(0.0)
+	for c in get_tree().root.find_children("*", "CanvasLayer", true, false):
+		(c as CanvasLayer).visible = false
+	pl = d.player
+	pl.set_torch(false)
+	pl.visible = false
+	pl.set_physics_process(false)
+	pl.set_process(false)
+	g.cam_attr.auto_exposure_speed = 30.0
+	var cam := Camera3D.new()
+	cam.fov = 82.0
+	cam.near = 0.05
+	g.add_child(cam)
+	cam.current = true
+	var fill := OmniLight3D.new()                      # слабый свет у камеры: тёмные комнаты тоже видно
+	fill.light_energy = 0.35
+	fill.omni_range = 7.0
+	fill.light_color = Color(1.0, 0.95, 0.88)
+	cam.add_child(fill)
+	var quad := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(2, 2)
+	quad.mesh = qm
+	quad.extra_cull_margin = 16384.0
+	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var sh := Shader.new()
+	sh.code = AUDIT_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = sh
+	quad.material_override = mat
+	cam.add_child(quad)
+	quad.position = Vector3(0, 0, -0.2)
+	var only := _arg("rooms", "")
+	var from := int(_arg("from", "0"))
+	var levels: Array = []
+	for t in _arg("levels", "0,1,2").split(","):
+		levels.append(int(t))
+	var man := FileAccess.open(out + "/manifest.txt", FileAccess.WRITE if from == 0 else FileAccess.READ_WRITE)
+	if from > 0:
+		man.seek_end()
+	var idx := 0
+	for lvl in levels:
+		var mk: Dictionary = _audit_mask(g, lvl)
+		mat.set_shader_parameter("mask", mk["tex"])
+		mat.set_shader_parameter("origin", mk["origin"])
+		mat.set_shader_parameter("size", mk["size"])
+		for r in g.room_list:
+			if int(r["level"]) != lvl or String(r["kind"]) in AUDIT_SKIP:
+				continue
+			if only != "" and not (String(r["id"]) in only.split(",")):
+				continue
+			var fy: float = r["floor_y"]
+			var eye: float = fy + minf(1.25, (float(r["ceil_y"]) - fy) * 0.5)
+			g.lights.set_room(String(r["id"]), true, false)
+			var views: Array = []
+			for q in r["rects"]:
+				var x0: float = q[0]
+				var x1: float = q[1]
+				var z0: float = q[2]
+				var z1: float = q[3]
+				var along_x: bool = (x1 - x0) >= (z1 - z0)
+				var L: float = (x1 - x0) if along_x else (z1 - z0)
+				var nseg := maxi(1, ceili(L / 8.0))
+				for sgi in nseg:
+					var a0: float = (x0 if along_x else z0) + L * sgi / nseg
+					var a1: float = (x0 if along_x else z0) + L * (sgi + 1) / nseg
+					var ins := minf(0.45, minf(x1 - x0, z1 - z0) * 0.25)
+					var p0: Vector3
+					var p1: Vector3
+					if along_x:
+						p0 = Vector3(a0 + ins, eye, z0 + ins)
+						p1 = Vector3(a1 - ins, eye, z1 - ins)
+					else:
+						p0 = Vector3(x0 + ins, eye, a0 + ins)
+						p1 = Vector3(x1 - ins, eye, a1 - ins)
+					views.append([p0, p1])
+					views.append([p1, p0])
+			var k := 0
+			for v in views:
+				if idx < from:
+					idx += 1
+					k += 1
+					continue
+				var p0: Vector3 = v[0]
+				var p1: Vector3 = v[1]
+				cam.global_position = p0
+				var tgt := Vector3(p1.x, fy + 0.55, p1.z)
+				if tgt.distance_to(p0) > 0.3:
+					cam.look_at(tgt, Vector3.UP)
+				quad.visible = false
+				await secs(0.35)
+				var nm := "%03d_%s_%d" % [idx, String(r["id"]).replace(".", "-"), k]
+				await shot(nm)
+				quad.visible = true
+				await frames(2)
+				await shot(nm + "_x")
+				man.store_line("%s\t%s\t%s\t%s\t%.2f,%.2f,%.2f" % [nm, r["id"], r["name"], r["kind"], p0.x, p0.y, p0.z])
+				man.flush()
+				idx += 1
+				k += 1
+			g.lights.set_room(String(r["id"]), false, false)
+	man.close()
+	print("AUDIT VIEWS ", idx)
+
+
+## Мебель, что въехала в другую мебель (кресло в стол, стул в тумбочку): пары с перекрытием в плане больше 4 см
+## и по высоте. Стулья под столом — как в жизни, их не считаем.
+func _clipaudit() -> void:
+	GameStateRef().checkpoint = _arg("cp", "start")
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	var Game: Script = load("res://sanatorium/scripts/game.gd")
+	var items: Array = []
+	for c in g.building.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = c
+		var t: String = Game.model_type(String(m.name))
+		if t == "" or t in Game.ON_TOP or t in Game.NOT_OBSTACLE:
+			continue
+		var holder: Node3D = m.get_parent().get_node_or_null(String(m.name) + "_model") as Node3D
+		var nd: Node3D = holder if holder else m
+		if holder == null and (not m.visible or m.mesh == null):
+			continue
+		var box: AABB = g._scene_aabb(holder) if holder else m.mesh.get_aabb()
+		var wb: AABB = nd.global_transform * box
+		items.append([nd, t, g._footprint(nd.global_transform, box), wb.position.y, wb.end.y, String(m.name)])
+	var n := 0
+	for i in items.size():
+		for j in range(i + 1, items.size()):
+			var A: Array = items[i]
+			var B: Array = items[j]
+			if (A[0] as Node3D).global_position.distance_to((B[0] as Node3D).global_position) > 4.0:
+				continue
+			if float(B[4]) < float(A[3]) + 0.05 or float(B[3]) > float(A[4]) - 0.05:
+				continue
+			var ov: float = Game._overlap(A[2], B[2])
+			if ov < 0.04:
+				continue
+			var ta: String = A[1]
+			var tb: String = B[1]
+			var seat := func(t: String): return t.begins_with("chair") or t == "stool"
+			var table := func(t: String): return t.begins_with("table") or t.begins_with("desk")
+			if (seat.call(ta) and table.call(tb)) or (seat.call(tb) and table.call(ta)):
+				continue
+			var p: Vector3 = (A[0] as Node3D).global_position
+			var room: Dictionary = g.room_at(p + Vector3(0, 0.4, 0))
+			print("CLIP %s | %s (%s) x %s (%s) | %.2f m | %s" % [room.get("id", "?"), A[5], ta, B[5], tb, ov, p])
+			n += 1
+	print("CLIP TOTAL ", n)
+
+
+## Свободная камера: --views="x,y,z>x,y,z;…" — кадры cam_00, cam_01…; свет во всех комнатах этих точек (--cp=глава).
+func _camviews() -> void:
+	GameStateRef().checkpoint = _arg("cp", "start")
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	d = g.get_node("Director")
+	await secs(4.0)
+	d.set_process(false)
+	if d.get("scares"):
+		d.scares.stop()
+	GameStateRef().set_fade(0.0)
+	for c in get_tree().root.find_children("*", "CanvasLayer", true, false):
+		(c as CanvasLayer).visible = false
+	pl = d.player
+	pl.set_torch(false)
+	pl.visible = false
+	pl.set_physics_process(false)
+	g.cam_attr.auto_exposure_speed = 30.0
+	var cam := Camera3D.new()
+	cam.fov = float(_arg("fov", "70"))
+	cam.near = 0.03
+	g.add_child(cam)
+	cam.current = true
+	var k := 0
+	for v in _arg("views", "").split(";", false):
+		var ab: PackedStringArray = v.split(">")
+		var a: PackedStringArray = ab[0].split(",")
+		var b: PackedStringArray = ab[1].split(",")
+		var pa := Vector3(float(a[0]), float(a[1]), float(a[2]))
+		var pb := Vector3(float(b[0]), float(b[1]), float(b[2]))
+		for p in [pa, pb]:
+			var r: Dictionary = g.room_at(p)
+			if not r.is_empty():
+				g.lights.set_room(String(r["id"]), true, false)
+		cam.global_position = pa
+		cam.look_at(pb, Vector3.UP)
+		await secs(0.6)
+		await shot("cam_%02d" % k)
+		k += 1

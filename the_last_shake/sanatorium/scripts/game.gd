@@ -66,9 +66,11 @@ func _ready() -> void:
 	_build_static_colliders()
 	_build_occluders_and_ranges()
 	stats["models_swapped"] = swap_models(building)     # свои 3D-модели из sanatorium/models/
+	stats["upholstered"] = upholster()                  # бежевые диваны — в ткани, а не «фанерные ящики»
 	stats["grounded"] = ground_furniture()              # ширмы, тележки… — на пол, а не в 10 см над ним
 	stats["models_on_tables"] = dress_tables(building)  # термос, кружка, хлеб на столах; мониторы на столиках
 	stats["reseated"] = reseat_items(building)          # чемоданы, книги, радио… — на верх своей мебели
+	stats["settled"] = settle_items()                   # и без щели: ровно на самую высокую точку опоры под ними
 	stats["separated"] = separate_furniture()           # кресла и стулья не въезжают в столики рядом
 	stats["lamps_swapped"] = swap_fixtures()            # свои лампы-трубки и абажуры на месте старых
 	stats["decor"] = Decor.apply(building, model_type, has_model)   # свои картины, циферблаты, экраны, таблички
@@ -777,6 +779,33 @@ const MODEL_EXTRA := {"bedside": ["epi_cabinet_2"]}
 ## Насколько модель может быть шире (x) и глубже (z) старой коробки. Батарея — с трубами вдоль
 ## стены, полка — глубже вешалки для полотенец.
 const SWAP_FIT := {"Radiator": Vector2(2.05, 99.0), "towel_rail": Vector2(1.3, 99.0)}
+## Столики между креслами: из вариантов модели берём те, что влезают в старую коробку (ширина 1.16 / 0.73 / 0.56 м —
+## большой стол между двумя креслами въезжал в оба). Не влезает ни один — самый маленький.
+const SNUG_TYPES := ["table_small"]
+static var _variant_box := {}
+
+
+static func _snug_variant(paths: Array, ob: AABB, key: String, scenes: Dictionary) -> String:
+	var fits: Array = []
+	var best := ""
+	var best_k := -1.0
+	for p in paths:
+		if not _variant_box.has(p):
+			if not scenes.has(p):
+				scenes[p] = load(p)
+			var inst: Node3D = (scenes[p] as PackedScene).instantiate()
+			_variant_box[p] = _scene_aabb(inst)
+			inst.free()
+		var nb: AABB = _variant_box[p]
+		var k: float = minf(ob.size.x / maxf(nb.size.x, 0.01), ob.size.z / maxf(nb.size.z, 0.01))
+		if k >= 0.97:
+			fits.append(p)
+		if k > best_k:
+			best_k = k
+			best = p
+	if not fits.is_empty():
+		return fits[absi(hash(key)) % fits.size()]
+	return best
 
 
 ## Тип предмета по имени узла: самый длинный тип из MODEL_TYPES, с которого начинается имя
@@ -858,6 +887,8 @@ static func swap_models(root: Node) -> int:
 			continue
 		var paths: Array = have[t]
 		var path: String = paths[absi(hash(String(old.name))) % paths.size()]
+		if paths.size() > 1 and t in SNUG_TYPES:
+			path = _snug_variant(paths, old.mesh.get_aabb(), String(old.name), scenes)
 		if not scenes.has(path):
 			scenes[path] = load(path)
 		var ps: PackedScene = scenes[path]
@@ -902,7 +933,7 @@ static func swap_models(root: Node) -> int:
 ## этого предмет целиком в своей комнате.
 const MOVABLE := ["armchair", "armchair_beige", "armchair_red", "chair", "chair_soft", "chair_tube", "stool",
 	"recliner", "iv_stand", "plant_stand", "coat_stand", "bin", "wheelchair", "laundry_cart", "cleaning_cart", "bedside",
-	"stretcher", "oxygen", "scale"]
+	"stretcher", "oxygen", "scale", "tv_cabinet", "palm"]
 ## Настенное и мелкое на мебели — не мешает (батарея с трубами идёт вдоль всей стены за креслами).
 const NOT_OBSTACLE := ["Radiator", "painting_1", "painting_2", "painting_3", "clock", "notice_board", "mirror",
 	"grab_bar", "grab_bar_l", "grab_bar_v", "grab_fold", "call_panel", "fire_ext", "fuse_box", "elec_panel_wall",
@@ -943,6 +974,20 @@ static func _overlap(a: PackedVector2Array, b: PackedVector2Array) -> float:
 	return best
 
 
+## Насколько многоугольник вылезает за прямоугольники комнаты (0 — целиком внутри). Кресло у окна спинкой и так
+## заходит за край на пару сантиметров — его можно сдвигать вдоль стены, лишь бы не вылезло ещё дальше.
+func _outside_by(poly: PackedVector2Array, room: Dictionary) -> float:
+	var worst := 0.0
+	for p in poly:
+		var best := INF
+		for q in room["rects"]:
+			var dx: float = maxf(maxf(float(q[0]) - p.x, p.x - float(q[1])), 0.0)
+			var dz: float = maxf(maxf(float(q[2]) - p.y, p.y - float(q[3])), 0.0)
+			best = minf(best, Vector2(dx, dz).length())
+		worst = maxf(worst, best)
+	return worst
+
+
 func _inside_room(poly: PackedVector2Array, y: float, room: Dictionary) -> bool:
 	for p in poly:
 		var ok := false
@@ -964,6 +1009,75 @@ const FLOOR_TYPES := ["screen", "cleaning_cart", "laundry_cart", "stretcher", "b
 	"bedside", "tv_cabinet", "desk_office", "desk_small", "desk_wide", "table_sq", "table_round", "table_cloth",
 	"table_coffee", "table_read", "table_small", "table_lab", "exam_couch", "massage_table", "med_cabinet",
 	"wheelchair", "gym_bench", "ex_bike", "piano", "safe", "fridge", "goods_rack", "linen_rack", "luggage_rack"]
+
+
+## Бежевые диваны в модели здания взяли из атласа кусок дерева — выглядели фанерными ящиками. Обиваем тканью
+## (твид, текстура по миру — без растяжек на любой форме).
+func upholster() -> int:
+	var tex: Texture2D = load("res://sanatorium/assets/tex/fabric_tweed.jpg") if ResourceLoader.exists("res://sanatorium/assets/tex/fabric_tweed.jpg") else null
+	if tex == null:
+		return 0
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = tex
+	m.albedo_color = Color(0.95, 0.92, 0.88)
+	m.roughness = 0.95
+	m.uv1_triplanar = true
+	m.uv1_world_triplanar = true
+	m.uv1_scale = Vector3(2.4, 2.4, 2.4)
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	var n := 0
+	for g in building.find_children("sofa_beige*", "MeshInstance3D", true, false):
+		var mi: MeshInstance3D = g
+		if mi.visible and mi.mesh:
+			mi.material_override = m
+			n += 1
+	return n
+
+
+## После всех замен мелочь сверху (чемодан на шкафу, радио, книги) могла остаться в паре сантиметров над опорой:
+## у новой модели шкафа верх ниже старой коробки. Опора — самый высокий верх видимой вещи здания под серединой
+## предмета (не выше его низа + 2 см); зазор 1–25 см убираем.
+func settle_items() -> int:
+	var grid := {}
+	for g in building.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = g
+		if not m.is_visible_in_tree() or m.mesh == null:
+			continue
+		var b: AABB = m.global_transform * m.get_aabb()
+		if b.size.x > 3.0 or b.size.z > 3.0 or b.size.y > 2.6 or b.size.length() < 0.03:
+			continue
+		for x in range(floori(b.position.x / 2.0), floori(b.end.x / 2.0) + 1):
+			for z in range(floori(b.position.z / 2.0), floori(b.end.z / 2.0) + 1):
+				var k := Vector2i(x, z)
+				if not grid.has(k):
+					grid[k] = []
+				grid[k].append([m, b])
+	var n := 0
+	for g in building.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = g
+		if not (model_type(String(m.name)) in ON_TOP):
+			continue
+		var holder: Node3D = m.get_parent().get_node_or_null(String(m.name) + "_model") as Node3D
+		var nd: Node3D = holder if holder else m
+		if not nd.is_visible_in_tree():
+			continue
+		var b: AABB = _world_aabb(nd)
+		var c: Vector3 = b.get_center()
+		var top := FIRST_FLOOR + floorf((b.position.y - FIRST_FLOOR + 0.05) / STOREY) * STOREY
+		for sp in grid.get(Vector2i(floori(c.x / 2.0), floori(c.z / 2.0)), []):
+			var sm: MeshInstance3D = sp[0]
+			if sm == m or nd.is_ancestor_of(sm):
+				continue
+			var sb: AABB = sp[1]
+			if c.x < sb.position.x or c.x > sb.end.x or c.z < sb.position.z or c.z > sb.end.z:
+				continue
+			if sb.end.y > top and sb.end.y <= b.position.y + 0.02:
+				top = sb.end.y
+		var gap: float = b.position.y - top
+		if gap > 0.01 and gap < 0.25:
+			nd.global_position.y -= gap
+			n += 1
+	return n
 
 
 func ground_furniture() -> int:
@@ -1025,6 +1139,13 @@ func separate_furniture() -> int:
 			continue
 		var a: Node3D = items[i][0]
 		var room: Dictionary = room_at(a.global_position + Vector3(0, 0.4, 0))
+		var start_pos: Vector3 = a.global_position
+		var worst0: float = _worst_overlap(i, items, cell)
+		if worst0 < 0.02:
+			continue
+		var top_pos := {}
+		for tp in tops:
+			top_pos[tp] = (tp as Node3D).global_position
 		for pass_i in 3:
 			var pa: PackedVector2Array = _footprint(a.global_transform, items[i][2])
 			var hit := false
@@ -1039,36 +1160,60 @@ func separate_furniture() -> int:
 						var pb: PackedVector2Array = _footprint((items[j][0] as Node3D).global_transform, items[j][2])
 						if _overlap(pa, pb) < 0.02:
 							continue
-						var ax3: Vector3 = a.global_transform.basis.x
-						var ax := Vector2(ax3.x, ax3.z).normalized()
-						var ia := _proj(pa, ax)
-						var ib := _proj(pb, ax)
-						var ca: float = (ia.x + ia.y) * 0.5
-						var cb: float = (ib.x + ib.y) * 0.5
-						var tries: Array = [ib.y - ia.x + 0.03, ib.x - ia.y - 0.03]
-						if ca < cb:
-							tries.reverse()
-						for dsp in tries:
-							if absf(dsp) > 0.6:
-								continue
-							var off := Vector3(ax.x, 0, ax.y) * float(dsp)
-							var moved_poly := PackedVector2Array()
-							for q in pa:
-								moved_poly.append(q + Vector2(off.x, off.z))
-							if room.is_empty() or _inside_room(moved_poly, a.global_position.y, room):
-								for tp in tops:
-									var tn: Node3D = tp
-									var tpos: Vector3 = tn.global_position
-									if tpos.y > float(items[i][4]) - 0.45 and tpos.y < float(items[i][4]) + 0.6 \
-											and Geometry2D.is_point_in_polygon(Vector2(tpos.x, tpos.z), pa):
-										tn.global_position += off
-								a.global_position += off
-								moved += 1
-								hit = true
+						# сначала вдоль стены (своя ось X — спинка остаётся у стены), не вышло — назад/вперёд (ось Z):
+						# кресла у окна стоят боком к стене, лицом к столику между ними
+						for ax3 in [a.global_transform.basis.x, a.global_transform.basis.z]:
+							if hit:
 								break
+							var ax := Vector2(ax3.x, ax3.z).normalized()
+							var ia := _proj(pa, ax)
+							var ib := _proj(pb, ax)
+							var ca: float = (ia.x + ia.y) * 0.5
+							var cb: float = (ib.x + ib.y) * 0.5
+							var tries: Array = [ib.y - ia.x + 0.03, ib.x - ia.y - 0.03]
+							if ca < cb:
+								tries.reverse()
+							for dsp in tries:
+								if absf(dsp) > 0.6:
+									continue
+								var off := Vector3(ax.x, 0, ax.y) * float(dsp)
+								var moved_poly := PackedVector2Array()
+								for q in pa:
+									moved_poly.append(q + Vector2(off.x, off.z))
+								if room.is_empty() or _outside_by(moved_poly, room) <= maxf(_outside_by(pa, room), 0.06) + 0.01:
+									for tp in tops:
+										var tn: Node3D = tp
+										var tpos: Vector3 = tn.global_position
+										if tpos.y > float(items[i][4]) - 0.45 and tpos.y < float(items[i][4]) + 0.6 \
+												and Geometry2D.is_point_in_polygon(Vector2(tpos.x, tpos.z), pa):
+											tn.global_position += off
+									a.global_position += off
+									moved += 1
+									hit = true
+									break
 			if not hit:
 				break
+		if a.global_position != start_pos and _worst_overlap(i, items, cell) > worst0 - 0.02:
+			a.global_position = start_pos                     # зажат между двумя — сдвиг не помог: как было
+			for tp in tops:
+				(tp as Node3D).global_position = top_pos[tp]
 	return moved
+
+
+func _worst_overlap(i: int, items: Array, cell: Dictionary) -> float:
+	var a: Node3D = items[i][0]
+	var pa: PackedVector2Array = _footprint(a.global_transform, items[i][2])
+	var k := Vector3i(floori(a.global_position.x / 3.0), floori(a.global_position.y / 3.0), floori(a.global_position.z / 3.0))
+	var worst := 0.0
+	for dx in [-1, 0, 1]:
+		for dz in [-1, 0, 1]:
+			for j in cell.get(k + Vector3i(dx, 0, dz), []):
+				if j == i:
+					continue
+				if float(items[j][4]) < float(items[i][3]) + 0.05 or float(items[j][3]) > float(items[i][4]) - 0.05:
+					continue
+				worst = maxf(worst, _overlap(pa, _footprint((items[j][0] as Node3D).global_transform, items[j][2])))
+	return worst
 
 
 ## Мелкие вещи, что лежат на мебели (чемодан на шкафу, книги на полке, радио на тумбочке): после замены мебели
