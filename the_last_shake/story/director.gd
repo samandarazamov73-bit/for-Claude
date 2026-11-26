@@ -254,8 +254,54 @@ func until(cond: Callable, timeout := -1.0) -> void:
 
 
 ## Реплика с подписью; идёт сама, по времени чтения (Enter / пробел — пропустить).
+## В разговоре (когда коляска стоит по сюжету) Азиз смотрит в лицо тому, с кем говорит: на реплику собеседника —
+## на него, на свою реплику — на того, кто говорил последним (или на ближайшего рядом).
+var _partner: Node3D = null
+
+
+func _speaker_actor(who: String):
+	match who:
+		"mom":
+			return mom
+		"grandpa":
+			return grandpa
+		"psycho", "elder":
+			return psycho
+		"younger":
+			return younger
+	return null
+
+
+func _face_partner(who: String) -> void:
+	if player == null or not player.story_lock or who in ["thought", "radio", "voice"]:
+		return
+	var a = _speaker_actor(who)
+	if a != null and is_instance_valid(a) and a.visible:
+		_partner = a
+	elif who == "hero":
+		if _partner == null or not is_instance_valid(_partner) or not _partner.visible \
+				or _partner.global_position.distance_to(ppos()) > 6.0:
+			_partner = null
+			var best := 4.5
+			for c in [mom, grandpa, psycho, younger, _son]:
+				if c != null and is_instance_valid(c) and c.visible and c.has_method("head_pos"):
+					var dd: float = c.global_position.distance_to(ppos())
+					if dd < best:
+						best = dd
+						_partner = c
+		a = _partner
+	if a == null or not is_instance_valid(a) or not a.visible or a.global_position.distance_to(ppos()) > 7.0:
+		return
+	var head: Vector3 = a.head_pos()
+	var to: Vector3 = (head - player.cam.global_position).normalized()
+	if (-player.cam.global_transform.basis.z).dot(to) > 0.985:
+		return                                          # и так смотрит на него
+	look_at_point(head, 0.5)                            # поворачивается, пока появляется реплика
+
+
 func say(who: String, text: String, sec := 0.0) -> void:
 	_skip = false
+	_face_partner(who)
 	# кто стоит и говорит — жестикулирует только во время своей реплики, потом снова спокойно стоит
 	var speaker = mom if who == "mom" else (grandpa if who == "grandpa" else null)
 	var gestures: bool = speaker != null and speaker.visible and not speaker.is_moving() \
@@ -1275,9 +1321,7 @@ func _faceless_chase() -> void:
 	await say("hero", "Чёрт! Чёрт, чёрт!", 1.8)
 	if faceless_state != "run":
 		return
-	mom.set_look(player.head.global_position)
-	ui.say("mom", "Быстрее, Азиз! Двигайся!", 2.4)
-	await until(func(): return faceless_state != "run" or ppos().distance_to(VOID_LIFT) < 3.5)
+	await _mom_holds_lift()
 	if faceless_state != "run":
 		return
 	mom.set_look(null)
@@ -1312,6 +1356,34 @@ func _faceless_chase() -> void:
 	_hold_lift = true
 	GameState.checkpoint = "floor3"
 	await _mom_vanishes()
+
+
+## Погоня: мама в дверях лифта держит створку правой рукой, левой машет к себе, смотрит на Азиза и зовёт —
+## громче, когда толпа близко. Пока он не подъедет к самым дверям.
+func _mom_holds_lift() -> void:
+	var calls := ["Быстрее, Азиз! Двигайся!", "Сюда! Давай, давай!", "Не оглядывайся — сюда!", "Азиз, быстрее!!"]
+	var ci := 0
+	var t_call := 0.0
+	var t := 0.0
+	var door_edge := Vector3(CAB_DOOR.x + 0.48, 4.5 + 1.2, CAB_DOOR.z)
+	while faceless_state == "run" and ppos().distance_to(VOID_LIFT) >= 3.5:
+		var dt: float = get_process_delta_time()
+		t += dt
+		mom.face(ppos())
+		mom.set_look(player.head.global_position)
+		var wave: float = sin(t * 7.5)
+		var b: Basis = mom.global_transform.basis
+		door_edge.x = CAB_DOOR.x + (0.48 if b.x.x >= 0.0 else -0.48)   # створка — с её правой стороны
+		var hand: Vector3 = mom.global_position + b * Vector3(-0.22, 1.2 + 0.1 * wave, -0.42 + 0.12 * wave)
+		mom.set_hands(door_edge, hand, 0.85)
+		t_call -= dt
+		if t_call <= 0.0 and not ui.line_visible():
+			var near: float = _nearest_faceless(ppos())
+			ui.say("mom", "Они сзади! Быстрее!!" if near < 4.5 else calls[ci % calls.size()], 1.7)
+			ci += 1
+			t_call = 2.8
+		await get_tree().process_frame
+	mom.set_hands(null, null, 0.0)
 
 
 ## Мама дошла до угла кабины — сразу поворачивается лицом в кабину, к дверям (не стоит спиной).
@@ -1630,7 +1702,7 @@ func _room_scare() -> void:
 	await until(func(): return ppos().distance_to(near_door) < 4.0, 40.0)
 	mom.face(ppos())
 	mom.set_look(player.head.global_position)
-	await say("mom", "Стоп. Что это было? Тихо. Проверим — иди за мной.")
+	await say("mom", "Стоп. Что это было? Тихо… Я проверю.")
 	await say("hero", "Мам, не надо. Пошли отсюда.")
 	mom.set_look(null)
 	if d:
@@ -1639,15 +1711,23 @@ func _room_scare() -> void:
 		game.play_at("door_open_wood", dc, -4.0, 0.9, 20.0)
 		d.swing_to(90.0, 1.0)
 		await wait(0.6)
+	objective("Зайди за мамой")
 	await mom.go_and_wait([dc, inside], 1.0)
-	mom.visible = false                                # в темноте — тишина, не отзывается
 	mom.stop()
-	objective("Загляни в палату")
-	await until(func(): return room_id() == room or Vector2(ppos().x - dc.x, ppos().z - dc.z).length() < 1.3)
-	# в палате — никого и тишина. Потом мама просто оказывается сзади: стоит, ничего не делает. Коляска резко
-	# разворачивается к ней — вместе с камерой. Без прыжков, криков и анимации.
+	# в тёмной палате она «растворяется» — но не на глазах: только когда на неё не смотрят (или через 5 с)
+	var hide_t := 0.0
+	while hide_t < 5.0:
+		var to_m: Vector3 = mom.head_pos() - player.cam.global_position
+		if (-player.cam.global_transform.basis.z).dot(to_m.normalized()) < 0.55:
+			break
+		await get_tree().process_frame
+		hide_t += get_process_delta_time()
+	mom.visible = false                                # внутри — тишина и никого
+	# Азиз заезжает следом — и уже внутри (не в дверях) мама сразу оказывается у него за спиной. Коляска резко
+	# разворачивается к ней вместе с камерой. Без прыжков, криков и анимации.
+	await until(func(): return room_id() == room and Vector2(ppos().x - dc.x, ppos().z - dc.z).length() > 1.2)
 	freeze(true)
-	await wait(1.4)
+	await wait(0.25)
 	var fwd: Vector3 = -player.global_transform.basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized()

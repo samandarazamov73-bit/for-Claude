@@ -57,12 +57,9 @@ var auto_detected := false
 
 func _ready() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(CONFIG_PATH) == OK and cfg.has_section_key("graphics", "preset"):
-		preset = clampi(int(cfg.get_value("graphics", "preset")), 0, 3)
+	preset = Preset.MEDIUM                      # графика одна — «Средняя»
+	if cfg.load(CONFIG_PATH) == OK:
 		fps_cap = int(cfg.get_value("graphics", "fps_cap", 0))
-	else:
-		preset = detect_preset()
-		auto_detected = true
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--quality="):
 			var q := arg.get_slice("=", 1).to_lower()
@@ -123,7 +120,7 @@ func set_preset(p: int, persist := true) -> void:
 
 
 func cycle() -> void:
-	set_preset((preset + 1) % 4)
+	pass                                        # переключения нет: графика одна
 
 
 func toggle_fps_cap() -> void:

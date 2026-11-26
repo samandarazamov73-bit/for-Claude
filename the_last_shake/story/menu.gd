@@ -35,7 +35,6 @@ func _ready() -> void:
 	box.add_child(_main)
 	_button(_main, "Новая игра", func(): GameState.go(GameState.PROLOGUE, "start"))
 	_button(_main, "Главы", _show_chapters.bind(true))
-	_button(_main, "Графика: " + str(GraphicsSettings.settings.get("name", "")), _cycle_graphics)
 	_button(_main, "Выход", func(): get_tree().quit())
 	_chapters = VBoxContainer.new()
 	_chapters.add_theme_constant_override("separation", 8)

@@ -17,7 +17,7 @@ var _focused := true
 const GRAIN_SHADER := """
 shader_type canvas_item;
 uniform float vignette = 0.45;
-uniform float grain = 0.02;
+uniform float grain = 0.0;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void fragment() {
 	vec2 uv = UV - 0.5;
@@ -39,8 +39,8 @@ const LENS_SHADER := """
 shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, repeat_disable, filter_linear;
 uniform float vignette = 0.45;
-uniform float grain = 0.02;
-uniform float aberration = 0.0008;      // about 5 px in the corners of a 2K picture
+uniform float grain = 0.0;
+uniform float aberration = 0.0;         // цветных кромок нет (раньше ~5 px по углам)
 uniform float barrel = 0.02;           // corners stay where they are, the middle is 3.5 % larger
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void fragment() {
@@ -141,7 +141,7 @@ func _label(size: int, col: Color) -> Label:
 	return l
 
 
-const CONTROLS := "W / S — вперёд / назад     A / D — поворот\nМышь — смотреть по сторонам     E — открыть, нажать, поговорить     ЛКМ — удар     F — фонарик\nКолесо мыши или Q / R — скорость коляски (1–5)     H — гудок     F3 — где я\nF11 (Mac: Ctrl+Cmd+F) — полный экран     G — качество графики     L — не больше 30 кадров/с     Esc — пауза"
+const CONTROLS := "W / S — вперёд / назад     A / D — поворот\nМышь — смотреть по сторонам     E — открыть, нажать, поговорить     ЛКМ — удар     F — фонарик\nКолесо мыши или Q / R — скорость коляски (1–5)     H — гудок     F3 — где я\nF11 (Mac: Ctrl+Cmd+F) — полный экран     L — не больше 30 кадров/с     Esc — пауза"
 
 
 func _panel(title: String, body: String) -> PanelContainer:
@@ -219,8 +219,8 @@ func set_lens(on: bool) -> void:
 func set_day(on: bool) -> void:
 	for m in [_overlay_mat, _lens_mat]:
 		m.set_shader_parameter("vignette", 0.16 if on else 0.45)
-		m.set_shader_parameter("grain", 0.006 if on else 0.02)
-	_lens_mat.set_shader_parameter("aberration", 0.0002 if on else 0.0008)
+		m.set_shader_parameter("grain", 0.0)          # без плёночного зерна (шума) на картинке
+	_lens_mat.set_shader_parameter("aberration", 0.0)    # без цветных кромок: картинка чистая
 
 
 func menu_open() -> bool:

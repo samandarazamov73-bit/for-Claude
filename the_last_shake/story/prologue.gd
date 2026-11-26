@@ -891,14 +891,23 @@ func _chair_sound(v: float, w: float) -> void:
 
 
 # ================================================================================ сюжет поездки
+## С кем говорит Азиз: на его реплики и реплики собеседника камера плавно поворачивается к лицу собеседника.
+var face_target: Node3D = null
+
+
 func say(who: String, text: String, sec := 0.0) -> void:
 	_skip = false
+	if who in ["hero", "mom", "pharmacist"]:
+		var partner: Node3D = pharmacist if (who == "pharmacist" or (who == "hero" and pharmacist != null and phase == "walk" and pharmacy and hero.global_position.distance_to(pharmacist.global_position) < 4.0)) else mom
+		if partner != null and partner.visible and partner.global_position.distance_to(hero.global_position) < 6.0:
+			face_target = partner
 	talking = who == "mom" or who == "hero"
 	mom_speaking = who == "mom"
 	if mom_speaking and (phase == "ride" or phase == "arrive"):
 		mom.play("talk_loop", 0.35)
 	await ui.line(who, text, sec)
 	_skip = false
+	face_target = null
 	talking = false
 	if mom_speaking and (phase == "ride" or phase == "arrive"):
 		mom.play("idle_loop", 0.45)
@@ -1098,6 +1107,13 @@ func _process(dt: float) -> void:
 			_bus_away = false
 			bus.visible = false
 			audio.fade_engine_out()
+	if face_target != null and is_instance_valid(face_target) and face_target.has_method("head_pos"):
+		var lp: Vector3 = head.get_parent().to_local(face_target.head_pos()) - head.position
+		var want_yaw: float = clampf(atan2(-lp.x, -lp.z), -2.2, 2.2)
+		var want_pitch: float = clampf(atan2(lp.y, Vector2(lp.x, lp.z).length()), -1.2, 1.0)
+		var k: float = 1.0 - exp(-5.0 * dt)
+		look_yaw = lerp_angle(look_yaw, want_yaw, k)
+		look_pitch = lerpf(look_pitch, want_pitch, k)
 	head.rotation = Vector3(look_pitch, look_yaw, 0.0)
 	_update_globals()
 	terrain.update_lods(cam.global_position)
@@ -1428,9 +1444,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		audio.play_sfx("click", 0.5)
 	elif event.is_action_pressed("pause"):
 		_toggle_pause()
-	elif event.is_action_pressed("quality"):
-		GraphicsSettings.cycle()
-		ui.hint("Графика: %s" % GraphicsSettings.settings["name"], 2.0)
 
 
 func _toggle_pause() -> void:

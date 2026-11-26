@@ -1,5 +1,5 @@
 extends Node
-## Graphics quality: Low / Medium / High, switched with G (or F2) and remembered between runs.
+## Graphics quality: одна — «Средняя» (Low и High остались в таблицах только для справки, не включаются).
 ## The 3D picture is rendered at a resolution limited by a pixel budget and upscaled with AMD FSR 1,
 ## so a Retina MacBook (2560x1600 and more) does not render 4 million pixels per frame.
 ## Mac (Apple M1 and newer) starts on Medium, Windows and Linux on High.
@@ -40,11 +40,10 @@ var fps_limited := false
 
 func setup(g) -> void:
 	game = g
-	level = 1 if OS.has_feature("macos") else 2
+	level = 1                                  # графика одна: «Средняя» — реалистично и легко
 	fps_limited = OS.get_model_name().begins_with("MacBookAir")
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
-		level = clampi(int(cfg.get_value("graphics", "quality", level)), 0, 2)
 		fps_limited = bool(cfg.get_value("graphics", "fps_limit_30", fps_limited))
 	get_window().size_changed.connect(_apply_scale)
 	apply()
@@ -52,10 +51,7 @@ func setup(g) -> void:
 
 
 func cycle() -> void:
-	level = (level + 1) % NAMES.size()
-	apply()
-	_save("quality", level)
-	game.hud.message("Графика: " + NAMES[level])
+	pass                                       # переключения больше нет: графика одна
 
 
 func toggle_fps_limit() -> void:

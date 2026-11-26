@@ -53,6 +53,8 @@ func finish_setup() -> void:
 		c += lf["body"].global_transform * lf["center"]
 	if leaves.size() > 0:
 		center = c / leaves.size()
+	for lf in leaves:
+		lf["rev_off"] = _reverse_offset(lf)
 	_shape_q = PhysicsShapeQueryParameters3D.new()
 	_shape_q.collision_mask = game.L_PLAYER
 	_shape_q.collide_with_bodies = true
@@ -106,7 +108,58 @@ func set_angle(a: float) -> void:
 
 func _leaf_xf(lf: Dictionary, a: float) -> Transform3D:
 	var c: Transform3D = lf["closed"]
-	return c * Transform3D(Basis(Vector3.UP, deg_to_rad(a) * float(lf["sign"])), Vector3.ZERO)
+	var r: float = deg_to_rad(a) * float(lf["sign"])
+	var off: Vector3 = lf.get("rev_off", Vector3.ZERO)
+	if a >= 0.0 or off == Vector3.ZERO:
+		return c * Transform3D(Basis(Vector3.UP, r), Vector3.ZERO)
+	# в обратную сторону — вокруг петли на другой стороне стены: створка ложится к той стене, а не стоит
+	# в стороне от косяка (раньше крутилась вокруг той же петли и проходила сквозь толщину стены)
+	var pivot: Vector3 = c.origin + off
+	var rot := Basis(Vector3.UP, r)
+	return Transform3D(rot, pivot - rot * pivot) * c
+
+
+## Где петля для открывания «в обратную сторону»: на той стороне стены (по плоскости комнаты за дверью).
+func _reverse_offset(lf: Dictionary) -> Vector3:
+	var c: Transform3D = lf["closed"]
+	var c0: Vector3 = c * lf["center"]
+	var c1: Vector3 = (c * Transform3D(Basis(Vector3.UP, deg_to_rad(35.0) * float(lf["sign"])), Vector3.ZERO)) * lf["center"]
+	var nrm: Vector3 = c.basis.z
+	nrm.y = 0.0
+	if nrm.length() < 0.01:
+		return Vector3.ZERO
+	nrm = nrm.normalized()
+	var swing: Vector3 = c1 - c0
+	var n_rev: Vector3 = -nrm if swing.dot(nrm) > 0.0 else nrm          # сторона, куда открывается «обратно»
+	var hinge: Vector3 = c.origin
+	var room: Dictionary = game.room_at(hinge + n_rev * 0.7 + Vector3(0, 0.5, 0))
+	if room.is_empty():
+		return Vector3.ZERO
+	var best := 99.0
+	for q in room["rects"]:
+		var x0: float = q[0]
+		var x1: float = q[1]
+		var z0: float = q[2]
+		var z1: float = q[3]
+		# граница прямоугольника, обращённая к двери (перпендикулярная n_rev), и рядом с петлёй вдоль стены
+		var faces: Array = []
+		if absf(n_rev.x) > 0.7:
+			if hinge.z > z0 - 0.6 and hinge.z < z1 + 0.6:
+				faces = [x0, x1]
+			for f in faces:
+				var dist: float = (float(f) - hinge.x) * signf(n_rev.x)
+				if dist >= -0.01 and dist < best:
+					best = dist
+		else:
+			if hinge.x > x0 - 0.6 and hinge.x < x1 + 0.6:
+				faces = [z0, z1]
+			for f in faces:
+				var dist: float = (float(f) - hinge.z) * signf(n_rev.z)
+				if dist >= -0.01 and dist < best:
+					best = dist
+	if best > 0.45 or best < 0.02:
+		return Vector3.ZERO
+	return n_rev * best
 
 
 func _apply(a: float) -> void:

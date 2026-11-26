@@ -77,6 +77,15 @@ func _run() -> void:
 			var fr: PackedStringArray = _arg("from", "0,0,0").split(",")
 			var at: PackedStringArray = _arg("at", "0,0,0").split(",")
 			await tp(Vector3(float(fr[0]), float(fr[1]), float(fr[2])), 0.0)
+			if _arg("door", "") != "":                     # --door=x,y,z,угол: ближайшую дверь открыть на угол
+				var dd: PackedStringArray = _arg("door", "").split(",")
+				var dp := Vector3(float(dd[0]), float(dd[1]), float(dd[2]))
+				var best = null
+				for dg in g.door_groups:
+					if best == null or (dg.center as Vector3).distance_to(dp) < (best.center as Vector3).distance_to(dp):
+						best = dg
+				if best:
+					best.set_angle(float(dd[3]))
 			await secs(1.0)
 			await snap("look", Vector3(float(at[0]), float(at[1]), float(at[2])))
 		"buydebug":
@@ -121,6 +130,8 @@ func _run() -> void:
 			await _fair_test()
 		"charlab":
 			await _charlab()
+		"wallaudit":
+			await _wallaudit()
 		"menu":
 			get_tree().change_scene_to_file("res://story/menu.tscn")
 			await secs(2.0)
@@ -775,11 +786,13 @@ func _seg_f3() -> void:
 	await snap("22_mom_behind", d.mom.global_position + Vector3(0, 1.5, 0))
 	await wait_for(func(): return d.act == "room_scare", 120, "mom noticed")
 	step("mom noticed, going to the lift")
-	await wait_for(func(): return d.objective_text().contains("Загляни"), 120, "look into the room")
-	step("look into the room")
+	await wait_for(func(): return d.objective_text().contains("Зайди за мамой"), 120, "follow mom into the room")
+	step("follow mom into the room")
 	var dg = d.door(167)
 	var dc: Vector3 = dg.center if dg else Vector3(31.6, 7.8, -9.7)
 	await tp(Vector3(dc.x, 7.8, -9.4), PI)
+	await secs(1.0)
+	await tp(Vector3(dc.x, 7.8, dc.z - 1.9), PI)                # внутрь палаты, не в дверях
 	if shoot:
 		await wait_for(func(): return d.ui.line_visible() and str(d.ui._sub_text.text).contains("Твою"), 30, "scare line")
 		await snap("23_jump_scare")
@@ -1528,3 +1541,50 @@ func _charlab() -> void:
 		ch.queue_free()
 		a.queue_free()
 		await secs(0.2)
+
+
+## Где у комнат нет стены (а двери нет и соседней части той же комнаты нет): лучи из комнаты к её границе
+## на высоте 1,5 м. Печатает отрезки «WALLGAP комната от-до куда видно».
+func _wallaudit() -> void:
+	GameStateRef().checkpoint = _arg("cp", "pharmacy")
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var space: PhysicsDirectSpaceState3D = g.get_world_3d().direct_space_state
+	var lvl := int(_arg("level", "0"))
+	for r in g.room_list:
+		if int(r["level"]) != lvl:
+			continue
+		var fy: float = r["floor_y"]
+		for q in r["rects"]:
+			var edges := [[Vector3(q[0], 0, q[2]), Vector3(q[1], 0, q[2]), Vector3(0, 0, 1)],
+				[Vector3(q[0], 0, q[3]), Vector3(q[1], 0, q[3]), Vector3(0, 0, -1)],
+				[Vector3(q[0], 0, q[2]), Vector3(q[0], 0, q[3]), Vector3(1, 0, 0)],
+				[Vector3(q[1], 0, q[2]), Vector3(q[1], 0, q[3]), Vector3(-1, 0, 0)]]
+			for e in edges:
+				var a: Vector3 = e[0]
+				var b: Vector3 = e[1]
+				var inward: Vector3 = e[2]
+				var L: float = a.distance_to(b)
+				var run_start := -1.0
+				var t := 0.25
+				while t < L - 0.2:
+					var p: Vector3 = a + (b - a).normalized() * t + Vector3(0, fy + 1.5, 0)
+					var hit: Dictionary = space.intersect_ray(PhysicsRayQueryParameters3D.create(p + inward * 0.3, p - inward * 0.45, 1 | 4))
+					var open: bool = hit.is_empty()
+					if open:
+						var beyond: Dictionary = g.room_at(p - inward * 0.6)
+						if not beyond.is_empty() and beyond["id"] == r["id"]:
+							open = false               # другая часть той же комнаты
+					if open and run_start < 0.0:
+						run_start = t
+					if (not open or t + 0.25 >= L - 0.2) and run_start >= 0.0:
+						if t - run_start >= 0.5:
+							var mid: Vector3 = a + (b - a).normalized() * ((run_start + t) * 0.5) + Vector3(0, fy, 0)
+							var bey: Dictionary = g.room_at(mid - inward * 0.6 + Vector3(0, 1.0, 0))
+							print("WALLGAP %s (%s) len %.1f at %s -> %s" % [r["id"], r["kind"], t - run_start, mid, bey.get("id", "NOTHING")])
+						run_start = -1.0
+					t += 0.25
+	print("AUDIT DONE")
