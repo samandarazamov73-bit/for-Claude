@@ -3,7 +3,7 @@ extends Node
 ## Управление (все клавиши задаются здесь), глава/контрольная точка, переходы между сценами с затемнением.
 
 ## Номер сборки — виден в главном меню слева внизу (чтобы сразу видно, какая версия запущена).
-const VERSION := "версия 11 · 26 ноября 2026"
+const VERSION := "версия 11.1 · 26 ноября 2026"
 
 const MENU := "res://story/menu.tscn"
 const PROLOGUE := "res://story/prologue.tscn"
@@ -22,7 +22,19 @@ const CHAPTERS := [
 	["Эпилог", EPILOGUE, ""],
 ]
 
-var checkpoint := "start"       # где начать: start, key, chase, void, floor3, floor3b, pharmacy, pharmacy_out (лес), real
+## где начать: start, key, chase, void, floor3, floor3b, pharmacy, pharmacy_out (лес), real. Каждая смена
+## запоминается на диске — «Продолжить» в главном меню начнёт с этого места.
+var checkpoint := "start":
+	set(v):
+		checkpoint = v
+		_save_progress()
+var current_scene := ""          # какая сцена игры сейчас (для «Начать главу заново» и «Продолжить»)
+## Настройки (меню «Настройки» — в главном меню и в паузе): громкость 0..1, чувствительность мыши (множитель).
+var volume := 0.85
+var mouse_sens := 1.0
+var fullscreen := false
+const SETTINGS_PATH := "user://the_last_shake_settings.cfg"
+const PROGRESS_PATH := "user://the_last_shake_progress.cfg"
 var deaths := 0
 var auto_lines := false          # автотест: записки закрываются сами (реплики и так идут по времени)
 var entry := {}                  # откуда заехали в здание (пролог → санаторий): pos, yaw, mom — координаты здания
@@ -35,6 +47,7 @@ var _busy := false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	setup_input()
+	_load_settings()
 	_layer = CanvasLayer.new()
 	_layer.layer = 100
 	add_child(_layer)
@@ -109,8 +122,12 @@ func go(scene: String, cp := "", threaded := false) -> void:
 	if _busy:
 		return
 	_busy = true
+	if scene != MENU:
+		current_scene = scene
 	if cp != "":
 		checkpoint = cp
+	else:
+		_save_progress()
 	await fade_to(1.0, 0.8)
 	set_loading(true)
 	await get_tree().process_frame
@@ -126,3 +143,70 @@ func go(scene: String, cp := "", threaded := false) -> void:
 
 func to_menu() -> void:
 	go(MENU)
+
+
+# ------------------------------------------------------------------------------ настройки и прогресс
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) == OK:
+		volume = clampf(float(cfg.get_value("settings", "volume", volume)), 0.0, 1.0)
+		mouse_sens = clampf(float(cfg.get_value("settings", "mouse_sens", mouse_sens)), 0.3, 2.5)
+		fullscreen = bool(cfg.get_value("settings", "fullscreen", fullscreen))
+	apply_settings()
+
+
+func apply_settings() -> void:
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(volume, 0.0001)))
+	AudioServer.set_bus_mute(0, volume <= 0.001)
+	var fs: bool = DisplayServer.window_get_mode() in [DisplayServer.WINDOW_MODE_FULLSCREEN, DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN]
+	if fs != fullscreen and not DisplayServer.get_name().contains("headless"):
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
+
+
+func save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("settings", "volume", volume)
+	cfg.set_value("settings", "mouse_sens", mouse_sens)
+	cfg.set_value("settings", "fullscreen", fullscreen)
+	cfg.save(SETTINGS_PATH)
+	apply_settings()
+
+
+func _save_progress() -> void:
+	if current_scene == "" or current_scene == MENU or current_scene == EPILOGUE:
+		return
+	var cfg := ConfigFile.new()
+	cfg.set_value("progress", "scene", current_scene)
+	cfg.set_value("progress", "checkpoint", checkpoint)
+	cfg.save(PROGRESS_PATH)
+
+
+## Сохранённое место: [сцена, контрольная точка] или [] — если игру ещё не начинали.
+func saved_progress() -> Array:
+	var cfg := ConfigFile.new()
+	if cfg.load(PROGRESS_PATH) != OK:
+		return []
+	var sc: String = cfg.get_value("progress", "scene", "")
+	if sc == "" or not ResourceLoader.exists(sc):
+		return []
+	return [sc, String(cfg.get_value("progress", "checkpoint", "start"))]
+
+
+## Название главы по сцене и контрольной точке (для паузы и «Продолжить»).
+func chapter_name(scene := "", cp := "") -> String:
+	var sc: String = scene if scene != "" else current_scene
+	var c: String = cp if cp != "" else checkpoint
+	if sc == PROLOGUE:
+		return "Глава 5. Таблетка" if c == "pharmacy_out" else "Пролог. Дорога в никуда"
+	if sc == EPILOGUE:
+		return "Эпилог"
+	var by_cp := {"start": 1, "key": 2, "chase": 2, "void": 3, "floor3": 4, "floor3b": 4, "pharmacy": 5, "real": 6}
+	var i: int = int(by_cp.get(c, 1))
+	return String(CHAPTERS[i][0])
+
+
+func restart_chapter() -> void:
+	if current_scene == "":
+		to_menu()
+		return
+	go(current_scene, checkpoint)

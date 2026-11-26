@@ -30,6 +30,9 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	ui = StoryUI.new()
 	add_child(ui)
+	var pm = load("res://story/pause_menu.gd").new()      # Esc — пауза; мышь после неё не захватывается
+	pm.capture_mouse = false
+	add_child(pm)
 	_build_room()
 	_blur = ColorRect.new()
 	_blur.color = Color(0.0, 0.0, 0.0, 1.0)

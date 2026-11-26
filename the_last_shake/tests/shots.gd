@@ -132,6 +132,12 @@ func _run() -> void:
 			await _charlab()
 		"wallaudit":
 			await _wallaudit()
+		"floataudit":
+			await _floataudit()
+		"menubg":
+			await _menubg()
+		"menushots":
+			await _menushots()
 		"menu":
 			get_tree().change_scene_to_file("res://story/menu.tscn")
 			await secs(2.0)
@@ -1588,3 +1594,142 @@ func _wallaudit() -> void:
 						run_start = -1.0
 					t += 0.25
 	print("AUDIT DONE")
+
+
+## Вещи, что висят в воздухе: низ выше пола, а под серединой нет верха другой вещи (в пределах 3 см).
+func _floataudit() -> void:
+	GameStateRef().checkpoint = _arg("cp", "floor3")
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	var Game: Script = load("res://sanatorium/scripts/game.gd")
+	var all: Array = []
+	for c in g.building.find_children("*", "VisualInstance3D", true, false):
+		var v: VisualInstance3D = c
+		if not v.is_visible_in_tree() or not (v is GeometryInstance3D):
+			continue
+		var b: AABB = v.global_transform * v.get_aabb()
+		if b.size.length() < 0.02:
+			continue
+		all.append([v, b])
+	var n := 0
+	for it in all:
+		var v: VisualInstance3D = it[0]
+		var b: AABB = it[1]
+		if b.size.x > 2.5 or b.size.z > 2.5 or b.size.y > 2.6:
+			continue                                   # стены, полы, большие куски здания
+		var floor_y: float = 1.2 + floorf((b.position.y - 1.2 + 0.05) / 3.3) * 3.3
+		var gap: float = b.position.y - floor_y
+		if gap < 0.04 or gap > 2.2:
+			continue
+		var c: Vector3 = b.get_center()
+		var ok := false
+		for sp in all:
+			if sp[0] == v:
+				continue
+			var sb: AABB = sp[1]
+			if c.x < sb.position.x or c.x > sb.end.x or c.z < sb.position.z or c.z > sb.end.z:
+				continue
+			if sb.size.x > 3.0 or sb.size.z > 3.0 or sb.size.y > 2.6:
+				continue                               # стены и перекрытия — не опора
+			if sb.end.y >= b.position.y - 0.035 and sb.end.y <= b.position.y + 0.06:
+				ok = true                              # верх опоры — под самым низом вещи
+				break
+		if not ok:
+			var nm := String(v.name)
+			var par := String(v.get_parent().name)
+			var room: Dictionary = g.room_at(c)
+			print("FLOAT %s | %s | %s | gap %.2f | size %s | %s" % [room.get("id", "?"), nm, par, gap, b.size, c])
+			n += 1
+	print("FLOAT TOTAL ", n)
+
+
+## Фон главного меню: тёмный коридор 3-го этажа, одна холодная лампа вдали, пустая коляска на переднем плане,
+## под лампой — мама. Три кадра: мама далеко (a), её нет (b), она ближе (c).
+func _menubg() -> void:
+	GameStateRef().checkpoint = "floor3"
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	d = g.get_node("Director")
+	await secs(3.0)
+	d.set_process(false)
+	d.scares.stop()
+	GameStateRef().set_fade(0.0)
+	for c in get_tree().root.find_children("*", "CanvasLayer", true, false):
+		(c as CanvasLayer).visible = false
+	for k in ["L2.C", "L2.R7", "L2.F9"]:
+		g.lights.set_room(k, false, false)
+	pl = d.player
+	pl.set_torch(false)
+	pl.visible = false
+	var cam := Camera3D.new()
+	cam.fov = 52.0
+	g.add_child(cam)
+	cam.global_position = Vector3(5.2, 7.8 + 1.08, -7.35)
+	cam.look_at(Vector3(30.0, 7.8 + 1.25, -8.35), Vector3.UP)
+	cam.current = true
+	var Props: Script = load("res://story/props.gd")
+	var wc: Node3D = Props.glb("res://sanatorium/models/wheelchair.glb", 1.0)
+	g.add_child(wc)
+	wc.global_position = Vector3(8.6, 7.8, -8.75)
+	wc.rotation.y = -PI * 0.5 + 0.35
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(0.78, 0.86, 1.0)
+	lamp.light_energy = 2.2
+	lamp.omni_range = 6.5
+	lamp.omni_attenuation = 1.4
+	lamp.shadow_enabled = true
+	g.add_child(lamp)
+	var fill := OmniLight3D.new()                  # еле заметный отсвет у камеры: видно коляску
+	fill.light_color = Color(0.7, 0.75, 0.9)
+	fill.light_energy = 0.12
+	fill.omni_range = 5.0
+	g.add_child(fill)
+	fill.global_position = Vector3(6.5, 7.8 + 2.4, -8.0)
+	var m = d.mom
+	m.stop()
+	m.set_look(null)
+	m.set_hands(null, null, 0.0)
+	for v in [["a", 24.0, true], ["b", 24.0, false], ["c", 15.5, true]]:
+		var x: float = v[1]
+		lamp.global_position = Vector3(x + 0.3, 7.8 + 2.75, -8.1)
+		m.global_position = Vector3(x, 7.8, -8.05)
+		m.face(cam.global_position, true)
+		m.play("idle_loop", 0.0)
+		m.visible = v[2]
+		await secs(2.5)
+		await shot("menu_bg_" + str(v[0]))
+	print("MENUBG DONE")
+
+
+## Главное меню (обычное, «Главы», мигание лампы) и пауза в санатории (с настройками).
+func _menushots() -> void:
+	get_tree().change_scene_to_file("res://story/menu.tscn")
+	await secs(3.0)
+	await shot("menu_main")
+	var m: Node = get_tree().current_scene
+	m._show("chapters")
+	await secs(0.6)
+	await shot("menu_chapters")
+	m._show("settings")
+	await secs(0.6)
+	await shot("menu_settings")
+	m._show("")
+	m._flick_t = 0.0
+	await secs(1.0)
+	await shot("menu_flicker")
+	GameStateRef().checkpoint = "start"
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(8.0)
+	var g: Node = get_tree().current_scene
+	GameStateRef().set_fade(0.0)
+	g.hud.menu.open()
+	await secs(0.6)
+	await shot("pause_main")
+	g.hud.menu._show("controls")
+	await secs(0.4)
+	await shot("pause_controls")
+	g.hud.menu._confirm("Выйти в главное меню?", "Продолжить потом можно с начала этой главы.", "Выйти в меню", func(): pass)
+	await secs(0.4)
+	await shot("pause_confirm")

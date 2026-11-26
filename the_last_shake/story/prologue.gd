@@ -118,6 +118,7 @@ func _ready() -> void:
 	ui = StoryUI.new()
 	add_child(ui)
 	ui.line_skipped.connect(_on_skip)
+	add_child(load("res://story/pause_menu.gd").new())   # Esc — пауза (общая для всей игры)
 	GameState.set_loading(true, "Загрузка леса…")
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -1435,28 +1436,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if get_tree().paused and not event.is_action_pressed("pause"):
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		look_yaw = clampf(look_yaw - event.relative.x * MOUSE_SENS, -2.2, 2.2)
-		look_pitch = clampf(look_pitch - event.relative.y * MOUSE_SENS, -1.2, 1.0)
+		look_yaw = clampf(look_yaw - event.relative.x * MOUSE_SENS * GameState.mouse_sens, -2.2, 2.2)
+		look_pitch = clampf(look_pitch - event.relative.y * MOUSE_SENS * GameState.mouse_sens, -1.2, 1.0)
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not get_tree().paused:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed("flashlight") and phase == "walk":
 		torch.visible = not torch.visible
 		audio.play_sfx("click", 0.5)
-	elif event.is_action_pressed("pause"):
-		_toggle_pause()
 
-
-func _toggle_pause() -> void:
-	var p: bool = not get_tree().paused
-	get_tree().paused = p
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if p else Input.MOUSE_MODE_CAPTURED
-	if p:
-		ui.show_title("Пауза", "Esc — продолжить   ·   M — выйти в меню", 48, 0.2)
-	else:
-		ui.clear_title(0.2)
-
-
-func _input(event: InputEvent) -> void:
-	if get_tree().paused and event is InputEventKey and event.pressed and event.physical_keycode == KEY_M:
-		get_tree().paused = false
-		GameState.to_menu()

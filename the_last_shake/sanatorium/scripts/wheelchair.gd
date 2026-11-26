@@ -276,8 +276,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if get_tree().paused:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not story_lock:
-		look_yaw = clamp(look_yaw - event.relative.x * MOUSE_SENS, -2.1, 2.1)
-		look_pitch = clamp(look_pitch - event.relative.y * MOUSE_SENS, -1.25, 1.0)
+		look_yaw = clamp(look_yaw - event.relative.x * MOUSE_SENS * GameState.mouse_sens, -2.1, 2.1)
+		look_pitch = clamp(look_pitch - event.relative.y * MOUSE_SENS * GameState.mouse_sens, -1.25, 1.0)
 		look_idle = 0.0
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED \
 			and not game.hud.menu_open():

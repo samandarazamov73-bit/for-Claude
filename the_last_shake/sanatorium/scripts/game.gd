@@ -66,6 +66,7 @@ func _ready() -> void:
 	_build_static_colliders()
 	_build_occluders_and_ranges()
 	stats["models_swapped"] = swap_models(building)     # свои 3D-модели из sanatorium/models/
+	stats["grounded"] = ground_furniture()              # ширмы, тележки… — на пол, а не в 10 см над ним
 	stats["models_on_tables"] = dress_tables(building)  # термос, кружка, хлеб на столах; мониторы на столиках
 	stats["reseated"] = reseat_items(building)          # чемоданы, книги, радио… — на верх своей мебели
 	stats["separated"] = separate_furniture()           # кресла и стулья не въезжают в столики рядом
@@ -954,6 +955,39 @@ func _inside_room(poly: PackedVector2Array, y: float, room: Dictionary) -> bool:
 	return true
 
 
+## Что стоит на полу, а висело в паре сантиметров над ним (у ширм и тележек в модели здания нет ножек и колёс,
+## коробка поднята на 10–15 см): опускаем на пол своего этажа.
+const FLOOR_TYPES := ["screen", "cleaning_cart", "laundry_cart", "stretcher", "bucket", "crates", "bin",
+	"coat_stand", "plant_stand", "iv_stand", "oxygen", "scale", "stool", "chair", "chair_soft", "chair_tube",
+	"armchair", "armchair_beige", "armchair_red", "recliner", "sofa_beige", "sofa_brown", "sofa_red", "bench",
+	"bed_a", "bed_b", "bed_hosp", "bed_strip", "wardrobe", "wardrobe_wide", "locker", "filing", "bookcase",
+	"bedside", "tv_cabinet", "desk_office", "desk_small", "desk_wide", "table_sq", "table_round", "table_cloth",
+	"table_coffee", "table_read", "table_small", "table_lab", "exam_couch", "massage_table", "med_cabinet",
+	"wheelchair", "gym_bench", "ex_bike", "piano", "safe", "fridge", "goods_rack", "linen_rack", "luggage_rack"]
+
+
+func ground_furniture() -> int:
+	var n := 0
+	for g in building.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = g
+		var t := model_type(String(m.name))
+		if not (t in FLOOR_TYPES):
+			continue
+		var holder: Node3D = m.get_parent().get_node_or_null(String(m.name) + "_model") as Node3D
+		var nd: Node3D = holder if holder else m
+		if holder == null and (not m.visible or m.mesh == null):
+			continue
+		var b: AABB = _world_aabb(nd)
+		if b.size.length() < 0.05:
+			continue
+		var floor_y: float = FIRST_FLOOR + floorf((b.position.y - FIRST_FLOOR + 0.05) / STOREY) * STOREY
+		var gap: float = b.position.y - floor_y
+		if gap > 0.02 and gap < 0.3:
+			nd.global_position.y -= gap
+			n += 1
+	return n
+
+
 func separate_furniture() -> int:
 	var items: Array = []          # [узел, тип, AABB в своих координатах, низ, верх]
 	for g in building.find_children("*", "MeshInstance3D", true, false):
@@ -1079,6 +1113,10 @@ static func reseat_items(root: Node) -> int:
 		if t in ON_TOP:
 			items.append([nd, b])
 		elif b.size.y > 0.25:
+			if is_holder and (t.begins_with("table") or t.begins_with("desk") or t in ["bedside", "tv_cabinet", "bar_counter", "buvette", "wardrobe", "wardrobe_wide", "locker", "filing", "med_cabinet", "prep_table"]):
+				var mt: float = main_top(nd)
+				if mt > b.position.y + 0.2 and mt < b.end.y - 0.01:
+					b = AABB(b.position, Vector3(b.size.x, mt - b.position.y, b.size.z))   # верх — столешница
 			supports.append([b, nd])
 	var n := 0
 	for it in items:
@@ -1119,7 +1157,8 @@ static func _model_like(old: GeometryInstance3D, path: String) -> Node3D:
 	return inst
 
 
-## Верх стола (в системе координат старого узла): у заменённого стола — по своей модели.
+## Верх стола (в системе координат старого узла): у заменённого стола — по своей модели, по столешнице, а не по
+## самой высокой точке (на моделях столов уже стоят бутылки и посуда — термос «вставал» на бутылку и висел).
 static func _table_top(old: MeshInstance3D) -> float:
 	var top: float = old.mesh.get_aabb().end.y
 	var holder: Node = old.get_parent().get_node_or_null(String(old.name) + "_model")
@@ -1127,7 +1166,59 @@ static func _table_top(old: MeshInstance3D) -> float:
 		var b := _scene_aabb(holder as Node3D)
 		if b.size.y > 0.2:
 			top = b.end.y
+			var wt: float = main_top(holder as Node3D)
+			if wt > -1e8:
+				top = (old.global_transform.affine_inverse() * Vector3(0, wt, 0)).y if old.is_inside_tree() else wt
 	return top
+
+
+static var _top_cache := {}          # сетка → [высота (локально), площадь] самой большой горизонтальной грани
+
+
+## Высота (в мире) самой большой обращённой вверх поверхности предмета — столешница, верх шкафа, сиденье;
+## −1e9, если такой нет. Мелочи на столе (бутылки, посуда) по площади меньше и не мешают.
+static func main_top(n: Node3D) -> float:
+	var best_area := 0.0
+	var best_y := -1e9
+	var list: Array = n.find_children("*", "MeshInstance3D", true, false)
+	if n is MeshInstance3D:
+		list.append(n)
+	for g in list:
+		var mi: MeshInstance3D = g
+		if mi.mesh == null or not mi.is_visible_in_tree():
+			continue
+		if not _top_cache.has(mi.mesh):
+			var bins := {}
+			for si in mi.mesh.get_surface_count():
+				var arr: Array = mi.mesh.surface_get_arrays(si)
+				var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+				var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+				var nt: int = (idx.size() if idx.size() > 0 else v.size()) / 3
+				for t in nt:
+					var a: Vector3 = v[idx[t * 3]] if idx.size() > 0 else v[t * 3]
+					var b: Vector3 = v[idx[t * 3 + 1]] if idx.size() > 0 else v[t * 3 + 1]
+					var c: Vector3 = v[idx[t * 3 + 2]] if idx.size() > 0 else v[t * 3 + 2]
+					var cr: Vector3 = (b - a).cross(c - a)
+					var ar: float = cr.length() * 0.5
+					if ar < 1e-7 or cr.y / (ar * 2.0) < 0.9:
+						continue
+					var key: int = roundi((a.y + b.y + c.y) / 3.0 * 100.0)
+					bins[key] = float(bins.get(key, 0.0)) + ar
+			var bk := 0
+			var ba := 0.0
+			for k in bins:
+				if float(bins[k]) > ba:
+					ba = bins[k]
+					bk = k
+			_top_cache[mi.mesh] = [float(bk) / 100.0, ba]
+		var e: Array = _top_cache[mi.mesh]
+		var wy: float = (mi.global_transform * Vector3(0, float(e[0]), 0)).y
+		var sc: float = mi.global_transform.basis.get_scale().x
+		var area: float = float(e[1]) * sc * sc
+		if area > best_area:
+			best_area = area
+			best_y = wy
+	return best_y
 
 
 ## На столы — термос, кружка и хлеб (table_items, примерно на двух столах из трёх), на столики с инструментами —

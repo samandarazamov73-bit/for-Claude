@@ -8,7 +8,7 @@ var room_label: Label
 var debug_label: Label
 var speed_bars := []
 var intro: Control
-var menu: Control
+var menu: CanvasLayer                  # пауза (story/pause_menu.gd)
 var _msg_t := 0.0
 var _room_t := 0.0
 var _intro_t := 0.0
@@ -172,27 +172,10 @@ func _panel(title: String, body: String) -> PanelContainer:
 	return p
 
 
+## Пауза — общая для всей игры (story/pause_menu.gd): Esc, тёмный экран, пункты слева.
 func _build_menu() -> void:
-	menu = _panel("Пауза", CONTROLS)
-	var v: VBoxContainer = menu.get_child(0)
-	var h := HBoxContainer.new()
-	h.alignment = BoxContainer.ALIGNMENT_CENTER
-	h.add_theme_constant_override("separation", 20)
-	v.add_child(h)
-	var cont := Button.new()
-	cont.text = "Продолжить"
-	cont.pressed.connect(func(): toggle_menu())
-	h.add_child(cont)
-	var m := Button.new()
-	m.text = "В главное меню"
-	m.pressed.connect(func(): GameState.to_menu())
-	h.add_child(m)
-	var q := Button.new()
-	q.text = "Выйти"
-	q.pressed.connect(func(): get_tree().quit())
-	h.add_child(q)
-	menu.visible = false
-	_center(menu)
+	menu = load("res://story/pause_menu.gd").new()
+	add_child(menu)
 
 
 func _center(c: Control) -> void:
@@ -224,15 +207,11 @@ func set_day(on: bool) -> void:
 
 
 func menu_open() -> bool:
-	return menu.visible
+	return menu != null and menu.visible
 
 
 func toggle_menu() -> void:
-	menu.visible = not menu.visible
-	get_tree().paused = menu.visible
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if menu.visible else Input.MOUSE_MODE_CAPTURED
-	if menu.visible:
-		_center(menu)
+	menu.toggle()
 	update_fps_cap()
 
 
@@ -263,9 +242,7 @@ func _notification(what: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if intro and intro.visible and (event is InputEventKey or event is InputEventMouseButton) and event.is_pressed():
 		intro.visible = false
-	if event.is_action_pressed("pause"):
-		toggle_menu()
-	elif event.is_action_pressed("debug_info"):
+	if event.is_action_pressed("debug_info"):
 		debug_label.visible = not debug_label.visible
 
 
