@@ -153,7 +153,7 @@ class LiftButton:
 			return "[E] Вызвать лифт"
 		if what["cab"] == "open":
 			return "[E] Открыть двери"
-		return "[E] Этаж " + what["cab"]
+		return GameState.t("[E] Этаж ") + what["cab"]
 
 	func interact(_by) -> void:
 		var pos: Vector3 = _by.global_position + Vector3(0, 1.0, 0)
@@ -325,7 +325,7 @@ func _physics_process(dt: float) -> void:
 				state = "opening"
 				_door_sound()
 				if player_in_cabin():
-					game.hud.message("Этаж %d" % (f + 1))
+					game.hud.message(GameState.t("Этаж %d") % (f + 1))
 				arrived.emit(f)
 		"opening":
 			open_f = move_toward(open_f, 1.0, dt / DOOR_TIME)

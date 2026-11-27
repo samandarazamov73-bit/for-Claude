@@ -1203,7 +1203,7 @@ func _update_walk(dt: float) -> void:
 ## пандуса и с наклоном. Маму впереди не обогнать; закрытую дверь не проехать.
 func _drive(dt: float) -> void:
 	if drive_model.handle_speed_keys():
-		ui.hint("Скорость %d из 5" % (drive_model.speed_level + 1), 1.5)
+		ui.hint(GameState.t("Скорость %d из 5") % (drive_model.speed_level + 1), 1.5)
 		chair_model.set_speed(drive_model.speed_level)
 	var j: Vector2 = drive_model.joystick()
 	hero.rotation.y += drive_model.step(j, dt)

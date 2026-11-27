@@ -58,7 +58,7 @@ func toggle_fps_limit() -> void:
 	fps_limited = not fps_limited
 	_save("fps_limit_30", fps_limited)
 	game.hud.update_fps_cap()
-	game.hud.message("Не больше %d кадров/с: меньше греется" % FPS_LIMIT if fps_limited else "Без ограничения кадров")
+	game.hud.message(GameState.t("Не больше %d кадров/с: меньше греется") % FPS_LIMIT if fps_limited else GameState.t("Без ограничения кадров"))
 
 
 ## The frame-rate limit for normal play, 0 = none.

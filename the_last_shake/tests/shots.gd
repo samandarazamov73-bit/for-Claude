@@ -17,6 +17,8 @@ func _ready() -> void:
 		elif a.begins_with("--out="):
 			out = a.get_slice("=", 1)
 	DirAccess.make_dir_recursive_absolute(out)
+	if _arg("lang", "") != "":                         # --lang=en|uz|ru — язык субтитров и меню
+		GameStateRef().set_language(_arg("lang", "ru"))
 	_run.call_deferred()
 
 
@@ -142,6 +144,8 @@ func _run() -> void:
 			await _camviews()
 		"fallcheck":
 			await _fallcheck()
+		"i18n":
+			await _i18n()
 		"dbgsep":
 			GameStateRef().checkpoint = "start"
 			get_tree().change_scene_to_file("res://sanatorium/main.tscn")
@@ -2074,3 +2078,32 @@ func _fallcheck() -> void:
 		if i % 3 == 0:
 			await shot("fall_%02d" % i)
 		await secs(0.15)
+
+
+## Языки: меню (с настройками) и сцена в санатории (реплика, задание, название комнаты, записка) — en и uz.
+func _i18n() -> void:
+	for lang in _arg("langs", "en,uz").split(","):
+		GameStateRef().set_language(lang)
+		get_tree().change_scene_to_file("res://story/menu.tscn")
+		await secs(2.5)
+		await shot("i18n_%s_menu" % lang)
+		get_tree().current_scene._show("settings")
+		await secs(0.8)
+		await shot("i18n_%s_settings" % lang)
+		GameStateRef().checkpoint = "start"
+		get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+		await secs(4.0)
+		d = get_tree().current_scene.get_node("Director")
+		pl = d.player
+		await wait_for(func(): return d.ui.line_visible(), 60, "first line")
+		await secs(0.6)
+		await shot("i18n_%s_line" % lang)
+		await wait_for(func(): return d.ui._objective.text != "", 90, "objective")
+		await secs(0.5)
+		await shot("i18n_%s_objective" % lang)
+		var n: Array = d.NOTES["diary"]
+		d.ui.note(String(n[0]), String(n[2]))
+		await secs(0.5)
+		await shot("i18n_%s_note" % lang)
+		await secs(2.0)
+	GameStateRef().set_language("ru")

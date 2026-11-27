@@ -237,7 +237,7 @@ func note(title: String, text: String) -> void:
 	h.custom_minimum_size = Vector2(690, 0)
 	v.add_child(h)
 	var body := Label.new()
-	body.text = text
+	body.text = GameState.paras(text)
 	body.add_theme_font_size_override("font_size", 19)
 	body.add_theme_color_override("font_color", Color(0.16, 0.13, 0.1))
 	body.add_theme_constant_override("line_spacing", 4)
@@ -265,7 +265,7 @@ func note(title: String, text: String) -> void:
 ## Реплика диалога идёт сама — нажимать ничего не нужно: висит столько, сколько нужно, чтобы спокойно
 ## прочитать (короткая — 2,5–3 с, обычная — около 5 с, длинная — 8–10 с). Пробел / Enter — пропустить.
 static func line_seconds(text: String) -> float:
-	return clampf(1.8 + text.length() * 0.05, 2.5, 10.0)
+	return clampf(1.8 + GameState.t(text).length() * 0.05, 2.5, 10.0)
 
 
 func line(who: String, text: String, seconds := 0.0) -> void:
@@ -295,7 +295,7 @@ func say(who: String, text: String, seconds := 0.0, wait := false) -> float:
 	_sub_wait = wait
 	_sub_next.visible = wait
 	_sub_shown_ms = Time.get_ticks_msec()
-	var t: float = seconds if seconds > 0.0 else clampf(1.6 + text.length() * 0.055, 2.2, 7.5)
+	var t: float = seconds if seconds > 0.0 else clampf(1.6 + GameState.t(text).length() * 0.055, 2.2, 7.5)
 	_sub_t = 0.0 if wait else t
 	return t
 
@@ -313,7 +313,7 @@ func line_visible() -> bool:
 
 
 func set_objective(text: String, target: Variant = null, offset := Vector3(0, 1.0, 0)) -> void:
-	_objective.text = ("Задание: " + text) if text != "" else ""
+	_objective.text = (GameState.t("Задание: ") + GameState.t(text)) if text != "" else ""
 	_obj_flash = 2.0 if text != "" else 0.0
 	set_marker(target, offset)
 
@@ -415,7 +415,7 @@ func _update_marker(dt: float) -> void:
 		var k: float = minf((c.x - margin) / maxf(absf(d.x), 0.001), (c.y - margin) / maxf(absf(d.y), 0.001))
 		p = c + d * minf(k, 1.0)
 	_marker.position = p
-	_marker_text.text = "%d м" % int(round(dist))
+	_marker_text.text = GameState.t("%d м") % int(round(dist))
 	# близко — почти пропадает; только что выдано — мигает
 	var a: float = clampf((dist - 1.5) / 3.0, 0.15, 0.85)
 	if _marker_t < 2.0:

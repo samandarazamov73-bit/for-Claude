@@ -152,6 +152,53 @@ static func controls_grid() -> GridContainer:
 	return g
 
 
+## Язык субтитров и меню: три кнопки, выбранная — светлая с красной чертой снизу. Названия языков — на своём языке.
+static func language_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 18)
+	var l := label("Язык", 22, TEXT, 400)
+	l.custom_minimum_size = Vector2(250, 0)
+	row.add_child(l)
+	var group := ButtonGroup.new()
+	for lang in GameState.LANGS:
+		var code: String = lang[0]
+		var b := Button.new()
+		b.text = String(lang[1])
+		b.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+		b.toggle_mode = true
+		b.button_group = group
+		b.button_pressed = GameState.language == code
+		b.focus_mode = Control.FOCUS_ALL
+		b.add_theme_font_override("font", font(400))
+		b.add_theme_font_size_override("font_size", 22)
+		b.add_theme_color_override("font_color", Color(TEXT.r, TEXT.g, TEXT.b, 0.6))
+		b.add_theme_color_override("font_hover_color", Color(1.0, 0.97, 0.92))
+		b.add_theme_color_override("font_focus_color", Color(1.0, 0.97, 0.92))
+		b.add_theme_color_override("font_pressed_color", Color(1.0, 0.97, 0.92))
+		b.add_theme_color_override("font_hover_pressed_color", Color(1.0, 0.97, 0.92))
+		var empty := StyleBoxEmpty.new()
+		empty.content_margin_left = 4
+		empty.content_margin_right = 4
+		empty.content_margin_bottom = 4
+		var mark := StyleBoxFlat.new()
+		mark.bg_color = Color(0, 0, 0, 0)
+		mark.border_color = ACCENT
+		mark.border_width_bottom = 2
+		mark.content_margin_left = 4
+		mark.content_margin_right = 4
+		mark.content_margin_bottom = 4
+		b.add_theme_stylebox_override("normal", empty)
+		b.add_theme_stylebox_override("hover", empty)
+		b.add_theme_stylebox_override("focus", empty)
+		b.add_theme_stylebox_override("pressed", mark)
+		b.add_theme_stylebox_override("hover_pressed", mark)
+		b.toggled.connect(func(on: bool):
+			if on and GameState.language != code:
+				GameState.set_language(code))
+		row.add_child(b)
+	return row
+
+
 ## Настройки: громкость, чувствительность мыши, полный экран — сразу сохраняются.
 static func settings_box() -> VBoxContainer:
 	var v := VBoxContainer.new()
@@ -167,5 +214,6 @@ static func settings_box() -> VBoxContainer:
 	v.add_child(toggle("Полный экран", GameState.fullscreen, func(on):
 		GameState.fullscreen = on
 		GameState.save_settings()))
+	v.add_child(language_row())
 	v.add_child(label("Графика одна — «Средняя»: реалистичный свет без тяжёлых эффектов.", 18, DIM, 300))
 	return v

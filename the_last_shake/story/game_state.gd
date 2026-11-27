@@ -3,7 +3,14 @@ extends Node
 ## Управление (все клавиши задаются здесь), глава/контрольная точка, переходы между сценами с затемнением.
 
 ## Номер сборки — виден в главном меню слева внизу (чтобы сразу видно, какая версия запущена).
-const VERSION := "версия 11.3 · 27 ноября 2026"
+const VERSION := "11.4"
+const BUILD_DATE := "27.11.2026"
+## Языки субтитров и интерфейса: код, название (на своём языке). Переводы — story/i18n/strings.tsv
+## (ru → en → uz; правится в Excel / Google Таблицах; собирается tools/i18n/build_tsv.py).
+const LANGS := [["ru", "Русский"], ["en", "English"], ["uz", "O'zbekcha"]]
+const I18N_PATH := "res://story/i18n/strings.tsv"
+
+signal language_changed
 
 const MENU := "res://story/menu.tscn"
 const PROLOGUE := "res://story/prologue.tscn"
@@ -33,6 +40,7 @@ var current_scene := ""          # какая сцена игры сейчас (
 var volume := 0.85
 var mouse_sens := 1.0
 var fullscreen := false
+var language := ""                 # "" — ещё не выбран: по языку системы (ru / uz, иначе en)
 const SETTINGS_PATH := "user://the_last_shake_settings.cfg"
 const PROGRESS_PATH := "user://the_last_shake_progress.cfg"
 var deaths := 0
@@ -47,6 +55,7 @@ var _busy := false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	setup_input()
+	_load_translations()
 	_load_settings()
 	_layer = CanvasLayer.new()
 	_layer.layer = 100
@@ -152,10 +161,17 @@ func _load_settings() -> void:
 		volume = clampf(float(cfg.get_value("settings", "volume", volume)), 0.0, 1.0)
 		mouse_sens = clampf(float(cfg.get_value("settings", "mouse_sens", mouse_sens)), 0.3, 2.5)
 		fullscreen = bool(cfg.get_value("settings", "fullscreen", fullscreen))
+		language = String(cfg.get_value("settings", "language", language))
+	if not language in ["ru", "en", "uz"]:
+		var sys := OS.get_locale_language()
+		language = sys if sys in ["ru", "uz"] else "en"
 	apply_settings()
 
 
 func apply_settings() -> void:
+	if TranslationServer.get_locale() != language:
+		TranslationServer.set_locale(language)
+		language_changed.emit()
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(volume, 0.0001)))
 	AudioServer.set_bus_mute(0, volume <= 0.001)
 	var fs: bool = DisplayServer.window_get_mode() in [DisplayServer.WINDOW_MODE_FULLSCREEN, DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN]
@@ -168,6 +184,7 @@ func save_settings() -> void:
 	cfg.set_value("settings", "volume", volume)
 	cfg.set_value("settings", "mouse_sens", mouse_sens)
 	cfg.set_value("settings", "fullscreen", fullscreen)
+	cfg.set_value("settings", "language", language)
 	cfg.save(SETTINGS_PATH)
 	apply_settings()
 
@@ -179,6 +196,54 @@ func _save_progress() -> void:
 	cfg.set_value("progress", "scene", current_scene)
 	cfg.set_value("progress", "checkpoint", checkpoint)
 	cfg.save(PROGRESS_PATH)
+
+
+func set_language(code: String) -> void:
+	language = code
+	save_settings()
+
+
+## Перевод строки (ключ — русский текст, как в коде). Подписи (Label, Button) переводятся сами; это — для строк,
+## которые склеиваются или форматируются (%d) перед показом.
+func t(s: String) -> String:
+	return String(TranslationServer.translate(s))
+
+
+## Длинный текст (записки) — по абзацам: каждый абзац переведён отдельно.
+func paras(s: String) -> String:
+	var out: PackedStringArray = []
+	for p in s.split("\n\n"):
+		out.append(t(p))
+	return "\n\n".join(out)
+
+
+func version_text() -> String:
+	return t("версия %s · %s") % [VERSION, BUILD_DATE]
+
+
+## Таблица переводов: первая строка — заголовок (ru, en, uz), дальше — по строке на фразу; \n в тексте — перенос.
+func _load_translations() -> void:
+	var f := FileAccess.open(I18N_PATH, FileAccess.READ)
+	if f == null:
+		push_warning("нет таблицы переводов " + I18N_PATH)
+		return
+	var head: PackedStringArray = f.get_line().split("\t")
+	var tables := {}
+	for i in range(1, head.size()):
+		var tl := Translation.new()
+		tl.locale = head[i].strip_edges()
+		tables[i] = tl
+	while not f.eof_reached():
+		var line := f.get_line()
+		if line.strip_edges() == "":
+			continue
+		var cols: PackedStringArray = line.split("\t")
+		var key: String = cols[0].replace("\\n", "\n")
+		for i in range(1, mini(cols.size(), head.size())):
+			if cols[i] != "":
+				(tables[i] as Translation).add_message(key, cols[i].replace("\\n", "\n"))
+	for i in tables:
+		TranslationServer.add_translation(tables[i])
 
 
 ## Сохранённое место: [сцена, контрольная точка] или [] — если игру ещё не начинали.

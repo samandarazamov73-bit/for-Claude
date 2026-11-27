@@ -267,7 +267,7 @@ func show_room(r: Dictionary) -> void:
 		room_label.text = ""
 		return
 	var num: String = r.get("num", "")
-	room_label.text = (num + "  " if num != "" else "") + String(r.get("name", ""))
+	room_label.text = (num + "  " if num != "" else "") + GameState.t(String(r.get("name", "")))
 	room_label.modulate.a = 1.0
 	_room_t = 3.5
 
