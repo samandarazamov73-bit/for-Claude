@@ -367,15 +367,18 @@ func look_at_point(p: Vector3, seconds := 0.6) -> void:
 		player.aim_at(p, clampf(dt * 6.0, 0.0, 1.0))
 
 
+## Тряска камеры поверх её текущего положения: если Азиз уже упал на пол, трясёт там, на полу, — а не возвращает
+## камеру в коляску (раньше после падения тряска ставила взгляд обратно на высоту сиденья).
 func shake(amount: float, seconds: float) -> void:
+	var base: Transform3D = player.view_offset
 	var t := 0.0
 	while t < seconds:
 		await get_tree().process_frame
 		t += get_process_delta_time()
 		var k: float = amount * (1.0 - t / seconds)
-		player.view_offset = Transform3D(Basis.from_euler(Vector3(randf_range(-1, 1) * 0.03 * k, randf_range(-1, 1) * 0.02 * k,
+		player.view_offset = base * Transform3D(Basis.from_euler(Vector3(randf_range(-1, 1) * 0.03 * k, randf_range(-1, 1) * 0.02 * k,
 			randf_range(-1, 1) * 0.04 * k)), Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.02 * k)
-	player.view_offset = Transform3D.IDENTITY
+	player.view_offset = base
 
 
 func door(id: int):

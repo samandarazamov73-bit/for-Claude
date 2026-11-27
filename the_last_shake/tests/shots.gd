@@ -140,6 +140,8 @@ func _run() -> void:
 			await _clipaudit()
 		"camviews":
 			await _camviews()
+		"fallcheck":
+			await _fallcheck()
 		"dbgsep":
 			GameStateRef().checkpoint = "start"
 			get_tree().change_scene_to_file("res://sanatorium/main.tscn")
@@ -2047,3 +2049,28 @@ func _camviews() -> void:
 		await secs(0.6)
 		await shot("cam_%02d" % k)
 		k += 1
+
+
+## Удар и падение (братья ловят Азиза): кадры и высота камеры каждые 0.15 с — после падения на пол камера не
+## должна возвращаться на высоту коляски до затемнения.
+func _fallcheck() -> void:
+	GameStateRef().checkpoint = "floor3"
+	get_tree().change_scene_to_file("res://sanatorium/main.tscn")
+	await secs(4.0)
+	var g: Node = get_tree().current_scene
+	d = g.get_node("Director")
+	pl = d.player
+	d.minigame.cheat = true
+	await secs(2.0)
+	d.scares.elapsed = 400.0
+	d.scares.count = 10
+	await tp(Vector3(30.0, 7.8, -8.1), -PI * 0.5)
+	await wait_for(func(): return d.act == "brothers" and d.younger.visible, 60, "brothers appear")
+	await wait_for(func(): return d.psycho.current == "hit", 90, "elder strikes")
+	var t0 := Time.get_ticks_msec()
+	for i in 18:
+		var t: float = (Time.get_ticks_msec() - t0) / 1000.0
+		print("FALL t=%.2f off_y=%.2f roll=%.2f fade=%.2f" % [t, pl.view_offset.origin.y, pl.view_offset.basis.get_euler().z, GameStateRef().fade_target()])
+		if i % 3 == 0:
+			await shot("fall_%02d" % i)
+		await secs(0.15)
