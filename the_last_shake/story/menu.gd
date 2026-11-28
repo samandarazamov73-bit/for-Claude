@@ -66,13 +66,6 @@ func _ready() -> void:
 	add_child(left)
 	_title = UI.label("THE LAST SHAKE", 92, Color(0.94, 0.91, 0.85), 600)
 	left.add_child(_title)
-	var sub_title: Label = UI.label("П О С Л Е Д Н И Й   С К А Ч О К", 22, Color(0.72, 0.68, 0.62), 300)
-	left.add_child(sub_title)
-	# по-английски название уже крупно сверху — подзаголовок не нужен
-	var lang_vis := func(): sub_title.visible = GameState.language != "en"
-	lang_vis.call()
-	GameState.language_changed.connect(lang_vis)
-	tree_exiting.connect(func(): GameState.language_changed.disconnect(lang_vis))
 	var line := ColorRect.new()
 	line.color = Color(UI.ACCENT.r, UI.ACCENT.g, UI.ACCENT.b, 0.8)
 	line.custom_minimum_size = Vector2(120, 2)

@@ -81,7 +81,6 @@ T = {
 "Здесь кто-то есть.": ("Someone is here.", "Bu yerda kimdir bor."),
 "Мама ждёт тебя.": ("Mom is waiting for you.", "Onang seni kutyapti."),
 "Не оглядывайся.": ("Don't look back.", "Orqangga qarama."),
-"П О С Л Е Д Н И Й   С К А Ч О К": ("T H E   L A S T   S H A K E", "S O ' N G G I   S I L K I N I S H"),
 "Санаторий «Оромгох», Ташкент, 1975": ("Oromgoh Sanatorium, Tashkent, 1975", "«Oromgoh» sanatoriysi, Toshkent, 1975"),
 "Продолжить": ("Continue", "Davom etish"),
 "Новая игра": ("New game", "Yangi o'yin"),
