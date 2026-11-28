@@ -1,5 +1,7 @@
 """Fine details: sharpening halos, thin lines, small highlights on shading,
 and profile fitting of vignette-like gradients."""
+import math
+
 import cv2
 import numpy as np
 import pytest
@@ -136,3 +138,109 @@ def test_higher_detail_is_closer_to_the_source():
     assert errs[1] < 0.85 * errs[0]
     assert errs[2] < errs[1]  # photo is the closest
     assert shapes[0] < shapes[1] < shapes[2]
+
+
+def _red_text_logo():
+    from PIL import Image as PILImage, ImageDraw, ImageFont
+
+    S = 4
+    im = PILImage.new("RGB", (420 * S, 150 * S), "white")
+    d = ImageDraw.Draw(im)
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    try:
+        small = ImageFont.truetype(font_path, 30 * S)
+        big = ImageFont.truetype(font_path, 70 * S)
+    except OSError:
+        pytest.skip("DejaVu font not available")
+    d.text((20 * S, 10 * S), "NTA", font=big, fill=(239, 24, 32))
+    d.text((20 * S, 100 * S), "SINCE 2013", font=small, fill=(239, 24, 32))
+    clean = im.resize((420, 150), PILImage.BOX)
+    return np.asarray(clean)
+
+
+def _jpeg(rgb, quality=85, subsampling=2):
+    import io as _io
+
+    from PIL import Image as PILImage
+
+    buf = _io.BytesIO()
+    PILImage.fromarray(rgb).save(buf, "JPEG", quality=quality, subsampling=subsampling)
+    return buf.getvalue()
+
+
+def test_jpeg_subsampling_is_detected():
+    from image_processing import decode_image
+
+    rgb = _red_text_logo()
+    assert decode_image(_jpeg(rgb, subsampling=2)).chroma_subsampling == (2, 2)
+    assert decode_image(_jpeg(rgb, subsampling=0)).chroma_subsampling is None
+    assert decode_image(png_bytes(np.dstack([rgb, np.full(rgb.shape[:2], 255, np.uint8)]))).chroma_subsampling is None
+
+
+def test_chroma_restoration_sharpens_thin_red_strokes():
+    from image_processing import decode_image
+    from image_processing.chroma import restore_subsampled_chroma
+
+    rgb = _red_text_logo()
+    dec = decode_image(_jpeg(rgb))
+    fixed = restore_subsampled_chroma(dec.rgba, dec.chroma_subsampling)
+    text = (slice(95, 140), slice(15, 260))  # the small text
+    before = np.abs(dec.rgba[text][..., :3].astype(int) - rgb[text]).mean()
+    after = np.abs(fixed[text][..., :3].astype(int) - rgb[text]).mean()
+    assert after < 0.8 * before
+
+
+def test_small_red_text_in_jpeg_keeps_one_red():
+    rgb = _red_text_logo()
+    res = vectorize(_jpeg(rgb))
+    pal = res.graph.palette
+    # white and the one red of the design: no darker or pinkish copies
+    assert len(pal) == 2
+    red = min(pal, key=lambda c: int(c[1]))
+    assert abs(int(red[0]) - 239) <= 8 and int(red[1]) <= 40 and int(red[2]) <= 45
+    ren = render_graph(res.graph)[..., :3].astype(int)
+    assert np.abs(ren - rgb.astype(int)).mean() < 2.0
+
+
+def test_straight_polyline_knee_and_arc():
+    from geometry_engine.fitting import _straight_polyline
+
+    rng = np.random.default_rng(3)
+    # a diagonal meeting a vertical stem at a shallow knee, with JPEG-like noise
+    a = np.stack([np.linspace(0, 60, 121), np.linspace(0, 100, 121)], 1)
+    b = np.stack([np.full(80, 60.0), np.linspace(100.5, 140, 80)], 1)
+    pts = np.concatenate([a, b]) + rng.normal(0, 0.15, (201, 2))  # after fairing
+    pts[0], pts[-1] = (0.0, 0.0), (60.0, 140.0)
+    v = _straight_polyline(pts, 0.65)
+    assert v is not None and len(v) == 3
+    assert np.hypot(*(np.asarray(v[1]) - [60.0, 100.0])) < 1.5
+    # a circular arc must stay a curve
+    t = np.linspace(0, math.pi / 2, 160)
+    arc = np.stack([80 * np.cos(t), 80 * np.sin(t)], 1)
+    assert _straight_polyline(arc, 0.65) is None
+
+
+def test_glyph_edges_are_straight_and_axis_aligned():
+    rgb = _red_text_logo()
+    g = vectorize(_jpeg(rgb)).graph
+    long_lines = []
+    for f in g.interfaces.values():
+        for s in f.segments:
+            if s.kind == "L":
+                (x0, y0), (x1, y1) = s.start(), s.end()
+                if math.hypot(x1 - x0, y1 - y0) >= 20:
+                    ang = math.degrees(math.atan2(y1 - y0, x1 - x0)) % 90
+                    long_lines.append(min(ang, 90 - ang))
+    # stems and bars of "NTA" come out as long straight lines, most of them
+    # exactly horizontal or vertical
+    assert len(long_lines) >= 8
+    assert sum(1 for a in long_lines if a < 1e-6) >= 0.5 * len(long_lines)
+
+
+def test_small_jpeg_text_stays_close_to_the_clean_original():
+    rgb = _red_text_logo()
+    res = vectorize(_jpeg(rgb))
+    ren = render_graph(res.graph)[..., :3].astype(int)
+    text = (slice(95, 140), slice(15, 260))
+    # letters whole, bars of E / 2 / 3 solid, no darker or pink pieces
+    assert np.abs(ren[text] - rgb[text].astype(int)).mean() < 6.0

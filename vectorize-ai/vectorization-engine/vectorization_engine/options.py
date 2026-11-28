@@ -13,7 +13,7 @@ from typing import Any
 from image_processing import DEFAULT_MAX_PIXELS, MAX_WORKING_PIXELS, parse_palette
 
 # bump when stages 1-3 change their output, so on-disk caches are not reused
-SEGMENTATION_VERSION = 4
+SEGMENTATION_VERSION = 5
 
 DETAIL_LEVELS = {"normal": 0, "high": 1, "max": 2, "photo": 3}
 

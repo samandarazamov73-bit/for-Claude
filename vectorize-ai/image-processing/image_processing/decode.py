@@ -47,6 +47,8 @@ class DecodedImage:
     dpi: tuple[float, float] | None
     icc_converted: bool
     frame_count: int
+    # JPEG chroma subsampling (horizontal, vertical), e.g. (2, 2) for 4:2:0
+    chroma_subsampling: tuple[int, int] | None = None
 
     @property
     def width(self) -> int:
@@ -161,6 +163,13 @@ def decode_image(
         except (TypeError, ValueError, IndexError):
             dpi = None
     icc = img.info.get("icc_profile")
+    subsampling = _jpeg_subsampling(img) if fmt == "JPEG" else None
+    if subsampling is not None:
+        try:
+            if img.getexif().get(0x0112) in (5, 6, 7, 8):  # rotated by 90°: axes swap
+                subsampling = (subsampling[1], subsampling[0])
+        except Exception:  # noqa: BLE001
+            pass
 
     try:
         img = ImageOps.exif_transpose(img)
@@ -209,7 +218,22 @@ def decode_image(
         dpi=dpi,
         icc_converted=icc_converted,
         frame_count=frame_count,
+        chroma_subsampling=subsampling,
     )
+
+
+def _jpeg_subsampling(img: Image.Image) -> tuple[int, int] | None:
+    """Chroma subsampling factors from the JPEG frame header (YCbCr only)."""
+    layer = getattr(img, "layer", None)
+    if img.mode not in ("RGB", "YCbCr") or not layer or len(layer) != 3:
+        return None
+    try:
+        (_, h0, v0, _), (_, h1, v1, _), (_, h2, v2, _) = layer
+        fx = max(1, int(h0) // max(1, min(int(h1), int(h2))))
+        fy = max(1, int(v0) // max(1, min(int(v1), int(v2))))
+    except (TypeError, ValueError):
+        return None
+    return (fx, fy) if fx > 1 or fy > 1 else None
 
 
 def encode_png(rgba: np.ndarray) -> bytes:

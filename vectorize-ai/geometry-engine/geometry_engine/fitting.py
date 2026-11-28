@@ -362,6 +362,80 @@ def _max_line_dev(pts: np.ndarray) -> float:
     return float(np.maximum(d, over).max())
 
 
+def _is_straight(pts: np.ndarray, tol: float) -> bool:
+    chord = float(np.hypot(*(pts[-1] - pts[0])))
+    tol_line = max(tol, min(1.4, 0.008 * chord))
+    dev = _max_line_dev(pts)
+    return dev <= tol or (dev <= tol_line and _rms_line_dev(pts) <= 0.4 * tol_line)
+
+
+def _straight_polyline(pts: np.ndarray, tol: float, max_pieces: int = 3, min_len: float = 8.0, min_turn_deg: float = 15.0):
+    """A run that is a polyline of two or three long straight pieces – a
+    diagonal meeting a vertical stem at a shallow knee the corner detector
+    did not flag – is returned as its vertices (end points kept, inner
+    vertices at the intersection of the pieces' least-squares lines).
+    Smooth curves fail the per-piece straightness test, because every
+    piece of an arc bows; None is returned then."""
+    n = pts.shape[0]
+    if n < 2 * min_len:
+        return None
+    cuts = [0, n - 1]
+    while len(cuts) - 1 < max_pieces:
+        worst, worst_i = None, -1
+        for k in range(len(cuts) - 1):
+            a, b = cuts[k], cuts[k + 1]
+            sec = pts[a : b + 1]
+            if _is_straight(sec, tol):
+                continue
+            ch = sec[-1] - sec[0]
+            ln = float(np.hypot(*ch))
+            if ln < 1e-9:
+                return None
+            nrm = np.array([-ch[1], ch[0]]) / ln
+            d = np.abs((sec - sec[0]) @ nrm)
+            j = int(np.argmax(d[1:-1])) + 1 if sec.shape[0] > 2 else 0
+            if worst is None or d[j] > worst:
+                worst, worst_i = d[j], (k, a + j)
+        if worst is None:
+            break
+        k, j = worst_i
+        cuts.insert(k + 1, j)
+    if len(cuts) < 3:
+        return None
+    lines = []
+    for a, b in zip(cuts[:-1], cuts[1:]):
+        sec = pts[a : b + 1]
+        if float(np.hypot(*(sec[-1] - sec[0]))) < min_len or not _is_straight(sec, tol):
+            return None
+        lines.append(fit_line_dir(sec))
+    verts = [pts[0].astype(np.float64)]
+    for k in range(len(lines) - 1):
+        (c1, d1), (c2, d2) = lines[k], lines[k + 1]
+        cos_t = abs(float(d1 @ d2))
+        if cos_t > math.cos(math.radians(min_turn_deg)):
+            return None  # too shallow to be a corner
+        m = np.array([[d1[0], -d2[0]], [d1[1], -d2[1]]])
+        try:
+            t = np.linalg.solve(m, c2 - c1)
+        except np.linalg.LinAlgError:
+            return None
+        v = c1 + t[0] * d1
+        if float(np.hypot(*(v - pts[cuts[k + 1]]))) > 3.0:
+            return None
+        verts.append(v)
+    verts.append(pts[-1].astype(np.float64))
+    return verts
+
+
+def _rms_line_dev(pts: np.ndarray) -> float:
+    a, b = pts[0], pts[-1]
+    ln = np.hypot(*(b - a))
+    if ln < 1e-9:
+        return float(np.sqrt(((pts - a) ** 2).sum(1).mean()))
+    n = np.array([-(b - a)[1], (b - a)[0]]) / ln
+    return float(np.sqrt((((pts - a) @ n) ** 2).mean()))
+
+
 def rdp(pts: np.ndarray, tol: float) -> np.ndarray:
     """Ramer-Douglas-Peucker simplification (returns kept indices)."""
     n = pts.shape[0]
@@ -438,9 +512,18 @@ def fit_section(
         return [Line(p0, p1)]
     tol = opts.tolerance
     free_ends = t_start is None and t_end is None
-    if _max_line_dev(pts) <= tol:
+    # Long straight runs carry more sampling noise (JPEG, scans) than the
+    # point tolerance allows, and a chain of cubics then makes them wavy.
+    # A long run counts as straight when it stays within a length-scaled
+    # band and does not bow systematically (the RMS of a real arc is a large
+    # fraction of its sagitta, that of noise is not).
+    if _is_straight(pts, tol):
         if free_ends or _tangents_compatible(pts, t_start, t_end):
             return [Line(p0, p1)]
+    if free_ends:
+        verts = _straight_polyline(pts, tol)
+        if verts is not None:
+            return [Line(_to_pt(a), _to_pt(b)) for a, b in zip(verts[:-1], verts[1:])]
     if opts.allow_arcs and free_ends:
         arc = fit_arc(pts, w, tol * 0.9, opts.min_arc_sweep, max_radius)
         if arc is not None:

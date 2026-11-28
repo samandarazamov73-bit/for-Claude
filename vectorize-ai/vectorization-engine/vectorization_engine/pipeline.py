@@ -30,10 +30,12 @@ from image_processing import (
     segment,
 )
 
+from image_processing.chroma import restore_subsampled_chroma
+
 from .curves import finalize_interfaces, fit_all, fit_parameters
 from .graph import VectorGraph
 from .ml import registry
-from .options import ProcessingOptions
+from .options import SEGMENTATION_VERSION, ProcessingOptions
 from .recognition import apply_repeats, apply_symmetry, recognize_shapes
 from .subpixel import assign_samples, crack_samples, refine_junctions, region_pm_colors
 from .topology import build_topology
@@ -97,6 +99,7 @@ class PreparedImage:
     original_size: tuple[int, int]
     denoise_applied: str
     source_format: str
+    chroma_restored: bool = False
 
 
 @dataclass
@@ -124,7 +127,7 @@ class StageCache:
             z = np.load(path, allow_pickle=False)
             meta = json.loads(str(z["meta"]))
             a = ImageAnalysis(**meta["analysis"])
-            return PreparedImage(z["rgba"], a, meta["scale"], tuple(meta["original_size"]), meta["denoise"], meta["format"])
+            return PreparedImage(z["rgba"], a, meta["scale"], tuple(meta["original_size"]), meta["denoise"], meta["format"], bool(meta.get("chroma_restored", False)))
         except Exception:  # noqa: BLE001 - corrupt cache entries are ignored
             return None
 
@@ -135,6 +138,7 @@ class StageCache:
             "original_size": list(p.original_size),
             "denoise": p.denoise_applied,
             "format": p.source_format,
+            "chroma_restored": p.chroma_restored,
         }
         tmp = self._p(f"prep_{key}.tmp.npz")
         np.savez_compressed(tmp, rgba=p.rgba, meta=json.dumps(meta))
@@ -158,7 +162,7 @@ class StageCache:
 
 
 def _prep_key(opts: ProcessingOptions, crop) -> str:
-    raw = json.dumps({"mp": opts.max_pixels, "cp": opts.color_profile, "dn": opts.denoise, "crop": crop}, sort_keys=True)
+    raw = json.dumps({"mp": opts.max_pixels, "cp": opts.color_profile, "dn": opts.denoise, "crop": crop, "v": SEGMENTATION_VERSION}, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
 
 
@@ -171,6 +175,11 @@ def prepare(data: bytes, opts: ProcessingOptions, crop: tuple[int, int, int, int
     report("decode", 0.1, "decoding image")
     dec: DecodedImage = decode_image(data, color_profile=opts.color_profile)
     rgba = dec.rgba
+    restored = False
+    if dec.chroma_subsampling is not None:
+        # sharp colour for thin strokes (small text) of subsampled JPEGs
+        rgba = restore_subsampled_chroma(rgba, dec.chroma_subsampling)
+        restored = True
     if crop:
         x, y, w, h = crop
         x0, y0 = max(0, int(x)), max(0, int(y))
@@ -182,7 +191,7 @@ def prepare(data: bytes, opts: ProcessingOptions, crop: tuple[int, int, int, int
     report("preprocess", 0.1, "analysing image")
     pp = preprocess(rgba, max_pixels=opts.max_pixels, denoise_mode=opts.denoise, source_format=dec.source_format)
     report("preprocess", 1.0, "preprocessed")
-    return PreparedImage(pp.rgba, pp.analysis, pp.scale, (rgba.shape[1], rgba.shape[0]), pp.denoise_applied, dec.source_format)
+    return PreparedImage(pp.rgba, pp.analysis, pp.scale, (rgba.shape[1], rgba.shape[0]), pp.denoise_applied, dec.source_format, restored)
 
 
 def vectorize(
@@ -317,6 +326,7 @@ def vectorize(
         "hard_edges": params.hard_edges,
         "analysis": a.to_dict(),
         "denoise": prepared.denoise_applied,
+        "chroma_restored": prepared.chroma_restored,
         "segmentation": seg.stats,
         "validation_problems": problems[:20],
         "timings": {k: round(v, 3) for k, v in timings.items()},

@@ -127,7 +127,7 @@ def _assign(feats: np.ndarray, centers: np.ndarray, chunk: int = 200_000) -> tup
     if centers.shape[0] > 64 and feats.shape[0] > 10_000:
         from scipy.spatial import cKDTree
 
-        dist, out = cKDTree(centers).query(feats, k=1, workers=-1)
+        dist, out = cKDTree(centers).query(feats, k=1)
         return out.astype(np.int64), dist.astype(np.float64)
     out = np.empty(feats.shape[0], dtype=np.int64)
     dist = np.empty(feats.shape[0], dtype=np.float64)
@@ -574,6 +574,116 @@ def _unify_thin_lines(labels: np.ndarray, pm: np.ndarray, colors: np.ndarray, no
     return out, total
 
 
+def _consolidate_blend_colors(labels: np.ndarray, pm: np.ndarray, colors: np.ndarray, feats: np.ndarray | None = None, thr: float = 0.0, max_colors: int = 16, minor_share: float = 0.02) -> tuple[np.ndarray, int]:
+    """Remove blend colours from flat artwork (logos, icons, text).
+
+    In artwork made of a few flat colours, a rare palette colour that is a
+    mixture of two main colours – anti-aliasing, blur, the pale interior of
+    a thin stroke – or a desaturated copy of one of them (JPEG chroma loss)
+    is not a colour of the design. Left in the palette it paints small text
+    in a wrong, lighter or darker shade and breaks letters into pieces. Its
+    pixels are handed to the two main colours by coverage – measured on
+    luma where the two differ in brightness, because luma is the sharp
+    channel of compressed images – so the sub-pixel stage can then place
+    the true edge. A rare colour closer than the colour threshold ``thr``
+    to a main colour (``feats`` = CIELAB features) is a near duplicate and
+    joins it. Only applies to palettes of at most ``max_colors``."""
+    k = colors.shape[0]
+    if k < 3 or k > max_colors:
+        return labels, 0
+    opaque = labels >= 0
+    total = float(opaque.sum())
+    if total <= 0:
+        return labels, 0
+    cnt = np.bincount(labels[opaque].ravel(), minlength=k).astype(np.float64)
+    out = labels.copy()
+    merged = 0
+    if feats is not None and thr > 0:
+        # near duplicates (closer than the colour threshold) are one colour
+        # in flat artwork, whatever their share: the smaller joins the larger
+        alive = [i for i in range(k) if cnt[i] > 0]
+        pairs = sorted((float(np.linalg.norm(feats[i] - feats[j])), i, j) for x, i in enumerate(alive) for j in alive[x + 1 :])
+        target = list(range(k))
+        for dist_, i, j in pairs:
+            if dist_ >= thr:
+                break
+            while target[i] != i:
+                i = target[i]
+            while target[j] != j:
+                j = target[j]
+            if i == j:
+                continue
+            big_, small_ = (i, j) if cnt[i] >= cnt[j] else (j, i)
+            target[small_] = big_
+            cnt[big_] += cnt[small_]
+            cnt[small_] = 0
+            merged += 1
+        if merged:
+            root = np.array(target)
+            for _ in range(k):
+                root = root[root]
+            lut = np.append(root, -1)
+            out = np.where(out >= 0, lut[np.maximum(out, 0)], out)
+            labels = out.copy()
+    share = cnt / total
+    solid = colors[:, 3] >= 254
+    majors = [i for i in range(k) if share[i] >= minor_share and solid[i]]
+    if len(majors) < 2:
+        return out, merged
+    rgb = colors[:, :3].astype(np.float64)
+    lum = rgb @ np.array([0.299, 0.587, 0.114])
+
+    def chroma(c):
+        yv = float(c @ np.array([0.299, 0.587, 0.114]))
+        return np.array([(c[2] - yv) / 1.772, (c[0] - yv) / 1.402])
+
+    for c in range(k):
+        if c in majors or cnt[c] == 0 or not solid[c] or share[c] >= minor_share:
+            continue
+        best = None
+        for ia, a in enumerate(majors):
+            for b in majors[ia + 1 :]:
+                d = rgb[b] - rgb[a]
+                dd = float(d @ d)
+                if dd < 900.0:
+                    continue
+                v = rgb[c] - rgb[a]
+                t = float(v @ d) / dd
+                perp = float(np.linalg.norm(v - t * d))
+                if 0.03 <= t <= 0.97 and perp <= max(12.0, 0.15 * math.sqrt(dd)):
+                    score = perp / math.sqrt(dd)
+                    if best is None or score < best[0]:
+                        best = (score, a, b)
+                # chroma loss: luma of one main colour, chroma part-way to the other
+                for p_, q_ in ((a, b), (b, a)):
+                    if abs(lum[c] - lum[p_]) > 15.0 or abs(lum[p_] - lum[q_]) < 40.0:
+                        continue
+                    cd = chroma(rgb[q_]) - chroma(rgb[p_])
+                    cdd = float(cd @ cd)
+                    if cdd < 25.0:
+                        continue
+                    cv = chroma(rgb[c]) - chroma(rgb[p_])
+                    tc = float(cv @ cd) / cdd
+                    pc = float(np.linalg.norm(cv - tc * cd))
+                    if 0.0 <= tc <= 0.9 and pc <= 10.0:
+                        score = 0.5 * pc / math.sqrt(cdd)
+                        if best is None or score < best[0]:
+                            best = (score, a, b)
+        if best is None:
+            continue
+        _, a, b = best
+        ys, xs = np.nonzero(labels == c)
+        px = pm[ys, xs, :3].astype(np.float64)
+        if abs(lum[a] - lum[b]) >= 40.0:
+            cov = (px @ np.array([0.299, 0.587, 0.114]) - lum[b]) / (lum[a] - lum[b])
+        else:
+            d = rgb[a] - rgb[b]
+            cov = ((px - rgb[b]) @ d) / max(float(d @ d), 1e-9)
+        out[ys, xs] = np.where(cov >= 0.5, a, b)
+        merged += 1
+    return out, merged
+
+
 def _candidates(filled: np.ndarray, ys: np.ndarray, xs: np.ndarray, near: np.ndarray, offset: int) -> np.ndarray:
     """Up to four distinct nearby palette labels per pixel plus the globally
     nearest colour. Nearby labels come from the nearest-flat-pixel map sampled
@@ -649,6 +759,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
         sm[..., ch] = cv2.GaussianBlur(np.ascontiguousarray(feats[..., ch]) * fm, (0, 0), sig)
     sm /= np.maximum(den, 1e-6)[..., None]
     flat_feats_smooth = sm[flat].astype(np.float64)
+    flat_feats_raw = feats[flat].astype(np.float64)
     del sm, den
 
     min_region = opts.min_region_px if opts.min_region_px > 0 else float(np.clip(2.0 + 0.8 * noise_sigma, 2.0, 12.0))
@@ -680,6 +791,14 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
 
         labels = np.full((h, w), tidx, dtype=np.int64)
         flat_lab, _ = _assign(flat_feats_smooth, centers)
+        # The smoothing above can reach across a thin structure (a 4 px bar
+        # between two white slots of a small "E" becomes pinkish and then
+        # white). Where the pixel's own colour is clearly closer to another
+        # palette colour, its own colour wins.
+        own_lab, own_d = _assign(flat_feats_raw, centers)
+        d_smooth = np.sqrt(((flat_feats_raw - centers[flat_lab]) ** 2).sum(1))
+        wrong = (flat_lab != own_lab) & (d_smooth > np.maximum(2.0 * thr, own_d + thr))
+        flat_lab = np.where(wrong, own_lab, flat_lab)
         labels[flat] = flat_lab
         seeds = flat | transparent
         nonseed = ~seeds
@@ -738,6 +857,10 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     extended = 0
     if k and opts.thin_lines:
         labels, extended = _unify_thin_lines(labels, pm, colors, noise_sigma, compressed)
+    blends = 0
+    if k and not opts.palette and float(flat.mean()) >= 0.85:
+        # flat artwork: blend colours are anti-aliasing, not design colours
+        labels, blends = _consolidate_blend_colors(labels, pm, colors, centers, thr)
 
     # ---- custom palette snapping ----------------------------------------
     out_colors = np.clip(colors + 0.5, 0, 255).astype(np.int64) if k else np.zeros((0, 4), np.int64)
@@ -816,6 +939,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
         "thin_regions_absorbed": int(thin_absorbed),
         "edge_bands_absorbed": int(halos),
         "thin_line_pixels": int(extended),
+        "blend_colors_removed": int(blends),
         "colors_added_second_pass": int(added),
         "compressed_source": bool(compressed),
     }
