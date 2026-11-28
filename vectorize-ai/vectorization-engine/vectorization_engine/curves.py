@@ -13,6 +13,13 @@ from .graph import VectorGraph
 from .options import ProcessingOptions
 
 
+# Detail levels (normal, high, max, photo): curve tolerance and fairing scale,
+# and how strongly weak (texture) boundaries are simplified.
+DETAIL_TOL = (1.0, 0.85, 0.7, 0.6)
+DETAIL_SIGMA = (1.0, 1.0, 1.0, 0.6)
+DETAIL_RELAX = (1.0, 1.0, 1.0, 0.3)
+
+
 @dataclass
 class FitParams:
     tolerance: float
@@ -20,18 +27,21 @@ class FitParams:
     curve: CurveOptions
     corner: CornerOptions
     hard_edges: bool
+    relax: float = 1.0  # how much weak boundaries are simplified (0..1)
 
 
 def fit_parameters(opts: ProcessingOptions, soft_edge_ratio: float, compressed: bool, edge_width: float) -> FitParams:
     hard = soft_edge_ratio < 0.12
+    # JPEG noise in edge positions still needs the "max" amount of fairing
+    lv = min(opts.detail_level, 2) if compressed else opts.detail_level
     if opts.fit_tolerance > 0:
         tol = float(opts.fit_tolerance)
     else:
         tol = 0.75 if hard else 0.5
         if compressed:
             tol += 0.15
-        tol *= (1.0, 0.85, 0.7)[opts.detail_level]
-    sigma = 1.6 if hard else (1.2 if compressed else 0.9)
+        tol *= DETAIL_TOL[lv]
+    sigma = (1.6 if hard else (1.2 if compressed else 0.9)) * DETAIL_SIGMA[lv]
     scale = max(2.0, min(4.0, 1.1 * edge_width + 0.9)) + (0.5 if hard else 0.0)
     curve = CurveOptions(
         tolerance=tol,
@@ -40,23 +50,24 @@ def fit_parameters(opts: ProcessingOptions, soft_edge_ratio: float, compressed: 
         allow_arcs=opts.curves_arcs,
     )
     corner = CornerOptions(mode=opts.corners_mode, strength=opts.corners_strength, scale=scale)
-    return FitParams(tol, sigma, curve, corner, hard)
+    return FitParams(tol, sigma, curve, corner, hard, DETAIL_RELAX[lv])
 
 
 def _weakness(contrast: float) -> float:
     return float(np.clip((70.0 - contrast) / 70.0, 0.0, 1.0))
 
 
-def adaptive_tolerance(base: float, contrast: float) -> float:
+def adaptive_tolerance(base: float, contrast: float, relax: float = 1.0) -> float:
     """Weak (low-contrast) boundaries are simplified more aggressively."""
-    return base * (1.0 + 0.9 * _weakness(contrast))
+    return base * (1.0 + 0.9 * relax * _weakness(contrast))
 
 
-def adaptive_sigma(base: float, contrast: float) -> float:
+def adaptive_sigma(base: float, contrast: float, relax: float = 1.0) -> float:
     """Low-contrast boundaries are iso-lines of smooth shading: their pixel
     position is noisy (a small colour error moves them far), so they are
-    faired more strongly; strong edges keep the base smoothing."""
-    return base * (1.0 + 1.6 * _weakness(contrast))
+    faired more strongly; strong edges keep the base smoothing. At high
+    detail levels (``relax`` < 1) the texture boundaries keep their shape."""
+    return base * (1.0 + 1.6 * relax * _weakness(contrast))
 
 
 def fit_interface(f, g: VectorGraph, p: FitParams, max_radius: float) -> None:
@@ -65,8 +76,8 @@ def fit_interface(f, g: VectorGraph, p: FitParams, max_radius: float) -> None:
         f.segments = [Line(a, b)]
         return
     pts, w = f.samples, f.weights
-    tol = adaptive_tolerance(p.tolerance, f.contrast)
-    sigma = adaptive_sigma(p.sigma, f.contrast)
+    tol = adaptive_tolerance(p.tolerance, f.contrast, p.relax)
+    sigma = adaptive_sigma(p.sigma, f.contrast, p.relax)
     copts = CurveOptions(tolerance=tol, allow_cubic=p.curve.allow_cubic, allow_quadratic=p.curve.allow_quadratic, allow_arcs=p.curve.allow_arcs)
     if f.closed:
         if pts.shape[0] < 3:

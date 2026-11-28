@@ -100,6 +100,7 @@ def test_detail_option_is_validated():
     from vectorization_engine import OptionError, ProcessingOptions, parse_public
 
     assert parse_public({"processing.detail": "max"}).detail_level == 2
+    assert parse_public({"processing.detail": "photo"}).detail_level == 3
     assert ProcessingOptions().detail_level == 0
     with pytest.raises(OptionError):
         parse_public({"processing.detail": "ultra"})
@@ -124,7 +125,7 @@ def test_higher_detail_is_closer_to_the_source():
 
     img = photo_like(360, 260, seed=7)
     errs, shapes = [], []
-    for level in ("normal", "max"):
+    for level in ("normal", "max", "photo"):
         res = vectorize(png_bytes(img), ProcessingOptions(detail=level))
         ren = render_graph(res.graph)
         errs.append(np.abs(ren[..., :3].astype(int) - res.prepared.rgba[..., :3].astype(int)).mean())
@@ -133,4 +134,5 @@ def test_higher_detail_is_closer_to_the_source():
         for sh in res.graph.drawable_shapes():
             assert sh.bbox[0] > -2 and sh.bbox[1] > -2 and sh.bbox[2] < 362 and sh.bbox[3] < 262
     assert errs[1] < 0.85 * errs[0]
-    assert shapes[1] > shapes[0]
+    assert errs[2] < errs[1]  # photo is the closest
+    assert shapes[0] < shapes[1] < shapes[2]

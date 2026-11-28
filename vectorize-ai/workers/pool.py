@@ -291,7 +291,7 @@ class JobManager:
             fut = loop.run_in_executor(self._executor, run_vectorize_job, spec, self.progress_q, self.cancel_flags)
             # higher detail levels legitimately take longer
             detail = str((spec.get("options") or {}).get("detail", "normal"))
-            budget = self.timeout * {"high": 1.5, "max": 3.0}.get(detail, 1.0)
+            budget = self.timeout * {"high": 1.5, "max": 3.0, "photo": 6.0}.get(detail, 1.0)
             try:
                 result = await asyncio.wait_for(asyncio.shield(fut), budget)
             except asyncio.TimeoutError:

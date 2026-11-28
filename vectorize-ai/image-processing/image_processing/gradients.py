@@ -37,6 +37,14 @@ _MIDX = {m: i for i, m in enumerate(_MOMENTS)}
 _GIDX = np.array([[_MIDX[(a[0] + b[0], a[1] + b[1])] for b in _BASIS] for a in _BASIS])
 _RIDGE = 1e-7
 
+# Detail levels (normal, high, max, photo): merge tolerance scale and the
+# per-region "band" paints (minimum size, how many, required gain, time cap).
+DETAIL_TAU = (1.0, 0.8, 0.65, 0.5)
+DETAIL_BAND_MIN_N = (80, 30, 12, 6)
+DETAIL_BAND_CAP = (600, 4000, 12000, 40000)
+DETAIL_BAND_GAIN = (0.85, 0.9, 0.92, 0.94)
+DETAIL_BAND_TIME = (10.0, 30.0, 60.0, 150.0)
+
 
 @dataclass
 class GradientStats:
@@ -328,7 +336,7 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
     """``detail`` 0 / 1 / 2 (normal / high / max): higher levels merge less
     (tighter tolerances) and give almost every remaining region its own
     gradient, approaching the source at the cost of more paints."""
-    detail = int(min(max(detail, 0), 2))
+    detail = int(min(max(detail, 0), len(DETAIL_TAU) - 1))
     regions = seg.regions
     region_color = seg.region_color
     h, w = regions.shape
@@ -363,8 +371,8 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
     tau_abs = min(12.0, 3.2 + 1.3 * noise_sigma + (2.0 if compressed else 0.0))
     tau_inc = min(5.0, 1.1 + 0.45 * noise_sigma + (0.8 if compressed else 0.0))
     if detail:
-        tau_abs *= (1.0, 0.8, 0.65)[detail]
-        tau_inc *= (1.0, 0.8, 0.65)[detail]
+        tau_abs *= DETAIL_TAU[detail]
+        tau_inc *= DETAIL_TAU[detail]
     tau_fin = tau_abs * 1.35
     sse = np.zeros(nreg)
     good = np.nonzero(opaque)[0]
@@ -634,15 +642,15 @@ def merge_gradients(rgba: np.ndarray, seg: Segmentation, *, noise_sigma: float =
             all_len[r_] = all_len.get(r_, 0.0) + tl
     # At higher detail levels every region qualifies, not only soft bands:
     # shading inside objects (droplets, leaves, glass) is then reproduced.
-    band_min_n = (80, 30, 12)[detail]
-    band_cap = (600, 4000, 12000)[detail]
-    band_gain = (0.85, 0.9, 0.92)[detail]
+    band_min_n = DETAIL_BAND_MIN_N[detail]
+    band_cap = DETAIL_BAND_CAP[detail]
+    band_gain = DETAIL_BAND_GAIN[detail]
     band_cands = [r for r in pix if r not in paints and n[r] >= band_min_n and all_len.get(r, 0.0) > 0 and (detail > 0 or soft_len.get(r, 0.0) >= 0.5 * all_len[r])]
     band_cands.sort(key=lambda r: -n[r])
     t_band = _time.perf_counter()
     band_added = 0
     for i, r in enumerate(band_cands[:band_cap]):
-        if _time.perf_counter() - t_band > (10.0, 30.0, 60.0)[detail]:  # safety net only
+        if _time.perf_counter() - t_band > DETAIL_BAND_TIME[detail]:  # safety net only
             break
         sel = pix[r]
         fr = flat_rms(r)

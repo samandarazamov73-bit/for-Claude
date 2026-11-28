@@ -42,7 +42,22 @@ class SegmentationOptions:
     min_region_px: float = 0.0  # 0 = automatic
     color_threshold: float = 0.0  # dE76; 0 = automatic
     thin_lines: bool = True  # continue thin lines into partially covered pixels
-    detail: int = 0  # 0 normal, 1 high, 2 max: finer colours, smaller regions
+    detail: int = 0  # 0 normal, 1 high, 2 max, 3 photo: finer colours, smaller regions
+
+
+# Detail levels (normal, high, max, photo): colour threshold scale and floor,
+# minimum region scale, and colour tolerance for absorbing thin bands.
+DETAIL_THR = (1.0, 0.72, 0.5, 0.32)
+DETAIL_THR_FLOOR = (0.0, 2.5, 2.5, 1.8)
+DETAIL_MIN_REGION = (1.0, 0.6, 0.35, 0.2)
+DETAIL_THIN_DE = (1.0, 0.8, 0.6, 0.45)
+# flat-pixel gradient limit, preference for two-colour (edge) explanations,
+# and the residual above which colours are added in the second pass
+DETAIL_FLAT = (1.0, 1.0, 1.0, 1.0)
+DETAIL_PAIR = (1.0, 1.0, 1.0, 3.0)
+DETAIL_TRES = (1.0, 1.0, 1.0, 0.3)
+# smoothing of flat-pixel colours before labelling (noise vs fine texture)
+DETAIL_FEAT_SIGMA = (1.0, 1.0, 1.0, 0.5)
 
 
 @dataclass
@@ -107,6 +122,13 @@ def _leader_cluster(feats: np.ndarray, weights: np.ndarray, thr: float, max_cent
 
 
 def _assign(feats: np.ndarray, centers: np.ndarray, chunk: int = 200_000) -> tuple[np.ndarray, np.ndarray]:
+    """Nearest centre for every feature vector (exact). Large palettes use a
+    k-d tree: brute force costs N·K, which dominates at high detail levels."""
+    if centers.shape[0] > 64 and feats.shape[0] > 10_000:
+        from scipy.spatial import cKDTree
+
+        dist, out = cKDTree(centers).query(feats, k=1, workers=-1)
+        return out.astype(np.int64), dist.astype(np.float64)
     out = np.empty(feats.shape[0], dtype=np.int64)
     dist = np.empty(feats.shape[0], dtype=np.float64)
     c2 = (centers ** 2).sum(1)
@@ -362,70 +384,79 @@ def _absorb_edge_bands(labels: np.ndarray, label_feats: np.ndarray, label_rgb: n
     src, dst, ln = src[sel], dst[sel], ln[sel]
     if src.size == 0:
         return labels, 0
-    lab = label_feats[:, :3]
-    alpha = label_feats[:, 3]
-    order = np.argsort(src, kind="stable")
-    src, dst, ln = src[order], dst[order], ln[order]
-    starts = np.flatnonzero(np.r_[True, src[1:] != src[:-1]])
-    ends = np.r_[starts[1:], src.shape[0]]
+    # border length per (thin region, neighbouring colour), aggregated in one
+    # vectorised pass; the per-region decisions below use plain Python
+    # scalars (numpy scalar arithmetic would dominate the run time when there
+    # are many thin regions, as at high detail levels)
+    kc = int(label_feats.shape[0]) + 1
+    k2, inv2 = np.unique(src * kc + region_color[dst].astype(np.int64), return_inverse=True)
+    clen_all = np.bincount(inv2.ravel(), weights=ln)
+    r_of, c_of, l_of = (k2 // kc).tolist(), (k2 % kc).tolist(), clen_all.tolist()
+    lab = label_feats[:, :3].tolist()
+    alpha = label_feats[:, 3].tolist()
+    rgb = label_rgb.tolist()
+    perim_l, width_l, rc = perim.tolist(), width.tolist(), region_color.tolist()
+
+    def dist(u, v):
+        return math.sqrt(sum((x - y) * (x - y) for x, y in zip(u, v)))
+
     lut = region_color.astype(np.int64).copy()
     merged = 0
-    for s0, e0 in zip(starts.tolist(), ends.tolist()):
-        r = int(src[s0])
-        cr = int(region_color[r])
-        nb, nl = dst[s0:e0], ln[s0:e0]
-        cols = region_color[nb]
-        tot = float(perim[r])
-        # border length per neighbouring colour
-        ucol, inv = np.unique(cols, return_inverse=True)
-        clen = np.bincount(inv, weights=nl)
-        big = clen >= 0.2 * tot
-        if big.sum() < 2:
+    i, n_rows = 0, len(r_of)
+    while i < n_rows:
+        r = r_of[i]
+        j = i
+        while j < n_rows and r_of[j] == r:
+            j += 1
+        ucol, clen = c_of[i:j], l_of[i:j]
+        i = j
+        cr = rc[r]
+        tot = float(perim_l[r])
+        wr = width_l[r]
+        big = [k for k in range(len(ucol)) if clen[k] >= 0.2 * tot]
+        if len(big) < 2:
             # *enclosed strips*: a one-pixel line inside a single shape that
             # differs only moderately from it (compression ringing parallel
             # to an edge) belongs to that shape
-            ia = int(np.argmax(clen))
-            ca = int(ucol[ia])
-            if width[r] <= aa_width and clen[ia] >= 0.8 * tot and abs(alpha[ca] - alpha[cr]) <= 1e-6:
-                if float(np.sqrt(((lab[cr] - lab[ca]) ** 2).sum())) <= de_enclosed:
-                    lut[r] = ca
-                    merged += 1
+            ia = max(range(len(clen)), key=lambda k: clen[k])
+            ca = ucol[ia]
+            if wr <= aa_width and clen[ia] >= 0.8 * tot and abs(alpha[ca] - alpha[cr]) <= 1e-6 and dist(lab[cr], lab[ca]) <= de_enclosed:
+                lut[r] = ca
+                merged += 1
             continue
         best = None
-        if width[r] <= aa_width:
-            for ia in np.flatnonzero(big):
-                for ib in np.flatnonzero(big):
-                    if ib <= ia:
-                        continue
-                    ca, cb = int(ucol[ia]), int(ucol[ib])
-                    d = label_rgb[cb] - label_rgb[ca]
-                    dd = float((d * d).sum())
+        if wr <= aa_width:
+            for x, ia in enumerate(big):
+                for ib in big[x + 1 :]:
+                    ca, cb = ucol[ia], ucol[ib]
+                    d = [q - p_ for q, p_ in zip(rgb[cb], rgb[ca])]
+                    dd = sum(v * v for v in d)
                     if dd < 900.0:  # A and B too similar to call R a mixture
                         continue
-                    v = label_rgb[cr] - label_rgb[ca]
-                    t = float((v * d).sum()) / dd
-                    perp = float(np.sqrt(((v - t * d) ** 2).sum()))
+                    v = [q - p_ for q, p_ in zip(rgb[cr], rgb[ca])]
+                    t = sum(vv * dv for vv, dv in zip(v, d)) / dd
+                    perp = math.sqrt(sum((vv - t * dv) ** 2 for vv, dv in zip(v, d)))
                     if -0.05 <= t <= 1.05 and perp <= max(12.0, 0.15 * math.sqrt(dd)):
                         score = perp / math.sqrt(dd) - 1.0  # prefer mixtures over halos
                         if best is None or score < best[0]:
                             best = (score, ca if t < 0.5 else cb)
-        for ia in np.flatnonzero(big):
-            ca = int(ucol[ia])
+        for ia in big:
+            ca = ucol[ia]
             if abs(alpha[ca] - alpha[cr]) > 1e-6:
                 continue
-            de_ra = float(np.sqrt(((lab[cr] - lab[ca]) ** 2).sum()))
+            de_ra = dist(lab[cr], lab[ca])
             if de_ra > de_max:
                 continue
-            for ib in np.flatnonzero(big):
+            for ib in big:
                 if ib == ia:
                     continue
-                cb = int(ucol[ib])
-                de_ab = float(np.sqrt(((lab[ca] - lab[cb]) ** 2).sum()))
-                dl_r = float(lab[cr, 0] - lab[ca, 0])
-                dl_b = float(lab[cb, 0] - lab[ca, 0])
+                cb = ucol[ib]
+                de_ab = dist(lab[ca], lab[cb])
+                dl_r = lab[cr][0] - lab[ca][0]
+                dl_b = lab[cb][0] - lab[ca][0]
                 if dl_r * dl_b >= 0 or abs(dl_r) < 0.5 * de_ra:
                     continue  # not an overshoot of A away from B
-                if de_ra > ratio * de_ab or (width[r] >= max_width and de_ra > 0.15 * de_ab):
+                if de_ra > ratio * de_ab or (wr >= max_width and de_ra > 0.15 * de_ab):
                     continue
                 score = de_ra / max(de_ab, 1e-6)
                 if best is None or score < best[0]:
@@ -577,7 +608,14 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
 
     # ---- flat pixels ----------------------------------------------------
     grad = _gradient(pm)
-    t_flat = max(8.0 if compressed else 5.0, 2.5 * noise_sigma)
+    lvl = int(min(max(opts.detail, 0), len(DETAIL_THR) - 1))
+    # Noise-sensitive settings stop at "max" for JPEG sources: finer ones
+    # would reproduce compression artefacts as detail.
+    lvl_n = min(lvl, 2) if compressed else lvl
+    # At higher detail levels smooth shading counts as "flat" too: its pixels
+    # then take their own palette colour instead of being treated as an
+    # anti-aliased mixture of two neighbours.
+    t_flat = max(8.0 if compressed else 5.0, 2.5 * noise_sigma) * DETAIL_FLAT[lvl_n]
     flat = (grad < t_flat) & ~transparent
     if flat.sum() < max(16, npx * 0.002):  # almost no flat area: fall back
         flat = (grad <= np.percentile(grad[~transparent], 30) if (~transparent).any() else flat) & ~transparent
@@ -586,8 +624,8 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     auto_thr = float(np.clip(5.5 + 2.5 * lab_noise, 5.5, 16.0))
     if compressed:
         auto_thr = max(auto_thr, 9.0)
-    if opts.detail:
-        auto_thr = max(2.5, auto_thr * (0.72 if opts.detail == 1 else 0.5))
+    if lvl:
+        auto_thr = max(DETAIL_THR_FLOOR[lvl_n], auto_thr * DETAIL_THR[lvl_n])
     thr = opts.color_threshold if opts.color_threshold > 0 else auto_thr
     min_support = max(3.0, npx * 4e-6)
 
@@ -604,7 +642,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     # lines between neighbouring gradient bands ragged, and edges are not
     # blurred because edge pixels carry zero weight.
     fm = flat.astype(np.float32)
-    sig = (3.2 if compressed else 1.2) + 0.25 * min(noise_sigma, 8.0)
+    sig = ((3.2 if compressed else 1.2) + 0.25 * min(noise_sigma, 8.0)) * DETAIL_FEAT_SIGMA[lvl_n]
     den = cv2.GaussianBlur(fm, (0, 0), sig)
     sm = np.empty_like(feats)
     for ch in range(feats.shape[2]):
@@ -616,8 +654,8 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     min_region = opts.min_region_px if opts.min_region_px > 0 else float(np.clip(2.0 + 0.8 * noise_sigma, 2.0, 12.0))
     if compressed and opts.min_region_px <= 0:
         min_region = max(min_region, 5.0)
-    if opts.detail and opts.min_region_px <= 0:
-        min_region = max(1.0, min_region * (0.6 if opts.detail == 1 else 0.35))
+    if lvl and opts.min_region_px <= 0:
+        min_region = max(1.0, min_region * DETAIL_MIN_REGION[lvl_n])
     opaque = ~transparent
     added = 0
     labels = np.full((h, w), TRANSPARENT, dtype=np.int64)
@@ -654,7 +692,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
             ys, xs = np.nonzero(nonseed)
             near, _ = _assign(feats[ys, xs].astype(np.float64), centers)
             cand = _candidates(filled, ys, xs, near, offset)
-            lab, resid = _mixture_assign(pm[ys, xs], cand, pal_pm, pair_penalty=2.0 + 0.5 * noise_sigma)
+            lab, resid = _mixture_assign(pm[ys, xs], cand, pal_pm, pair_penalty=(2.0 + 0.5 * noise_sigma) * DETAIL_PAIR[lvl_n])
             labels[ys, xs] = lab
         else:
             ys = xs = np.zeros(0, dtype=np.int64)
@@ -664,7 +702,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
         if pass_no == 1 or ys.shape[0] == 0:
             break
         # ---- second pass: colours no palette mixture can explain --------
-        t_res = max(40.0 + 4.0 * noise_sigma, 6.0 * float(np.median(resid)))
+        t_res = max(40.0 + 4.0 * noise_sigma, 6.0 * float(np.median(resid))) * DETAIL_TRES[lvl_n]
         if compressed:
             t_res = max(t_res, 70.0)
         bad = resid > t_res
@@ -726,7 +764,7 @@ def segment(rgba: np.ndarray, opts: SegmentationOptions, *, noise_sigma: float =
     labels, speckles = _remove_speckles(labels, min_region)
     thin_absorbed = halos = 0
     if k:
-        de_limit = (24.0 if compressed else 9.0) * (1.0, 0.8, 0.6)[min(opts.detail, 2)]
+        de_limit = (24.0 if compressed else 9.0) * DETAIL_THIN_DE[lvl_n]
         for _ in range(2):
             labels, n_abs = _absorb_thin_regions(labels, centers, de_limit, 3.0 if compressed else 2.2)
             thin_absorbed += n_abs

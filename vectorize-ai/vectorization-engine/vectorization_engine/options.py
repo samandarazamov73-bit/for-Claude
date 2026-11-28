@@ -13,9 +13,9 @@ from typing import Any
 from image_processing import DEFAULT_MAX_PIXELS, MAX_WORKING_PIXELS, parse_palette
 
 # bump when stages 1-3 change their output, so on-disk caches are not reused
-SEGMENTATION_VERSION = 3
+SEGMENTATION_VERSION = 4
 
-DETAIL_LEVELS = {"normal": 0, "high": 1, "max": 2}
+DETAIL_LEVELS = {"normal": 0, "high": 1, "max": 2, "photo": 3}
 
 
 @dataclass
@@ -26,7 +26,7 @@ class ProcessingOptions:
     max_colors: int = 0
     palette: str = ""
     color_threshold: float = 0.0
-    detail: str = "normal"  # normal | high | max
+    detail: str = "normal"  # normal | high | max | photo
     gradients: bool = True
     min_area_px: float = 0.0
     fit_tolerance: float = 0.0
@@ -51,7 +51,7 @@ class ProcessingOptions:
 
     @property
     def detail_level(self) -> int:
-        """0 = normal, 1 = high, 2 = max (photo-like fidelity)."""
+        """0 = normal, 1 = high, 2 = max, 3 = photo (closest to the source)."""
         return DETAIL_LEVELS.get(self.detail, 0)
 
     def enabled_shapes(self) -> set[str]:
@@ -96,7 +96,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     OptionSpec("processing.max_colors", "max_colors", "integer", "Maximum number of colours (0 = determined automatically).", 0, 256, group="palette"),
     OptionSpec("processing.palette", "palette", "string", "Custom palette: '#RRGGBB[AA] [-> #RRGGBB[AA]] [~ tolerance]' entries separated by ';' (max 1024).", group="palette"),
     OptionSpec("processing.color_threshold", "color_threshold", "number", "Colour merge threshold in CIE76 dE (0 = automatic, noise adaptive).", 0, 60, group="palette"),
-    OptionSpec("processing.detail", "detail", "enum", "Fidelity level. 'normal' gives clean, editable artwork; 'high' and 'max' keep finer colour steps, smaller details and shade almost every region with its own gradient, getting close to the original at the cost of more shapes and a larger file.", enum=("normal", "high", "max"), group="palette"),
+    OptionSpec("processing.detail", "detail", "enum", "Fidelity level. 'normal' gives clean, editable artwork; 'high' and 'max' keep finer colour steps, smaller details and shade almost every region with its own gradient; 'photo' goes furthest (finest colours, texture-level detail, unsmoothed texture boundaries) and looks closest to the original, at the cost of many more shapes, a larger file and a longer run.", enum=("normal", "high", "max", "photo"), group="palette"),
     OptionSpec("processing.gradients", "gradients", "boolean", "Represent smooth shading with linear and radial gradients instead of bands of flat colour.", group="palette"),
     OptionSpec("processing.min_area_px", "min_area_px", "number", "Regions smaller than this many pixels are merged into neighbours (0 = automatic).", 0, 10000, group="geometry"),
     OptionSpec("processing.fit_tolerance", "fit_tolerance", "number", "Maximum curve deviation in pixels (0 = automatic). Larger = fewer anchor points.", 0, 5, group="geometry"),
