@@ -273,7 +273,7 @@ def test_small_letters_keep_square_corners():
     g = vectorize(_jpeg(img[..., :3].copy(), quality=85)).graph
     e_shape = None
     for sh in g.drawable_shapes():
-        x0, y0, x1, y1 = sh.bbox
+        x0, y0, x1, y1 = (v / g.scale for v in sh.bbox)
         if x0 < 12 and x1 < 30 and y1 < 36 and (x1 - x0) > 15:
             e_shape = sh
     assert e_shape is not None
@@ -286,9 +286,40 @@ def test_small_letters_keep_square_corners():
 def test_small_round_shapes_stay_round():
     img = _small_glyph_scene()
     g = vectorize(_jpeg(img[..., :3].copy(), quality=85)).graph
-    dot = [sh for sh in g.drawable_shapes() if sh.bbox[0] > 90 and sh.bbox[2] < 110]
+    dot = [sh for sh in g.drawable_shapes() if sh.bbox[0] / g.scale > 90 and sh.bbox[2] / g.scale < 110]
     assert dot
     for sh in dot:
         kinds = {s.kind for iid, _ in sh.loops[0] for s in g.interfaces[iid].segments}
         prim = sh.primitive.get("kind") if isinstance(sh.primitive, dict) else None
         assert prim in ("circle", "ellipse") or kinds - {"L"}, kinds  # not a polygon
+
+
+def test_small_logo_text_is_traced_at_double_resolution():
+    import re
+
+    from export_engine import ExportOptions, export
+
+    rgb = _red_text_logo()
+    res = vectorize(_jpeg(rgb))
+    g = res.graph
+    assert g.stats["segmentation"].get("upscaled") == 2 and g.scale == 2.0
+    assert tuple(g.original_size) == (420, 150)
+    # exports keep the size of the uploaded image
+    svg = export(g, ExportOptions(file_format="svg")).decode()
+    assert re.search(r'width="420(\.0+)?(px)?"', svg) and re.search(r'height="150(\.0+)?(px)?"', svg)
+    ren = render_graph(g)[..., :3].astype(int)
+    assert ren.shape[:2] == (150, 420)
+    text = (slice(95, 140), slice(15, 260))
+    # "SINCE 2013" (strokes ~4 px) follows the clean letters closely
+    assert np.abs(ren[text] - rgb[text].astype(int)).mean() < 2.7
+
+
+def test_photos_are_not_upscaled():
+    yy, xx = np.mgrid[0:120, 0:160]
+    img = np.zeros((120, 160, 4), np.uint8)
+    img[..., 0] = (40 + xx * 1.2).astype(np.uint8)
+    img[..., 1] = (60 + yy * 1.1).astype(np.uint8)
+    img[..., 2] = (200 - xx * 0.5 - yy * 0.4).astype(np.uint8)
+    img[..., 3] = 255
+    g = vectorize(png_bytes(img)).graph
+    assert "upscaled" not in g.stats["segmentation"] and g.scale == 1.0

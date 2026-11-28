@@ -109,7 +109,8 @@ class JobManager:
         self._stop.set()
         for t in self._tasks:
             t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._tasks:
+            await asyncio.wait(self._tasks, timeout=10)
         if self._executor:
             self._executor.shutdown(wait=False, cancel_futures=True)
         if self._mp_manager:
@@ -127,7 +128,34 @@ class JobManager:
                 job.finished_at = utcnow()
 
     # ------------------------------------------------------------------
+    def _on_loop(self, fn, *args):
+        """Run ``fn`` on the event loop thread.
+
+        Sync FastAPI handlers run in a thread pool, but asyncio queues and
+        events are not thread-safe: touching them off-loop can leave a waiting
+        consumer un-woken (or un-cancellable at shutdown)."""
+        loop = self._loop
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if loop is None or running is loop or loop.is_closed():
+            return fn(*args)
+        done: cf.Future = cf.Future()
+
+        def call():
+            try:
+                done.set_result(fn(*args))
+            except BaseException as exc:  # noqa: BLE001
+                done.set_exception(exc)
+
+        loop.call_soon_threadsafe(call)
+        return done.result(timeout=30)
+
     def submit(self, job_id: str, token: str, options: dict, crop: list | None) -> LiveJob:
+        return self._on_loop(self._submit, job_id, token, options, crop)
+
+    def _submit(self, job_id: str, token: str, options: dict, crop: list | None) -> LiveJob:
         if self._queue is None:
             raise RuntimeError("job manager not started")
         if self._queue.qsize() >= self.max_queue:
@@ -142,6 +170,9 @@ class JobManager:
         return live
 
     def cancel(self, job_id: str) -> bool:
+        return self._on_loop(self._cancel, job_id)
+
+    def _cancel(self, job_id: str) -> bool:
         live = self.jobs.get(job_id)
         if live is None or live.status in TERMINAL:
             return False

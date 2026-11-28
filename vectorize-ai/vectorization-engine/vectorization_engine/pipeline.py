@@ -194,10 +194,29 @@ def prepare(data: bytes, opts: ProcessingOptions, crop: tuple[int, int, int, int
     return PreparedImage(pp.rgba, pp.analysis, pp.scale, (rgba.shape[1], rgba.shape[0]), pp.denoise_applied, dec.source_format, restored)
 
 
+# Flat artwork (logos, lettering) is traced at twice the resolution when the
+# result stays below this many working pixels: strokes of small text are
+# only two or three pixels wide, too few for clean outlines and corners.
+LOGO_UPSCALE = 2
+LOGO_UPSCALE_MAX_PIXELS = 6_400_000
+
+
+def _upscaled(prepared: PreparedImage, f: int) -> PreparedImage:
+    import cv2
+
+    h, w = prepared.rgba.shape[:2]
+    work = cv2.resize(prepared.rgba.astype(np.float32), (w * f, h * f), interpolation=cv2.INTER_CUBIC)
+    work = np.clip(work + 0.5, 0, 255).astype(np.uint8)
+    analysis = replace(prepared.analysis, edge_width=prepared.analysis.edge_width * f)
+    return replace(prepared, rgba=work, analysis=analysis, scale=prepared.scale * f)
+
+
 def _is_flat_artwork(seg: Segmentation, limit: int = 16) -> bool:
     """Logo-like input: almost all pixels flat, only a few colours, and those
     colours clearly distinct. (The bands of a smooth ramp are flat pixel by
     pixel too, but their colours are only a threshold apart.)"""
+    if seg.fills:  # smooth gradients were found: not flat artwork
+        return False
     if float(seg.stats.get("flat_ratio", 0.0)) < 0.85 or not 0 < len(seg.palette) <= limit:
         return False
     from image_processing.color import rgba_features
@@ -246,10 +265,19 @@ def vectorize(
     t = time.perf_counter()
     skey = _seg_key(opts, crop_l)
     seg = cache.load_segmentation(skey) if cache else None
+    # the result reports the decoded image; an upscaled copy is internal
+    source_prepared = prepared
+    if seg is not None and int(seg.stats.get("upscaled", 1)) > 1:
+        prepared = _upscaled(prepared, int(seg.stats["upscaled"]))
+        a = prepared.analysis
     if seg is None:
         model = registry.segmentation()
 
-        def run_segmentation(level: int) -> Segmentation:
+        def run_segmentation(level: int, lo: float = 0.0, hi: float = 0.55) -> Segmentation:
+            # progress share of this pass within the segmentation stage
+            def sp(f: float, msg: str = "") -> None:
+                rep("segmentation", lo + (hi - lo) * f, msg)
+
             sopts = SegmentationOptions(
                 max_colors=opts.max_colors,
                 palette=parse_palette(opts.palette) if opts.palette else None,
@@ -263,7 +291,7 @@ def vectorize(
                 noise_sigma=a.noise_sigma,
                 edge_width=a.edge_width,
                 compressed=a.compressed,
-                progress=lambda f, msg="": rep("segmentation", 0.8 * f, msg),
+                progress=lambda f, msg="": sp(0.8 * f, msg),
             )
             # flat artwork keeps flat fills: in a logo a "gradient" is only
             # compression noise across a solid colour
@@ -274,7 +302,7 @@ def vectorize(
                     noise_sigma=a.noise_sigma,
                     compressed=a.compressed,
                     detail=level,
-                    progress=lambda f, msg="": rep("segmentation", 0.8 + 0.2 * f, msg),
+                    progress=lambda f, msg="": sp(0.8 + 0.2 * f, msg),
                 )
             return out
 
@@ -282,9 +310,22 @@ def vectorize(
         if opts.detail_level > 0 and _is_flat_artwork(seg, limit=24):
             # Logos and lettering: finer colour steps only pick up
             # compression noise; the "normal" segmentation is the best one.
-            base = run_segmentation(0)
+            base = run_segmentation(0, 0.55, 0.7)
             if _is_flat_artwork(base):
                 seg = base
+        h0, w0 = prepared.rgba.shape[:2]
+        if _is_flat_artwork(seg) and prepared.scale >= 1.0 and h0 * w0 * LOGO_UPSCALE**2 <= LOGO_UPSCALE_MAX_PIXELS:
+            rep("segmentation", 0.7, "tracing artwork at double resolution")
+            base_prepared = prepared
+            prepared = _upscaled(prepared, LOGO_UPSCALE)
+            a = prepared.analysis
+            up = run_segmentation(0, 0.7, 1.0)
+            if _is_flat_artwork(up, limit=24):
+                seg = up
+                seg.stats["upscaled"] = LOGO_UPSCALE
+            else:  # keep the result the decision was based on
+                prepared = base_prepared
+                a = prepared.analysis
         if cache:
             cache.save_segmentation(skey, seg)
     else:
@@ -368,9 +409,10 @@ def vectorize(
         "denoise": prepared.denoise_applied,
         "chroma_restored": prepared.chroma_restored,
         "flat_artwork": flat_art,
+        "working_scale": round(prepared.scale, 6),
         "segmentation": seg.stats,
         "validation_problems": problems[:20],
         "timings": {k: round(v, 3) for k, v in timings.items()},
     }
     rep("finalize", 1.0, "done")
-    return PipelineResult(graph=graph, prepared=prepared, timings=timings)
+    return PipelineResult(graph=graph, prepared=source_prepared, timings=timings)

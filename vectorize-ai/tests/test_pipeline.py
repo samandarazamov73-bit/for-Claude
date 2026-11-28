@@ -24,7 +24,8 @@ def test_logo_end_to_end(logo_result):
     assert kinds == ["circle", "circle", "rounded_rectangle", "star"]
     star = next(s for s in g.drawable_shapes() if s.primitive and s.primitive["type"] == "star")
     assert star.primitive["points"] == 5
-    assert abs(star.primitive["outer_radius"] - 58) < 0.5
+    # graph coordinates are working pixels (flat artwork is traced at 2x)
+    assert abs(star.primitive["outer_radius"] / g.scale - 58) < 0.5
     assert fidelity(logo_result) < 1.0
 
 
@@ -124,7 +125,9 @@ def test_stage_cache_reuses_segmentation(tmp_path):
 
 def test_crop():
     res = vectorize(png_bytes(logo_scene()), crop=(150, 50, 140, 140))
-    assert res.graph.width == 140 and res.graph.height == 140
+    g = res.graph
+    assert tuple(g.original_size) == (140, 140)
+    assert g.width == round(140 * g.scale) and g.height == round(140 * g.scale)
 
 
 def test_public_option_parsing():

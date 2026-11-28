@@ -860,6 +860,12 @@ def _restore_corner(pts, s, i, L, closed, total, strength, mode, gap_before=None
     limit = (0.45 + 1.1 * strength) * expected
     if d > max(5.0 * L, 8.0):
         return None
+    # A vertex cannot stick out further than the feature it belongs to: at
+    # the end of a 2 px stroke the two support lines are almost opposite
+    # and their intersection would form a spike far outside the letter.
+    gaps = [g for g in (gap_before, gap_after) if g is not None]
+    if gaps and d > 0.6 * min(gaps) + 0.5:
+        return x, False, min(max(0.9 * L, 1.0), 2.5 * L)
     sharp = mode == "sharp" or d <= limit
     trim = min(max(0.9 * L, d * 1.2), 2.5 * L)
     return x, sharp, trim

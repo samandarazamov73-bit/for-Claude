@@ -87,7 +87,9 @@ def test_upload_process_and_results(app_client):
     info = c.get(f"/api/images/{up['token']}").json()
     assert info["hasResult"] and info["stats"]["primitives"] == 4
     g = c.get(f"/api/images/{up['token']}/graph").json()
-    assert len(g["shapes"]) == 5 and g["width"] == 320
+    # small flat artwork is traced at a higher working resolution; the
+    # graph records the scale and the original size
+    assert len(g["shapes"]) == 5 and g["original"] == [320, 240] and g["width"] == round(320 * g["scale"])
     src = c.get(f"/api/images/{up['token']}/source.png")
     assert src.status_code == 200 and src.headers["content-type"] == "image/png"
     events = c.get(f"/api/jobs/{up['jobId']}/events").text
@@ -110,7 +112,7 @@ def test_crop_and_reprocess(app_client):
     up = upload(c, crop="[150, 50, 140, 140]")
     wait_job(c, up["jobId"])
     g = c.get(f"/api/images/{up['token']}/graph").json()
-    assert g["width"] == 140
+    assert g["original"] == [140, 140] and g["width"] == round(140 * g["scale"])
     r = c.post(f"/api/images/{up['token']}/reprocess", json={"options": {"shapes_enabled": False, "max_colors": 2}}, headers=H)
     job = wait_job(c, r.json()["jobId"])
     assert job["status"] == "completed"
