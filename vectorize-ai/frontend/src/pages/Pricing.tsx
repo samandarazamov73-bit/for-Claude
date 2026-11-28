@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Check } from 'lucide-react'
 import { ErrorNote, Footer, Header, Spinner } from '../components/Chrome'
 import { api, ApiError } from '../lib/api'
+import { useCapabilities } from '../lib/capabilities'
 import { useAuth } from '../store/auth'
 
 interface Plan {
@@ -32,6 +33,7 @@ export default function Pricing() {
   const { user, account, refresh } = useAuth()
   const nav = useNavigate()
   const [params] = useSearchParams()
+  const caps = useCapabilities()
 
   useEffect(() => {
     api<Plans>('/api/billing/plans').then(setPlans)
@@ -57,7 +59,11 @@ export default function Pricing() {
       <main className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
         <div className="mx-auto mb-10 max-w-2xl text-center">
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Pricing</h1>
-          <p className="mt-3 text-muted">Uploading, vectorizing, editing and previewing are free. Pay to download results in the web app, or buy credits for the API.</p>
+          <p className="mt-3 text-muted">
+            {caps?.freeDownloads
+              ? 'Uploading, vectorizing, editing and downloading in every format are free. Credits are needed only for the API.'
+              : 'Uploading, vectorizing, editing and previewing are free. Pay to download results in the web app, or buy credits for the API.'}
+          </p>
         </div>
         {params.get('checkout') === 'cancelled' && <div className="mx-auto mb-6 max-w-xl"><ErrorNote>Checkout was cancelled – you were not charged.</ErrorNote></div>}
         {err && <div className="mx-auto mb-6 max-w-xl"><ErrorNote>{err}</ErrorNote></div>}
@@ -84,7 +90,7 @@ export default function Pricing() {
                 <ul className="mt-5 flex-1 space-y-2 text-sm">
                   {(pro
                     ? ['Unlimited downloads', 'SVG, PDF, EPS, DXF and PNG', 'All editor tools', 'History of your images']
-                    : ['Unlimited uploads and processing', 'Full editor and before/after preview', 'Free downloads of example images']
+                    : ['Unlimited uploads and processing', 'Full editor and before/after preview', caps?.freeDownloads ? 'Free downloads in SVG, PDF, EPS, DXF and PNG' : 'Free downloads of example images']
                   ).map((f) => (
                     <li key={f} className="flex gap-2">
                       <Check className="mt-0.5 size-4 shrink-0 text-ok" /> {f}

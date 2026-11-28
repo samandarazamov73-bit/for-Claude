@@ -13,7 +13,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 import numpy as np
@@ -194,6 +194,28 @@ def prepare(data: bytes, opts: ProcessingOptions, crop: tuple[int, int, int, int
     return PreparedImage(pp.rgba, pp.analysis, pp.scale, (rgba.shape[1], rgba.shape[0]), pp.denoise_applied, dec.source_format, restored)
 
 
+def _is_flat_artwork(seg: Segmentation, limit: int = 16) -> bool:
+    """Logo-like input: almost all pixels flat, only a few colours, and those
+    colours clearly distinct. (The bands of a smooth ramp are flat pixel by
+    pixel too, but their colours are only a threshold apart.)"""
+    if float(seg.stats.get("flat_ratio", 0.0)) < 0.85 or not 0 < len(seg.palette) <= limit:
+        return False
+    from image_processing.color import rgba_features
+
+    counts = np.asarray(seg.counts, dtype=np.float64)
+    total = float(counts.sum())
+    if total <= 0:
+        return False
+    keep = counts / total >= 0.005
+    if keep.sum() < 2:
+        return True
+    lab = rgba_features(seg.palette[keep][None, :, :].astype(np.uint8))[0][:, :3].astype(np.float64)
+    d = np.sqrt(((lab[:, None, :] - lab[None, :, :]) ** 2).sum(-1))
+    d[np.diag_indices_from(d)] = np.inf
+    thr = float(seg.stats.get("color_threshold", 6.0))
+    return float(d.min()) >= max(20.0, 2.5 * thr)
+
+
 def vectorize(
     data: bytes,
     opts: ProcessingOptions | None = None,
@@ -225,31 +247,44 @@ def vectorize(
     skey = _seg_key(opts, crop_l)
     seg = cache.load_segmentation(skey) if cache else None
     if seg is None:
-        sopts = SegmentationOptions(
-            max_colors=opts.max_colors,
-            palette=parse_palette(opts.palette) if opts.palette else None,
-            min_region_px=opts.min_area_px,
-            color_threshold=opts.color_threshold,
-            detail=opts.detail_level,
-        )
         model = registry.segmentation()
-        seg = model.segment(
-            prepared.rgba,
-            sopts,
-            noise_sigma=a.noise_sigma,
-            edge_width=a.edge_width,
-            compressed=a.compressed,
-            progress=lambda f, msg="": rep("segmentation", 0.8 * f, msg),
-        )
-        if opts.gradients:
-            seg, _, _ = merge_gradients(
-                prepared.rgba,
-                seg,
-                noise_sigma=a.noise_sigma,
-                compressed=a.compressed,
-                detail=opts.detail_level,
-                progress=lambda f, msg="": rep("segmentation", 0.8 + 0.2 * f, msg),
+
+        def run_segmentation(level: int) -> Segmentation:
+            sopts = SegmentationOptions(
+                max_colors=opts.max_colors,
+                palette=parse_palette(opts.palette) if opts.palette else None,
+                min_region_px=opts.min_area_px,
+                color_threshold=opts.color_threshold,
+                detail=level,
             )
+            out = model.segment(
+                prepared.rgba,
+                sopts,
+                noise_sigma=a.noise_sigma,
+                edge_width=a.edge_width,
+                compressed=a.compressed,
+                progress=lambda f, msg="": rep("segmentation", 0.8 * f, msg),
+            )
+            # flat artwork keeps flat fills: in a logo a "gradient" is only
+            # compression noise across a solid colour
+            if opts.gradients and not _is_flat_artwork(out):
+                out, _, _ = merge_gradients(
+                    prepared.rgba,
+                    out,
+                    noise_sigma=a.noise_sigma,
+                    compressed=a.compressed,
+                    detail=level,
+                    progress=lambda f, msg="": rep("segmentation", 0.8 + 0.2 * f, msg),
+                )
+            return out
+
+        seg = run_segmentation(opts.detail_level)
+        if opts.detail_level > 0 and _is_flat_artwork(seg, limit=24):
+            # Logos and lettering: finer colour steps only pick up
+            # compression noise; the "normal" segmentation is the best one.
+            base = run_segmentation(0)
+            if _is_flat_artwork(base):
+                seg = base
         if cache:
             cache.save_segmentation(skey, seg)
     else:
@@ -279,17 +314,22 @@ def vectorize(
 
     # ---- stage 6 --------------------------------------------------------
     t = time.perf_counter()
-    params = fit_parameters(opts, a.soft_edge_ratio, a.compressed, a.edge_width)
+    # Flat artwork (logos, icons, lettering): higher detail levels refine
+    # colours only. Their finer curve settings would trace compression
+    # noise into the outlines of letters, so geometry stays at "normal".
+    flat_art = _is_flat_artwork(seg)
+    gopts = replace(opts, detail="normal") if flat_art and opts.detail_level > 0 else opts
+    params = fit_parameters(gopts, a.soft_edge_ratio, a.compressed, a.edge_width)
     fit_all(graph, params, rep.sub("curves"))
     timings["curves"] = time.perf_counter() - t
 
     # ---- stages 7-8 -----------------------------------------------------
     t = time.perf_counter()
-    n_prims = recognize_shapes(graph, opts, params.tolerance, rep.sub("shapes"))
+    n_prims = recognize_shapes(graph, gopts, params.tolerance, rep.sub("shapes"))
     timings["shapes"] = time.perf_counter() - t
     t = time.perf_counter()
-    n_sym = apply_symmetry(graph, opts, params.curve, params.corner, rep.sub("symmetry"))
-    n_rep = apply_repeats(graph, opts, params.curve, params.corner)
+    n_sym = apply_symmetry(graph, gopts, params.curve, params.corner, rep.sub("symmetry"))
+    n_rep = apply_repeats(graph, gopts, params.curve, params.corner)
     timings["symmetry"] = time.perf_counter() - t
 
     # ---- stage 9 --------------------------------------------------------
@@ -327,6 +367,7 @@ def vectorize(
         "analysis": a.to_dict(),
         "denoise": prepared.denoise_applied,
         "chroma_restored": prepared.chroma_restored,
+        "flat_artwork": flat_art,
         "segmentation": seg.stats,
         "validation_problems": problems[:20],
         "timings": {k: round(v, 3) for k, v in timings.items()},

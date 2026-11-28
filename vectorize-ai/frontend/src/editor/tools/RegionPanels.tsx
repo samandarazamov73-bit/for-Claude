@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Combine, Eraser, Paintbrush, RotateCcw, Trash2, WandSparkles } from 'lucide-react'
 import { api } from '../../lib/api'
+import { useCapabilities } from '../../lib/capabilities'
 import { rgbToHex } from '../../lib/color'
 import { effectivePalette } from '../../lib/graph'
 import { useEditor } from '../../store/editor'
@@ -14,10 +15,7 @@ export function BackgroundPanel() {
   const applyEdits = useEditor((s) => s.applyEdits)
   const setHighlight = useEditor((s) => s.setHighlight)
   const [method, setMethod] = useState<'auto' | 'color' | 'grabcut' | 'neural'>('auto')
-  const [neural, setNeural] = useState(false)
-  useEffect(() => {
-    api<{ capabilities?: { neuralBackground?: boolean } }>('/api/health').then((h) => setNeural(!!h.capabilities?.neuralBackground)).catch(() => undefined)
-  }, [])
+  const neural = !!useCapabilities()?.neuralBackground
   const [enclosed, setEnclosed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')

@@ -22,7 +22,7 @@ def health(request: Request):
         "workers": st.jobs.workers,
         "workerMode": st.jobs.mode,
         "models": registry.describe(),
-        "capabilities": {"neuralBackground": neural_available()},
+        "capabilities": {"neuralBackground": neural_available(), "freeDownloads": bool(st.settings.free_downloads)},
     }
 
 

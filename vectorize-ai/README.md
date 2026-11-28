@@ -82,6 +82,7 @@ vectorize-ai/
 | `VZ_JOB_TIMEOUT` | `180` | бюджет времени на одну задачу, с |
 | `VZ_ANON_RETENTION_HOURS` | `24` | срок хранения изображений анонимов |
 | `VZ_USER_RETENTION_DAYS` | `30` | срок хранения изображений пользователей |
+| `VZ_FREE_DOWNLOADS` | `1` | скачивание в веб-приложении бесплатно во всех форматах; `0` — только с подпиской Pro (API всегда работает за кредиты) |
 | `VZ_STRIPE_SECRET_KEY`, `VZ_STRIPE_WEBHOOK_SECRET` | — | включают онлайн-оплату |
 | `VZ_STRIPE_PRICE_<PLAN>` | — | ID цен Stripe, например `VZ_STRIPE_PRICE_WEB_PRO=price_...` |
 | `VZ_CORS_ORIGINS` | — | список разрешённых origin через запятую |
@@ -108,7 +109,7 @@ curl http://localhost:8000/api/v1/vectorize -u 'API_ID:API_SECRET' \
 ## Тесты
 
 ```bash
-python -m pytest            # 108 тестов: декодирование, сегментация, геометрия, конвейер, экспорт, бэкенд
+python -m pytest            # 111 тестов: декодирование, сегментация, геометрия, конвейер, экспорт, бэкенд
 cd frontend && npm test     # vitest
 ```
 

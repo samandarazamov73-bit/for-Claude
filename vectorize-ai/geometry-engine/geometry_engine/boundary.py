@@ -102,7 +102,7 @@ def fit_open(pts: np.ndarray, w: np.ndarray, copts: CurveOptions, kopts: CornerO
     if n <= 2:
         return BoundaryFit([Line(tuple(pts[0]), tuple(pts[-1]))], [])
     sm = smooth_points(pts, sigma)
-    corners = detect_corners(sm, False, kopts)
+    corners = detect_corners(sm, False, kopts, raw=pts)
     s = arc_length(sm)
     breaks = [(0, sm[0], 0.0)] + [(c.index, c.point, c.trim) for c in corners] + [(n - 1, sm[-1], 0.0)]
     secs = []
@@ -134,7 +134,7 @@ def fit_closed(pts: np.ndarray, w: np.ndarray, copts: CurveOptions, kopts: Corne
         p = tuple(pts[0])
         return BoundaryFit([Line(p, p)], [])
     sm = smooth_points(pts, sigma, closed=True)
-    corners = detect_corners(sm, True, kopts)
+    corners = detect_corners(sm, True, kopts, raw=pts)
     if corners:
         first = corners[0].index
         sm = np.roll(sm, -first, axis=0)
@@ -161,6 +161,11 @@ def fit_closed(pts: np.ndarray, w: np.ndarray, copts: CurveOptions, kopts: Corne
         for sec, ws in secs:
             segs.extend(fit_section(sec, ws, copts, max_radius=max_radius))
         return BoundaryFit(_stitch(segs, closed=True), corners)
+    # No corners found: a small rectangle (the stem of an "I", a dot) may
+    # still be one, with corners too rounded by blur to be detected.
+    ortho = _orthogonal_loop(sm, copts.tolerance)
+    if ortho is not None:
+        return BoundaryFit(_stitch(ortho, closed=True), [])
     # No corners: two halves joined with matched tangents (G1 everywhere).
     half = n // 2
     loop = np.concatenate([sm, sm[:1]])
@@ -174,6 +179,38 @@ def fit_closed(pts: np.ndarray, w: np.ndarray, copts: CurveOptions, kopts: Corne
     a = fit_section(loop[: half + 1], wl[: half + 1], copts, t0, th, max_radius)
     b = fit_section(loop[half:], wl[half:], copts, th, t0, max_radius)
     return BoundaryFit(_stitch(a + b, closed=True), [])
+
+
+def _orthogonal_loop(sm: np.ndarray, tol: float):
+    """Closed loop rebuilt from horizontal and vertical sides, starting in
+    the middle of its longest straight run; None if it is not one."""
+    from .fitting import _orthogonal_polyline
+
+    n = sm.shape[0]
+    if n < 8:
+        return None
+    d = np.roll(sm, -1, axis=0) - np.roll(sm, 1, axis=0)
+    ang = np.degrees(np.arctan2(d[:, 1], d[:, 0])) % 180.0
+    axis = (ang < 20.0) | (ang > 160.0) | (np.abs(ang - 90.0) < 20.0)
+    if axis.mean() < 0.6:
+        return None
+    # middle of the longest run of axis-parallel points
+    best, best_i, run = 0, -1, 0
+    for i in range(2 * n):
+        if axis[i % n]:
+            run += 1
+            if run > best:
+                best, best_i = run, i
+        else:
+            run = 0
+    if best < 3:
+        return None
+    start = (best_i - best // 2) % n
+    loop = np.concatenate([np.roll(sm, -start, axis=0), np.roll(sm, -start, axis=0)[:1]])
+    verts = _orthogonal_polyline(loop, tol)
+    if verts is None:
+        return None
+    return [Line(tuple(map(float, a)), tuple(map(float, b))) for a, b in zip(verts[:-1], verts[1:])]
 
 
 def _stitch(segs: list[Segment], closed: bool = False) -> list[Segment]:

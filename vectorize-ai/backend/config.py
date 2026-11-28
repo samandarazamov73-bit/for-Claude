@@ -35,6 +35,9 @@ class Settings:
     stripe_webhook_secret: str = ""
     stripe_prices: dict[str, str] = field(default_factory=dict)
     rate_limits_enabled: bool = True
+    # Downloads in every format without a subscription (default). Set
+    # VZ_FREE_DOWNLOADS=0 to require the web Pro plan again.
+    free_downloads: bool = True
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -59,6 +62,7 @@ class Settings:
             stripe_webhook_secret=e("VZ_STRIPE_WEBHOOK_SECRET", ""),
             stripe_prices={k[len("VZ_STRIPE_PRICE_"):].lower(): v for k, v in os.environ.items() if k.startswith("VZ_STRIPE_PRICE_")},
             rate_limits_enabled=_bool(e("VZ_RATE_LIMITS"), True),
+            free_downloads=_bool(e("VZ_FREE_DOWNLOADS"), True),
         )
         for k, v in overrides.items():
             setattr(s, k, v)

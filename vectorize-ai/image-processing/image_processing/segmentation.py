@@ -627,7 +627,16 @@ def _consolidate_blend_colors(labels: np.ndarray, pm: np.ndarray, colors: np.nda
             labels = out.copy()
     share = cnt / total
     solid = colors[:, 3] >= 254
-    majors = [i for i in range(k) if share[i] >= minor_share and solid[i]]
+    # A main colour of the design fills some area: a colour found only in
+    # thin strokes (inscribed radius < 4 px) – the faded interior of small
+    # JPEG text – is a candidate for clean-up even when it covers several
+    # per cent of the image.
+    thick = np.zeros(k, dtype=bool)
+    for i in range(k):
+        if cnt[i] > 0 and share[i] >= minor_share:
+            m = (out == i).astype(np.uint8)
+            thick[i] = float(cv2.distanceTransform(m, cv2.DIST_L2, 3).max()) >= 4.0
+    majors = [i for i in range(k) if share[i] >= minor_share and solid[i] and thick[i]]
     if len(majors) < 2:
         return out, merged
     rgb = colors[:, :3].astype(np.float64)
@@ -638,7 +647,7 @@ def _consolidate_blend_colors(labels: np.ndarray, pm: np.ndarray, colors: np.nda
         return np.array([(c[2] - yv) / 1.772, (c[0] - yv) / 1.402])
 
     for c in range(k):
-        if c in majors or cnt[c] == 0 or not solid[c] or share[c] >= minor_share:
+        if c in majors or cnt[c] == 0 or not solid[c]:
             continue
         best = None
         for ia, a in enumerate(majors):

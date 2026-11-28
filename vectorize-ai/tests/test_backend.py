@@ -19,10 +19,28 @@ def app_client(tmp_path):
     from backend.config import Settings
     from backend.main import create_app
 
-    settings = Settings.from_env(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path}/t.sqlite3", worker_mode="thread", workers=2, rate_limits_enabled=False, secret_key="test-secret", stripe_secret_key="sk_test", stripe_webhook_secret="whsec_test", stripe_prices={"web_pro": "price_1"})
+    settings = Settings.from_env(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path}/t.sqlite3", worker_mode="thread", workers=2, rate_limits_enabled=False, secret_key="test-secret", stripe_secret_key="sk_test", stripe_webhook_secret="whsec_test", stripe_prices={"web_pro": "price_1"}, free_downloads=False)
     app = create_app(settings)
     with TestClient(app) as c:
         yield c
+
+
+def test_downloads_are_free_by_default(tmp_path, monkeypatch):
+    from backend.config import Settings
+    from backend.main import create_app
+
+    monkeypatch.delenv("VZ_FREE_DOWNLOADS", raising=False)
+    settings = Settings.from_env(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path}/f.sqlite3", worker_mode="thread", rate_limits_enabled=False, secret_key="x")
+    assert settings.free_downloads
+    with TestClient(create_app(settings)) as c:
+        assert c.get("/api/health").json()["capabilities"]["freeDownloads"] is True
+        up = upload(c)
+        wait_job(c, up["jobId"])
+        for fmt in ("svg", "pdf", "png"):
+            d = c.get(f"/api/images/{up['token']}/download?format={fmt}")
+            assert d.status_code == 200, d.text
+    monkeypatch.setenv("VZ_FREE_DOWNLOADS", "0")
+    assert not Settings.from_env(data_dir=tmp_path, secret_key="x").free_downloads
 
 
 def wait_job(c, job_id, timeout=60):

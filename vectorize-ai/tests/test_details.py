@@ -200,6 +200,13 @@ def test_small_red_text_in_jpeg_keeps_one_red():
     assert abs(int(red[0]) - 239) <= 8 and int(red[1]) <= 40 and int(red[2]) <= 45
     ren = render_graph(res.graph)[..., :3].astype(int)
     assert np.abs(ren - rgb.astype(int)).mean() < 2.0
+    # flat artwork keeps flat fills (no gradients made of JPEG noise), and
+    # every detail level gives the same clean result
+    assert res.graph.stats["flat_artwork"] and res.graph.stats["gradient_shapes"] == 0
+    from vectorization_engine import ProcessingOptions
+
+    hi = vectorize(_jpeg(rgb), ProcessingOptions(detail="high")).graph
+    assert len(hi.palette) == 2 and hi.stats["gradient_shapes"] == 0
 
 
 def test_straight_polyline_knee_and_arc():
@@ -244,3 +251,44 @@ def test_small_jpeg_text_stays_close_to_the_clean_original():
     text = (slice(95, 140), slice(15, 260))
     # letters whole, bars of E / 2 / 3 solid, no darker or pink pieces
     assert np.abs(ren[text] - rgb[text].astype(int)).mean() < 6.0
+
+
+def _small_glyph_scene():
+    # a 24 px tall "E" with 4.5 px strokes and 3 px slots, a small "C" made
+    # of a ring with a cut, and a 5 px dot – rendered with anti-aliasing
+    s = Scene(140, 60)
+    red = (230, 30, 40, 255)
+    e = [(10, 10), (28, 10), (28, 14.5), (14.5, 14.5), (14.5, 19.8), (26, 19.8), (26, 24.2), (14.5, 24.2),
+         (14.5, 29.5), (28, 29.5), (28, 34), (10, 34)]
+    s.polygon(e, red)
+    s.circle(60, 22, 12, red)
+    s.circle(60, 22, 7.5, (255, 255, 255, 255))
+    s.rect(60, 18, 75, 26, (255, 255, 255, 255))  # the opening of the "C"
+    s.circle(100, 22, 5, red)
+    return s.image()
+
+
+def test_small_letters_keep_square_corners():
+    img = _small_glyph_scene()
+    g = vectorize(_jpeg(img[..., :3].copy(), quality=85)).graph
+    e_shape = None
+    for sh in g.drawable_shapes():
+        x0, y0, x1, y1 = sh.bbox
+        if x0 < 12 and x1 < 30 and y1 < 36 and (x1 - x0) > 15:
+            e_shape = sh
+    assert e_shape is not None
+    segs = [s for iid, _ in e_shape.loops[0] for s in g.interfaces[iid].segments]
+    # the E is a polygon: straight sides with corners, no rounded caps
+    assert all(s.kind == "L" for s in segs)
+    assert 10 <= len(segs) <= 16
+
+
+def test_small_round_shapes_stay_round():
+    img = _small_glyph_scene()
+    g = vectorize(_jpeg(img[..., :3].copy(), quality=85)).graph
+    dot = [sh for sh in g.drawable_shapes() if sh.bbox[0] > 90 and sh.bbox[2] < 110]
+    assert dot
+    for sh in dot:
+        kinds = {s.kind for iid, _ in sh.loops[0] for s in g.interfaces[iid].segments}
+        prim = sh.primitive.get("kind") if isinstance(sh.primitive, dict) else None
+        assert prim in ("circle", "ellipse") or kinds - {"L"}, kinds  # not a polygon

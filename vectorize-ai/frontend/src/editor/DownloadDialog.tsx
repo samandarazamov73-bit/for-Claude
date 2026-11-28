@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Download, Lock } from 'lucide-react'
 import { Modal, ErrorNote, Spinner } from '../components/Chrome'
 import { downloadFile } from '../lib/api'
+import { useCapabilities } from '../lib/capabilities'
 import { useAuth } from '../store/auth'
 import { Section, Segmented, Switch } from './controls'
 
@@ -33,7 +34,8 @@ export function DownloadDialog({ open, onClose, token, filename, isExample, size
   const [dxf, setDxf] = useState('lines_arcs_splines')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const entitled = isExample || account?.webPlan === 'web_pro'
+  const caps = useCapabilities()
+  const entitled = isExample || account?.webPlan === 'web_pro' || !!caps?.freeDownloads
 
   const query = useMemo(() => {
     const q = new URLSearchParams({ format: fmt, 'output.size.scale': String(scale), 'output.size.unit': unit, 'output.size.dpi': String(dpi) })
@@ -139,7 +141,7 @@ export function DownloadDialog({ open, onClose, token, filename, isExample, size
           </Section>
         )}
       </div>
-      {!entitled && (
+      {caps && !entitled && (
         <div className="mt-4 rounded-xl border border-line bg-canvas p-4 text-sm">
           <div className="flex items-center gap-2 font-medium">
             <Lock className="size-4" /> Downloads require Pro

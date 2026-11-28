@@ -427,6 +427,98 @@ def _straight_polyline(pts: np.ndarray, tol: float, max_pieces: int = 3, min_len
     return verts
 
 
+def _orthogonal_polyline(pts: np.ndarray, tol: float, max_transition: float = 2.4, min_run: float = 1.0):
+    """Rebuild a run of horizontal and vertical edges with exact right
+    angles.
+
+    Strokes of small text (E, T, L, H, the end of a bar) are axis-aligned,
+    but at a few pixels' size blur rounds every corner and corner detection
+    cannot separate two corners three pixels apart. The points are split
+    into horizontal and vertical runs by their direction; the short turns
+    between runs may be no longer than blur makes them (``max_transition``,
+    a genuinely rounded corner or a circle has longer ones). Each run
+    becomes an axis-parallel line, consecutive lines meet at right angles.
+    Returns the vertices (end points kept) or None."""
+    n = pts.shape[0]
+    if n < 6:
+        return None
+    s = arc_length(pts)
+    total = float(s[-1])
+    if total < 2 * min_run:
+        return None
+    # direction from neighbours about 1 px away on each side
+    back = np.stack([np.interp(np.maximum(s - 1.0, 0.0), s, pts[:, 0]), np.interp(np.maximum(s - 1.0, 0.0), s, pts[:, 1])], 1)
+    fwd = np.stack([np.interp(np.minimum(s + 1.0, total), s, pts[:, 0]), np.interp(np.minimum(s + 1.0, total), s, pts[:, 1])], 1)
+    d = fwd - back
+    ang = np.degrees(np.arctan2(d[:, 1], d[:, 0])) % 180.0
+    cls = np.full(n, 2, dtype=np.int64)  # 0 horizontal, 1 vertical, 2 transition
+    cls[(ang < 20.0) | (ang > 160.0)] = 0
+    cls[np.abs(ang - 90.0) < 20.0] = 1
+    # runs of equal class
+    runs = []
+    start = 0
+    for i in range(1, n + 1):
+        if i == n or cls[i] != cls[start]:
+            runs.append((int(cls[start]), start, i - 1))
+            start = i
+    lines = []  # (class, value, first index, last index)
+    for c, a, b in runs:
+        length = float(s[b] - s[a])
+        if c == 2:
+            if length > max_transition:
+                return None
+            continue
+        if length < min_run:
+            if length > max_transition:
+                return None
+            continue  # too short to be a side: part of a turn
+        val = float(np.median(pts[a : b + 1, 1 if c == 0 else 0]))
+        if lines and lines[-1][0] == c:
+            if abs(lines[-1][1] - val) <= tol:
+                # the same side, interrupted by noise
+                lines[-1] = (c, 0.5 * (lines[-1][1] + val), lines[-1][2], b)
+                continue
+            # a step too short to show its own direction (the end of a
+            # thin slot): a perpendicular side through the turn's centre
+            mid = pts[lines[-1][3] + 1 : a]
+            if mid.shape[0] == 0:
+                return None
+            pc = 1 - c
+            pval = float(np.mean(mid[:, 1 if pc == 0 else 0]))
+            lines.append((pc, pval, lines[-1][3] + 1, a - 1))
+        lines.append((c, val, a, b))
+    if len(lines) < 2:
+        return None
+    covered = sum(float(s[b] - s[a]) for _, _, a, b in lines)
+    if covered < 0.6 * total:
+        return None
+    # each run must be straight around its line
+    for c, val, a, b in lines:
+        if b < a:
+            continue
+        seg_c = cls[a : b + 1]
+        sel = seg_c == c
+        if not sel.any():
+            continue  # inserted step: its points are the turn itself
+        dev = np.abs(pts[a : b + 1, 1 if c == 0 else 0][sel] - val)
+        if float(dev.max()) > max(tol, 0.9):
+            return None
+    verts = [pts[0].astype(np.float64)]
+    for (c1, v1, _, _), (c2, v2, _, _) in zip(lines[:-1], lines[1:]):
+        verts.append(np.array([v2, v1]) if c1 == 0 else np.array([v1, v2]))
+    verts.append(pts[-1].astype(np.float64))
+    # the fixed end points must lie close to the first and last line
+    for (c, val, _, _), p in ((lines[0], pts[0]), (lines[-1], pts[-1])):
+        if abs(float(p[1 if c == 0 else 0]) - val) > 1.5:
+            return None
+    # drop zero-length pieces
+    out = [verts[0]]
+    for v in verts[1:]:
+        if float(np.hypot(*(v - out[-1]))) > 1e-6:
+            out.append(v)
+    return out if len(out) >= 3 else None
+
+
 def _rms_line_dev(pts: np.ndarray) -> float:
     a, b = pts[0], pts[-1]
     ln = np.hypot(*(b - a))
@@ -522,6 +614,8 @@ def fit_section(
             return [Line(p0, p1)]
     if free_ends:
         verts = _straight_polyline(pts, tol)
+        if verts is None:
+            verts = _orthogonal_polyline(pts, tol)
         if verts is not None:
             return [Line(_to_pt(a), _to_pt(b)) for a, b in zip(verts[:-1], verts[1:])]
     if opts.allow_arcs and free_ends:
@@ -613,11 +707,16 @@ def _turn_all(pts: np.ndarray, s: np.ndarray, L: float, closed: bool, total: flo
     return ang
 
 
-def detect_corners(pts: np.ndarray, closed: bool, opts: CornerOptions) -> list[CornerInfo]:
+def detect_corners(pts: np.ndarray, closed: bool, opts: CornerOptions, raw: np.ndarray | None = None) -> list[CornerInfo]:
+    """Corners of a faired point sequence ``pts``. ``raw`` (same indexing,
+    before fairing) is used for the support lines of each corner: fairing
+    helps to find corners but rounds them, which matters for small text."""
     n = pts.shape[0]
     if n < 5 or opts.mode == "rounded":
         return []
-    work = pts[:-1] if closed and np.allclose(pts[0], pts[-1]) else pts
+    drop_last = closed and np.allclose(pts[0], pts[-1])
+    work = pts[:-1] if drop_last else pts
+    support = work if raw is None or raw.shape[0] != pts.shape[0] else (raw[:-1] if drop_last else raw)
     n = work.shape[0]
     if closed:
         s = arc_length(np.concatenate([work, work[:1]]))
@@ -635,11 +734,16 @@ def detect_corners(pts: np.ndarray, closed: bool, opts: CornerOptions) -> list[C
     thr = math.radians(42.0 - 22.0 * strength)
     ang1 = _turn_all(ext, s, L, closed, total)
     ang2 = _turn_all(ext, s, 2 * L, closed, total)
+    ang_h = _turn_all(ext, s, 0.5 * L, closed, total)
     ok = np.abs(ang1) >= thr
     if not closed:
         ok &= (s >= L * 1.2) & (s <= total - L * 1.2)
-    # turning spread evenly over 2L means a smooth curve, not a corner
-    ok &= np.abs(ang1) >= 0.72 * np.abs(ang2)
+    # Turning spread evenly over 2L means a smooth curve, not a corner. Two
+    # corners close together (the square end of a thin stroke, the arm of a
+    # small "E") also turn a lot over 2L, so a turn concentrated within L/2
+    # – an arc turns in proportion to its length, a corner does not –
+    # identifies a corner as well.
+    ok &= (np.abs(ang1) >= 0.72 * np.abs(ang2)) | (np.abs(ang_h) >= 0.75 * np.abs(ang1))
     cand = np.nonzero(ok)[0]
     # greedy non-maximum suppression within +-L
     corners: list[CornerInfo] = []
@@ -658,8 +762,15 @@ def detect_corners(pts: np.ndarray, closed: bool, opts: CornerOptions) -> list[C
     corners.sort(key=lambda c: c.index)
     # classification + restoration
     out: list[CornerInfo] = []
-    for c in corners:
-        res = _restore_corner(work, s, c.index, L, closed, total, strength, opts.mode)
+    m = len(corners)
+    for k, c in enumerate(corners):
+        gap_b = gap_a = None
+        si = s[c.index]
+        if m > 1 and (closed or k > 0):
+            gap_b = (si - s[corners[k - 1].index]) % total if closed else si - s[corners[k - 1].index]
+        if m > 1 and (closed or k < m - 1):
+            gap_a = (s[corners[(k + 1) % m].index] - si) % total if closed else s[corners[k + 1].index] - si
+        res = _restore_corner(support, s, c.index, L, closed, total, strength, opts.mode, gap_b, gap_a)
         if res is None:
             continue
         x, sharp, trim = res
@@ -683,13 +794,52 @@ def _side_points(pts, s, i, lo, hi, closed, total):
     return pts[idx[order]]
 
 
-def _restore_corner(pts, s, i, L, closed, total, strength, mode):
-    before = _side_points(pts, s, i, -3.5 * L, -0.8 * L, closed, total)
-    after = _side_points(pts, s, i, 0.8 * L, 3.5 * L, closed, total)
+def _side_tangent(side: np.ndarray, at_end: bool):
+    """Support line of one side of a corner. A straight side gives its
+    least-squares line. A curved side (the arc of a "C" meeting the flat
+    cut of its terminal) would give a chord, so a parabola is fitted along
+    the side and its tangent at the corner end is used instead."""
+    c, d = fit_line_dir(side)
+    if side.shape[0] < 5:
+        return c, d
+    nrm = np.array([-d[1], d[0]])
+    resid = (side - c) @ nrm
+    if float(np.sqrt((resid * resid).mean())) < 0.12:
+        return c, d
+    u = (side - c) @ d
+    try:
+        coef = np.polyfit(u, resid, 2)
+    except (np.linalg.LinAlgError, ValueError):
+        return c, d
+    u0 = float(u[-1] if at_end else u[0])  # the end nearest to the corner
+    slope = 2.0 * coef[0] * u0 + coef[1]
+    p0 = c + u0 * d + float(np.polyval(coef, u0)) * nrm
+    t = d + slope * nrm
+    t = t / max(float(np.hypot(*t)), 1e-12)
+    return p0, t
+
+
+def _restore_corner(pts, s, i, L, closed, total, strength, mode, gap_before=None, gap_after=None):
+    """Support lines on both sides of corner i, intersected. ``gap_*`` is
+    the distance along the boundary to the neighbouring corner candidate:
+    the support points stop short of it (the square end of a thin stroke
+    has two corners a few pixels apart), and for small features they start
+    closer to the corner so that a few remain."""
+
+    def window(gap):
+        if gap is None:
+            return 0.8 * L, 3.5 * L
+        inner = min(0.8 * L, 0.28 * gap)
+        return inner, max(min(3.5 * L, gap - inner), inner + 0.6)
+
+    ib, rb = window(gap_before)
+    ia, ra = window(gap_after)
+    before = _side_points(pts, s, i, -rb, -ib, closed, total)
+    after = _side_points(pts, s, i, ia, ra, closed, total)
     if before.shape[0] < 2 or after.shape[0] < 2:
         return None
-    c1, d1 = fit_line_dir(before)
-    c2, d2 = fit_line_dir(after)
+    c1, d1 = _side_tangent(before, at_end=True)
+    c2, d2 = _side_tangent(after, at_end=False)
     if np.dot(d1, before[-1] - before[0]) < 0:
         d1 = -d1
     if np.dot(d2, after[-1] - after[0]) < 0:

@@ -288,8 +288,8 @@ def background(token: str, body: BackgroundIn, request: Request, db: DbSession =
         raise ApiError("invalid_request", str(exc)) from exc
 
 
-def can_download(db: DbSession, img: Image, user: User | None) -> bool:
-    if img.is_example:
+def can_download(db: DbSession, img: Image, user: User | None, free: bool = False) -> bool:
+    if free or img.is_example:
         return True
     return user is not None and active_subscription(db, user.id, "web") is not None
 
@@ -300,7 +300,7 @@ def download(token: str, request: Request, db: DbSession = Depends(get_db), user
     st = state(request)
     if not st.storage.has_graph(token):
         raise ApiError("not_ready")
-    if not can_download(db, img, user):
+    if not can_download(db, img, user, st.settings.free_downloads):
         raise ApiError("subscription_required", "Downloading requires a Pro subscription (examples are free to download).")
     params = dict(request.query_params)
     if "format" in params:
