@@ -81,7 +81,11 @@ func _ready() -> void:
 	var saved: Array = GameState.saved_progress()
 	if not saved.is_empty():
 		_first = _add("Продолжить", func(): _start(saved[0], saved[1]))
-		var where := UI.label("        " + GameState.chapter_name(saved[0], saved[1]), 18, UI.DIM, 300)
+		var where := UI.label("", 18, UI.DIM, 300)
+		var where_upd := func(): where.text = "        " + GameState.t(GameState.chapter_name(saved[0], saved[1]))
+		where_upd.call()
+		GameState.language_changed.connect(where_upd)
+		tree_exiting.connect(func(): GameState.language_changed.disconnect(where_upd))
 		_items.add_child(where)
 	var ng := _add("Новая игра", func(): _start(GameState.PROLOGUE, "start"))
 	if _first == null:

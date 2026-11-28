@@ -940,10 +940,18 @@ func _prologue_play() -> void:
 	await wait_for_p(func(): return p.phase == "walk", 120, "walk", p)
 	print("STEP walk  bus_away=", p._bus_away)
 	var dist := 0.0
+	var it := 0
 	while is_instance_valid(p) and p.phase == "walk" and dist < p.forest_end_s - 1.0:
 		dist = minf(minf(dist + 2.0, p.forest_end_s - 1.0), maxf(p.mom_s - 1.5, dist))    # за мамой
 		p.hero.global_position = p._path_at(dist)
 		await secs(0.3)
+		it += 1
+		if it % 40 == 0:
+			print("WALK it=%d dist=%.1f walk_s=%.1f mom_s=%.1f hold=%s phase=%s events=%s" % [it, dist, p.walk_s, p.mom_s,
+				p._mom_hold, p.phase, p._events.keys()])
+		if it > 1200:
+			print("TIMEOUT walk stuck")
+			break
 	print("STEP forest end  walk_s=", p.walk_s, " of ", p.forest_end_s)
 	while is_instance_valid(p) and dist < p.door_stop_s - 0.05:
 		var cap: float = p.door_stop_s - 0.05 if p._mom_aside else maxf(p.mom_s - 1.5, dist)
